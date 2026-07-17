@@ -1,0 +1,35 @@
+# 环境变量与密钥（保留 .env.example）
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# 编译产物
+bin/
+vendor/
+
+# 备份
+backups/
+*.sql.gz
+
+# 文件上传目录
+uploads/
+
+# Go 测试与性能
+*.exe
+*.test
+*.out
+coverage.out
+*.prof
+
+# 日志与临时文件
+*.log
+tmp/
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

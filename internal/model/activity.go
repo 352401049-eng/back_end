@@ -1,0 +1,64 @@
+package model
+
+import "time"
+
+const (
+	ActivityStatusOff   uint8 = 0
+	ActivityStatusOn    uint8 = 1
+	ActivityStatusDraft uint8 = 2
+)
+
+type Activity struct {
+	ID           uint64    `gorm:"primaryKey" json:"id"`
+	MerchantID   uint64    `gorm:"not null" json:"merchant_id"`
+	Name         string    `gorm:"size:128;not null" json:"name"`
+	Description  *string   `gorm:"type:text" json:"description,omitempty"`
+	CoverURL     *string   `gorm:"column:cover_url;size:512" json:"cover_url,omitempty"`
+	BannerImages []string  `gorm:"serializer:json" json:"banner_images,omitempty"`
+	StartAt      time.Time `gorm:"not null" json:"start_at"`
+	EndAt        time.Time `gorm:"not null" json:"end_at"`
+	Status       uint8     `gorm:"not null;default:2" json:"status"`
+	EnableCoupon uint8     `gorm:"not null;default:1" json:"enable_coupon"`
+	SortOrder    int       `gorm:"not null;default:0" json:"sort_order"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	SoftDelete
+	Products []ActivityProduct `gorm:"foreignKey:ActivityID" json:"products,omitempty"`
+}
+
+func (Activity) TableName() string { return "activity" }
+
+type ActivityProduct struct {
+	ID                      uint64    `gorm:"primaryKey" json:"id"`
+	ActivityID              uint64    `gorm:"not null" json:"activity_id"`
+	ProductID               uint64    `gorm:"not null" json:"product_id"`
+	ActivityPrice           float64   `gorm:"type:decimal(10,2);not null" json:"activity_price"`
+	ActivityStock           uint32    `gorm:"not null;default:0" json:"activity_stock"`
+	SoldCount               uint32    `gorm:"not null;default:0" json:"sold_count"`
+	PerUserMaxQty           uint32    `gorm:"not null;default:0" json:"per_user_max_qty"`
+	PerUserMaxOrders        uint32    `gorm:"not null;default:0" json:"per_user_max_orders"`
+	EnableGroupBuy          uint8     `gorm:"not null;default:0" json:"enable_group_buy"`
+	GroupBuyPrice           *float64  `gorm:"type:decimal(10,2)" json:"group_buy_price,omitempty"`
+	GroupBuyTargetCount     *uint32   `json:"group_buy_target_count,omitempty"`
+	GroupBuyAllowRepeat     uint8     `gorm:"not null;default:0" json:"group_buy_allow_repeat"`
+	GroupBuyMaxJoinsPerUser uint32    `gorm:"not null;default:1" json:"group_buy_max_joins_per_user"`
+	EnableCoupon            uint8     `gorm:"not null;default:1" json:"enable_coupon"`
+	SortOrder               int       `gorm:"not null;default:0" json:"sort_order"`
+	Status                  uint8     `gorm:"not null;default:1" json:"status"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
+	SoftDelete
+	Product *Product `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+}
+
+func (ActivityProduct) TableName() string { return "activity_product" }
+
+func (a *Activity) IsActiveNow(now time.Time) bool {
+	if a.Status != ActivityStatusOn {
+		return false
+	}
+	if now.Before(a.StartAt) || now.After(a.EndAt) {
+		return false
+	}
+	return true
+}

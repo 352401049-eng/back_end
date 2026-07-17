@@ -1,0 +1,6297 @@
+basePath: /api
+definitions:
+  internal_handler.ActivityProductRequest:
+    properties:
+      activity_price:
+        type: number
+      activity_stock:
+        example: 0
+        type: integer
+      enable_coupon:
+        example: 1
+        type: integer
+      enable_group_buy:
+        example: 0
+        type: integer
+      group_buy_allow_repeat:
+        example: 0
+        type: integer
+      group_buy_max_joins_per_user:
+        example: 1
+        type: integer
+      group_buy_price:
+        type: number
+      group_buy_target_count:
+        type: integer
+      per_user_max_orders:
+        example: 0
+        type: integer
+      per_user_max_qty:
+        example: 0
+        type: integer
+      product_id:
+        type: integer
+      sort_order:
+        type: integer
+      status:
+        example: 1
+        type: integer
+    required:
+    - activity_price
+    - product_id
+    type: object
+  internal_handler.ActivityRequest:
+    properties:
+      banner_images:
+        items:
+          type: string
+        type: array
+      cover_url:
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        example: 1
+        type: integer
+      end_at:
+        type: string
+      name:
+        type: string
+      sort_order:
+        type: integer
+      start_at:
+        type: string
+      status:
+        example: 2
+        type: integer
+    required:
+    - end_at
+    - name
+    - start_at
+    type: object
+  internal_handler.AddCartRequest:
+    properties:
+      group_buy_id:
+        type: integer
+      group_buy_team_id:
+        type: integer
+      product_id:
+        type: integer
+      purchase_type:
+        example: 1
+        type: integer
+      quantity:
+        example: 1
+        type: integer
+      spec:
+        type: string
+    required:
+    - product_id
+    type: object
+  internal_handler.AddressRequest:
+    properties:
+      city:
+        example: 信阳市
+        type: string
+      contact_name:
+        example: 张三
+        type: string
+      contact_phone:
+        example: "13800138000"
+        type: string
+      detail:
+        example: 某某路 1 号
+        type: string
+      district:
+        example: 浉河区
+        type: string
+      is_default:
+        example: 0
+        type: integer
+      province:
+        example: 河南省
+        type: string
+    required:
+    - city
+    - contact_name
+    - contact_phone
+    - detail
+    - district
+    - province
+    type: object
+  internal_handler.AnnouncementRequest:
+    properties:
+      content:
+        type: string
+      cover_url:
+        type: string
+      expire_at:
+        type: string
+      merchant_id:
+        example: 0
+        type: integer
+      publish_at:
+        type: string
+      sort_order:
+        type: integer
+      status:
+        example: 1
+        type: integer
+      title:
+        type: string
+    required:
+    - content
+    - title
+    type: object
+  internal_handler.ApplyRiderRequest:
+    properties:
+      id_card_no:
+        example: "410000199001011234"
+        type: string
+      phone:
+        example: "13800138000"
+        type: string
+      real_name:
+        example: 张三
+        type: string
+    required:
+    - phone
+    - real_name
+    type: object
+  internal_handler.AvatarRequest:
+    properties:
+      avatar_url:
+        example: https://weixin.catmicloud.cn/uploads/2026/07/01/avatar.jpg
+        type: string
+    required:
+    - avatar_url
+    type: object
+  internal_handler.CancelInventoryUsageRequest:
+    properties:
+      reason:
+        example: 临时有事
+        type: string
+    type: object
+  internal_handler.ClaimCouponRequest:
+    properties:
+      coupon_id:
+        example: 1
+        type: integer
+    required:
+    - coupon_id
+    type: object
+  internal_handler.CompleteDeliveryRequest:
+    properties:
+      photos:
+        example:
+        - /uploads/2026/07/01/proof.jpg
+        items:
+          type: string
+        type: array
+      remark:
+        example: 已放门口
+        type: string
+    type: object
+  internal_handler.CreateCategoryRequest:
+    properties:
+      icon_url:
+        type: string
+      merchant_id:
+        example: 1
+        type: integer
+      name:
+        example: 生鲜
+        type: string
+      parent_id:
+        example: 0
+        type: integer
+      sort_order:
+        example: 0
+        type: integer
+      status:
+        example: 1
+        type: integer
+    required:
+    - name
+    type: object
+  internal_handler.CreateCouponRequest:
+    properties:
+      discount_amount:
+        example: 10
+        type: number
+      discount_rate:
+        example: 85
+        type: integer
+      end_at:
+        type: string
+      max_discount:
+        example: 50
+        type: number
+      merchant_id:
+        example: 1
+        type: integer
+      min_amount:
+        example: 100
+        type: number
+      name:
+        example: 满100减10
+        type: string
+      scope_ids:
+        items:
+          type: integer
+        type: array
+      scope_type:
+        example: 0
+        type: integer
+      start_at:
+        type: string
+      total_quota:
+        example: 1000
+        type: integer
+      type:
+        example: 1
+        type: integer
+    required:
+    - end_at
+    - name
+    - start_at
+    - type
+    type: object
+  internal_handler.CreateMerchantRequest:
+    properties:
+      address:
+        type: string
+      contact_phone:
+        type: string
+      images:
+        example:
+        - /uploads/2026/06/30/a.jpg
+        - /uploads/2026/06/30/b.jpg
+        items:
+          type: string
+        type: array
+      nickname:
+        type: string
+      openid:
+        example: oABC123
+        type: string
+      phone:
+        example: "13800138000"
+        type: string
+      shop_logo:
+        type: string
+      shop_name:
+        example: 豫记小店
+        type: string
+    required:
+    - shop_name
+    type: object
+  internal_handler.CreateOrderRequest:
+    properties:
+      activity_product_id:
+        example: 1
+        type: integer
+      address_id:
+        type: integer
+      cart_item_id:
+        type: integer
+      delivery_type:
+        example: 1
+        type: integer
+      group_buy_id:
+        type: integer
+      group_buy_team_id:
+        type: integer
+      merchant_id:
+        type: integer
+      product_id:
+        example: 1
+        type: integer
+      purchase_type:
+        example: 1
+        type: integer
+      quantity:
+        example: 1
+        type: integer
+      remark:
+        type: string
+      user_coupon_id:
+        example: 1
+        type: integer
+    required:
+    - merchant_id
+    type: object
+  internal_handler.HealthData:
+    properties:
+      database:
+        example: connected
+        type: string
+      status:
+        example: up
+        type: string
+    type: object
+  internal_handler.LoginRequest:
+    properties:
+      code:
+        example: 081abcXYZ
+        type: string
+    required:
+    - code
+    type: object
+  internal_handler.LoginResponse:
+    properties:
+      account:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+      is_new:
+        type: boolean
+      token:
+        type: string
+    type: object
+  internal_handler.MerchantProfileResp:
+    properties:
+      account:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+      account_id:
+        type: integer
+      address:
+        type: string
+      contact_phone:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      images:
+        items:
+          type: string
+        type: array
+      shop_logo:
+        type: string
+      shop_name:
+        type: string
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  internal_handler.ProductRequest:
+    properties:
+      category_id:
+        example: 1
+        type: integer
+      category_name:
+        example: 特产
+        type: string
+      cover_url:
+        example: /uploads/2026/06/30/abc.jpg
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        example: 1
+        type: integer
+      enable_group_buy:
+        example: 0
+        type: integer
+      group_buy_allow_repeat:
+        example: 0
+        type: integer
+      group_buy_price:
+        example: 79.9
+        type: number
+      group_buy_target_count:
+        example: 3
+        type: integer
+      images:
+        example:
+        - /uploads/2026/06/30/a.jpg
+        - /uploads/2026/06/30/b.jpg
+        items:
+          type: string
+        type: array
+      is_hot:
+        example: 0
+        type: integer
+      item_type:
+        example: 1
+        type: integer
+      merchant_id:
+        example: 1
+        type: integer
+      name:
+        example: 信阳毛尖
+        type: string
+      original_price:
+        example: 129.9
+        type: number
+      price:
+        example: 99.9
+        type: number
+      status:
+        example: 0
+        type: integer
+      stock:
+        example: 100
+        type: integer
+    required:
+    - name
+    - price
+    type: object
+  internal_handler.ProductResp:
+    properties:
+      category:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
+      category_id:
+        type: integer
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        type: integer
+      enable_group_buy:
+        type: integer
+      group_buy_allow_repeat:
+        type: integer
+      group_buy_price:
+        type: number
+      group_buy_target_count:
+        type: integer
+      id:
+        type: integer
+      images:
+        items:
+          type: string
+        type: array
+      is_hot:
+        type: integer
+      item_type:
+        type: integer
+      merchant:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.MerchantProfile'
+      merchant_id:
+        type: integer
+      name:
+        type: string
+      original_price:
+        type: number
+      price:
+        type: number
+      sales_count:
+        type: integer
+      status:
+        type: integer
+      stock:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  internal_handler.RequestUseRequest:
+    properties:
+      address_id:
+        type: integer
+      delivery_type:
+        type: integer
+      remark:
+        type: string
+    required:
+    - delivery_type
+    type: object
+  internal_handler.ReviewOrderRequest:
+    properties:
+      approve:
+        type: boolean
+      reject_reason:
+        type: string
+    required:
+    - approve
+    type: object
+  internal_handler.ReviewRiderRequest:
+    properties:
+      reject_reason:
+        example: 资料不完整
+        type: string
+      status:
+        example: 1
+        type: integer
+    required:
+    - status
+    type: object
+  internal_handler.UpdateCartRequest:
+    properties:
+      quantity:
+        type: integer
+      selected:
+        type: integer
+    type: object
+  internal_handler.UpdateCategoryRequest:
+    properties:
+      icon_url:
+        type: string
+      name:
+        type: string
+      sort_order:
+        type: integer
+      status:
+        type: integer
+    type: object
+  internal_handler.UpdateCouponRequest:
+    properties:
+      discount_amount:
+        type: number
+      discount_rate:
+        type: integer
+      end_at:
+        type: string
+      max_discount:
+        type: number
+      min_amount:
+        type: number
+      name:
+        type: string
+      scope_ids:
+        items:
+          type: integer
+        type: array
+      scope_type:
+        type: integer
+      start_at:
+        type: string
+      total_quota:
+        type: integer
+    type: object
+  internal_handler.UpdateCouponStatusRequest:
+    properties:
+      status:
+        enum:
+        - 0
+        - 1
+        example: 1
+        type: integer
+    required:
+    - status
+    type: object
+  internal_handler.UpdateMerchantImagesRequest:
+    properties:
+      images:
+        items:
+          type: string
+        minItems: 1
+        type: array
+      shop_logo:
+        type: string
+    required:
+    - images
+    type: object
+  internal_handler.UpdateMerchantProfileRequest:
+    properties:
+      address:
+        example: 河南省郑州市
+        type: string
+      contact_phone:
+        example: "13800138000"
+        type: string
+      images:
+        items:
+          type: string
+        type: array
+      shop_logo:
+        type: string
+      shop_name:
+        example: 豫记小店
+        type: string
+    type: object
+  internal_handler.UpdateMerchantStatusRequest:
+    properties:
+      status:
+        enum:
+        - 0
+        - 1
+        example: 1
+        type: integer
+    required:
+    - status
+    type: object
+  internal_handler.UpdateProductCouponRequest:
+    properties:
+      enable_coupon:
+        example: 1
+        type: integer
+    required:
+    - enable_coupon
+    type: object
+  internal_handler.UpdateProductGroupBuyRequest:
+    properties:
+      enable_group_buy:
+        example: 1
+        type: integer
+      group_buy_allow_repeat:
+        example: 0
+        type: integer
+      group_buy_price:
+        example: 79.9
+        type: number
+      group_buy_target_count:
+        example: 3
+        type: integer
+    required:
+    - enable_group_buy
+    type: object
+  internal_handler.UpdateProductImagesRequest:
+    properties:
+      cover_url:
+        type: string
+      images:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - images
+    type: object
+  internal_handler.UpdateProductPriceRequest:
+    properties:
+      original_price:
+        type: number
+      price:
+        example: 88.8
+        type: number
+    required:
+    - price
+    type: object
+  internal_handler.UpdateProductRequest:
+    properties:
+      category_id:
+        type: integer
+      category_name:
+        type: string
+      cover_url:
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        type: integer
+      enable_group_buy:
+        type: integer
+      group_buy_allow_repeat:
+        type: integer
+      group_buy_price:
+        type: number
+      group_buy_target_count:
+        type: integer
+      images:
+        items:
+          type: string
+        type: array
+      is_hot:
+        type: integer
+      item_type:
+        type: integer
+      merchant_id:
+        type: integer
+      name:
+        type: string
+      original_price:
+        type: number
+      price:
+        type: number
+      status:
+        type: integer
+      stock:
+        type: integer
+    type: object
+  internal_handler.UpdateProductSaleRequest:
+    properties:
+      enable_coupon:
+        example: 1
+        type: integer
+      enable_group_buy:
+        example: 1
+        type: integer
+      group_buy_allow_repeat:
+        example: 0
+        type: integer
+      group_buy_price:
+        example: 79.9
+        type: number
+      group_buy_target_count:
+        example: 3
+        type: integer
+    type: object
+  internal_handler.UpdateProductStatusRequest:
+    properties:
+      status:
+        enum:
+        - 0
+        - 1
+        example: 1
+        type: integer
+    required:
+    - status
+    type: object
+  internal_handler.UpdateProductStockRequest:
+    properties:
+      stock:
+        example: 50
+        type: integer
+    required:
+    - stock
+    type: object
+  internal_handler.UpdateProfileRequest:
+    properties:
+      nickname:
+        example: 新昵称
+        type: string
+    type: object
+  internal_handler.UseInventoryRequest:
+    properties:
+      address_id:
+        type: integer
+      delivery_type:
+        example: 1
+        type: integer
+      quantity:
+        example: 1
+        type: integer
+      remark:
+        type: string
+    required:
+    - delivery_type
+    type: object
+  internal_handler.VerifyRequest:
+    properties:
+      code:
+        example: V1a2b3c4d
+        type: string
+    required:
+    - code
+    type: object
+  internal_handler.WeChatPhoneRequest:
+    properties:
+      code:
+        example: phone_code_from_getPhoneNumber
+        type: string
+    required:
+    - code
+    type: object
+  yujixinjiang_backend_internal_model.Account:
+    properties:
+      avatar_url:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      gender:
+        type: integer
+      id:
+        type: integer
+      is_rider:
+        type: integer
+      last_login_at:
+        type: string
+      nickname:
+        type: string
+      openid:
+        type: string
+      phone:
+        type: string
+      status:
+        type: integer
+      type:
+        type: integer
+      unionid:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.Activity:
+    properties:
+      banner_images:
+        items:
+          type: string
+        type: array
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        type: integer
+      end_at:
+        type: string
+      id:
+        type: integer
+      merchant_id:
+        type: integer
+      name:
+        type: string
+      products:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_model.ActivityProduct'
+        type: array
+      sort_order:
+        type: integer
+      start_at:
+        type: string
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.ActivityProduct:
+    properties:
+      activity_id:
+        type: integer
+      activity_price:
+        type: number
+      activity_stock:
+        type: integer
+      created_at:
+        type: string
+      enable_coupon:
+        type: integer
+      enable_group_buy:
+        type: integer
+      group_buy_allow_repeat:
+        type: integer
+      group_buy_max_joins_per_user:
+        type: integer
+      group_buy_price:
+        type: number
+      group_buy_target_count:
+        type: integer
+      id:
+        type: integer
+      per_user_max_orders:
+        type: integer
+      per_user_max_qty:
+        type: integer
+      product:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Product'
+      product_id:
+        type: integer
+      sold_count:
+        type: integer
+      sort_order:
+        type: integer
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.AddressSnapshot:
+    properties:
+      city:
+        type: string
+      contact_name:
+        type: string
+      contact_phone:
+        type: string
+      detail:
+        type: string
+      district:
+        type: string
+      province:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.Announcement:
+    properties:
+      content:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      expire_at:
+        type: string
+      id:
+        type: integer
+      merchant_id:
+        type: integer
+      publish_at:
+        type: string
+      sort_order:
+        type: integer
+      status:
+        type: integer
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.CartItem:
+    properties:
+      account_id:
+        type: integer
+      created_at:
+        type: string
+      group_buy_id:
+        type: integer
+      group_buy_team_id:
+        type: integer
+      id:
+        type: integer
+      product:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Product'
+      product_id:
+        type: integer
+      purchase_type:
+        type: integer
+      quantity:
+        type: integer
+      selected:
+        type: integer
+      spec:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.Coupon:
+    properties:
+      created_at:
+        type: string
+      discount_amount:
+        type: number
+      discount_rate:
+        type: integer
+      end_at:
+        type: string
+      id:
+        type: integer
+      max_discount:
+        type: number
+      merchant_id:
+        type: integer
+      min_amount:
+        type: number
+      name:
+        type: string
+      received_count:
+        type: integer
+      scope_ids:
+        items:
+          type: integer
+        type: array
+      scope_type:
+        type: integer
+      start_at:
+        type: string
+      status:
+        type: integer
+      total_quota:
+        type: integer
+      type:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.DeliveryOrder:
+    properties:
+      accepted_at:
+        type: string
+      created_at:
+        type: string
+      deliver_photos:
+        items:
+          type: string
+        type: array
+      deliver_remark:
+        type: string
+      delivered_at:
+        type: string
+      id:
+        type: integer
+      inventory_usage:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.UserInventoryUsage'
+      inventory_usage_id:
+        type: integer
+      order:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Order'
+      order_id:
+        type: integer
+      rider_id:
+        type: integer
+      started_at:
+        type: string
+      status:
+        type: integer
+      updated_at:
+        type: string
+      user_confirmed:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_model.MerchantProfile:
+    properties:
+      account:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+      account_id:
+        type: integer
+      address:
+        type: string
+      contact_phone:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      images:
+        items:
+          type: string
+        type: array
+      shop_logo:
+        type: string
+      shop_name:
+        type: string
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.Order:
+    properties:
+      account_id:
+        type: integer
+      activity_id:
+        type: integer
+      address_snapshot:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.AddressSnapshot'
+      created_at:
+        type: string
+      delivery_type:
+        type: integer
+      discount_amount:
+        type: number
+      id:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_model.OrderItem'
+        type: array
+      merchant_id:
+        type: integer
+      merchant_review_stage:
+        type: integer
+      order_no:
+        type: string
+      paid_at:
+        type: string
+      pay_amount:
+        type: number
+      pay_status:
+        type: integer
+      remark:
+        type: string
+      status:
+        type: integer
+      total_amount:
+        type: number
+      updated_at:
+        type: string
+      user_coupon_id:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_model.OrderItem:
+    properties:
+      activity_id:
+        type: integer
+      activity_product_id:
+        type: integer
+      created_at:
+        type: string
+      group_buy_id:
+        type: integer
+      group_buy_team_id:
+        type: integer
+      id:
+        type: integer
+      order_id:
+        type: integer
+      product_id:
+        type: integer
+      product_image:
+        type: string
+      product_name:
+        type: string
+      purchase_type:
+        type: integer
+      quantity:
+        type: integer
+      spec:
+        type: string
+      subtotal:
+        type: number
+      unit_price:
+        type: number
+    type: object
+  yujixinjiang_backend_internal_model.Product:
+    properties:
+      category:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
+      category_id:
+        type: integer
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        type: integer
+      enable_group_buy:
+        type: integer
+      group_buy_allow_repeat:
+        type: integer
+      group_buy_price:
+        type: number
+      group_buy_target_count:
+        type: integer
+      id:
+        type: integer
+      images:
+        items:
+          type: string
+        type: array
+      is_hot:
+        type: integer
+      item_type:
+        type: integer
+      merchant:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.MerchantProfile'
+      merchant_id:
+        type: integer
+      name:
+        type: string
+      original_price:
+        type: number
+      price:
+        type: number
+      sales_count:
+        type: integer
+      status:
+        type: integer
+      stock:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.ProductCategory:
+    properties:
+      created_at:
+        type: string
+      icon_url:
+        type: string
+      id:
+        type: integer
+      merchant_id:
+        type: integer
+      name:
+        type: string
+      parent_id:
+        type: integer
+      sort_order:
+        type: integer
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.UserAddress:
+    properties:
+      account_id:
+        type: integer
+      city:
+        type: string
+      contact_name:
+        type: string
+      contact_phone:
+        type: string
+      created_at:
+        type: string
+      detail:
+        type: string
+      district:
+        type: string
+      id:
+        type: integer
+      is_default:
+        type: integer
+      province:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.UserCoupon:
+    properties:
+      account_id:
+        type: integer
+      coupon:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+      coupon_id:
+        type: integer
+      expired_at:
+        type: string
+      id:
+        type: integer
+      order_id:
+        type: integer
+      received_at:
+        type: string
+      status:
+        type: integer
+      used_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.UserInventory:
+    properties:
+      account_id:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: integer
+      last_order_id:
+        type: integer
+      product:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Product'
+      product_id:
+        type: integer
+      quantity:
+        type: integer
+      spec:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.UserInventoryUsage:
+    properties:
+      account_id:
+        type: integer
+      address_snapshot:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.AddressSnapshot'
+      cancel_reason:
+        type: string
+      created_at:
+        type: string
+      delivery_order:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.DeliveryOrder'
+      delivery_order_id:
+        type: integer
+      delivery_type:
+        type: integer
+      id:
+        type: integer
+      inventory:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.UserInventory'
+      inventory_id:
+        type: integer
+      merchant_id:
+        type: integer
+      product:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Product'
+      product_id:
+        type: integer
+      quantity:
+        type: integer
+      remark:
+        type: string
+      source_order_id:
+        type: integer
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_model.UserProfile:
+    properties:
+      account_id:
+        type: integer
+      bio:
+        type: string
+      birthday:
+        type: string
+      city:
+        type: string
+      created_at:
+        type: string
+      district:
+        type: string
+      id:
+        type: integer
+      points:
+        type: integer
+      province:
+        type: string
+      real_name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_query.PageResult:
+    properties:
+      list: {}
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_response.Body:
+    properties:
+      code:
+        type: integer
+      data: {}
+      message:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.ActivityStoreView:
+    properties:
+      banner_images:
+        items:
+          type: string
+        type: array
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        type: integer
+      end_at:
+        type: string
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      merchant_id:
+        type: integer
+      name:
+        type: string
+      products:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_model.ActivityProduct'
+        type: array
+      sort_order:
+        type: integer
+      start_at:
+        type: string
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.AdminDashboard:
+    properties:
+      completed_order_count:
+        type: integer
+      low_stock_product_count:
+        type: integer
+      merchant_count:
+        type: integer
+      order_count:
+        type: integer
+      order_trend:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_service.DailyStat'
+        type: array
+      pending_rider_apps:
+        type: integer
+      product_count:
+        type: integer
+      top_products:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductSalesRank'
+        type: array
+      total_sales:
+        type: number
+      user_count:
+        type: integer
+      verification_count:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_service.BuyerBrief:
+    properties:
+      account_id:
+        type: integer
+      nickname:
+        type: string
+      phone:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.CartItemView:
+    properties:
+      account_id:
+        type: integer
+      can_group_buy:
+        type: boolean
+      can_use_coupon:
+        type: boolean
+      created_at:
+        type: string
+      group_buy_id:
+        type: integer
+      group_buy_team_id:
+        type: integer
+      group_price:
+        type: number
+      id:
+        type: integer
+      product:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Product'
+      product_id:
+        type: integer
+      purchase_type:
+        type: integer
+      quantity:
+        type: integer
+      selected:
+        type: integer
+      spec:
+        type: string
+      subtotal:
+        type: number
+      unit_price:
+        type: number
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.DailyStat:
+    properties:
+      date:
+        type: string
+      order_count:
+        type: integer
+      sales_amount:
+        type: number
+    type: object
+  yujixinjiang_backend_internal_service.DeliveryView:
+    properties:
+      accepted_at:
+        type: string
+      created_at:
+        type: string
+      deliver_photos:
+        items:
+          type: string
+        type: array
+      deliver_remark:
+        type: string
+      delivered_at:
+        type: string
+      id:
+        type: integer
+      inventory_usage:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.UserInventoryUsage'
+      inventory_usage_id:
+        type: integer
+      order:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Order'
+      order_id:
+        type: integer
+      rider_id:
+        type: integer
+      started_at:
+        type: string
+      status:
+        type: integer
+      status_text:
+        type: string
+      updated_at:
+        type: string
+      user_confirmed:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_service.GroupBuyProgress:
+    properties:
+      allow_repeat_join:
+        type: integer
+      current_count:
+        type: integer
+      expire_at:
+        type: string
+      group_price:
+        type: number
+      is_leader:
+        type: boolean
+      remaining_count:
+        type: integer
+      status:
+        type: integer
+      status_text:
+        type: string
+      target_count:
+        type: integer
+      team_id:
+        type: integer
+      user_join_count:
+        type: integer
+      user_joined:
+        type: boolean
+    type: object
+  yujixinjiang_backend_internal_service.GroupPurchaseOption:
+    properties:
+      allow_repeat_join:
+        type: integer
+      available:
+        type: boolean
+      can_use_coupon:
+        type: boolean
+      group_buy_id:
+        type: integer
+      price:
+        type: number
+      target_count:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_service.InventoryUsageView:
+    properties:
+      account_id:
+        type: integer
+      address_snapshot:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.AddressSnapshot'
+      buyer:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.BuyerBrief'
+      cancel_reason:
+        type: string
+      created_at:
+        type: string
+      delivery_order:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.DeliveryOrder'
+      delivery_order_id:
+        type: integer
+      delivery_type:
+        type: integer
+      id:
+        type: integer
+      inventory:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.UserInventory'
+      inventory_id:
+        type: integer
+      merchant_id:
+        type: integer
+      product:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Product'
+      product_id:
+        type: integer
+      quantity:
+        type: integer
+      remark:
+        type: string
+      source_order_id:
+        type: integer
+      status:
+        type: integer
+      status_text:
+        type: string
+      updated_at:
+        type: string
+      verify_code:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.MerchantDashboard:
+    properties:
+      low_stock_count:
+        type: integer
+      order_trend:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_service.DailyStat'
+        type: array
+      pending_order_review:
+        type: integer
+      pending_use_review:
+        type: integer
+      product_count:
+        type: integer
+      sales:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.SalesReport'
+      today_verification_count:
+        type: integer
+      top_products:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductSalesRank'
+        type: array
+    type: object
+  yujixinjiang_backend_internal_service.OrderView:
+    properties:
+      account_id:
+        type: integer
+      activity_id:
+        type: integer
+      address_snapshot:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.AddressSnapshot'
+      buyer:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.BuyerBrief'
+      created_at:
+        type: string
+      delivery_type:
+        type: integer
+      discount_amount:
+        type: number
+      group_buy_progress:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.GroupBuyProgress'
+      id:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_model.OrderItem'
+        type: array
+      merchant_id:
+        type: integer
+      merchant_review_stage:
+        type: integer
+      order_no:
+        type: string
+      paid_at:
+        type: string
+      pay_amount:
+        type: number
+      pay_status:
+        type: integer
+      remark:
+        type: string
+      status:
+        type: integer
+      status_code:
+        type: string
+      status_text:
+        type: string
+      total_amount:
+        type: number
+      updated_at:
+        type: string
+      user_coupon_id:
+        type: integer
+      verify_code:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.OverviewResponse:
+    properties:
+      account:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+      profile:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.UserProfile'
+      stats:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.UserStats'
+    type: object
+  yujixinjiang_backend_internal_service.ProductSaleOptions:
+    properties:
+      group:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.GroupPurchaseOption'
+      solo:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.PurchaseOption'
+    type: object
+  yujixinjiang_backend_internal_service.ProductSalesRank:
+    properties:
+      merchant_id:
+        type: integer
+      product_id:
+        type: integer
+      product_name:
+        type: string
+      sales_count:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_service.ProductStoreView:
+    properties:
+      can_group_buy:
+        type: boolean
+      can_use_coupon:
+        type: boolean
+      category:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
+      category_id:
+        type: integer
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        type: integer
+      enable_group_buy:
+        type: integer
+      group_buy_allow_repeat:
+        type: integer
+      group_buy_id:
+        type: integer
+      group_buy_price:
+        type: number
+      group_buy_target_count:
+        type: integer
+      id:
+        type: integer
+      images:
+        items:
+          type: string
+        type: array
+      is_hot:
+        type: integer
+      item_type:
+        type: integer
+      merchant:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.MerchantProfile'
+      merchant_id:
+        type: integer
+      name:
+        type: string
+      original_price:
+        type: number
+      price:
+        type: number
+      sale_options:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductSaleOptions'
+      sales_count:
+        type: integer
+      status:
+        type: integer
+      stock:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.ProfileDetail:
+    properties:
+      account:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+      addresses:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_model.UserAddress'
+        type: array
+      profile:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.UserProfile'
+      stats:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.UserStats'
+    type: object
+  yujixinjiang_backend_internal_service.PurchaseOption:
+    properties:
+      available:
+        type: boolean
+      can_use_coupon:
+        type: boolean
+      price:
+        type: number
+    type: object
+  yujixinjiang_backend_internal_service.RiderApplicationView:
+    properties:
+      account:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+      account_id:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: integer
+      id_card_no:
+        type: string
+      phone:
+        type: string
+      real_name:
+        type: string
+      reject_reason:
+        type: string
+      reviewed_at:
+        type: string
+      reviewer_id:
+        type: integer
+      status:
+        type: integer
+      status_text:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.SalesReport:
+    properties:
+      end_date:
+        type: string
+      merchant_id:
+        type: integer
+      merchant_name:
+        type: string
+      start_date:
+        type: string
+      total_sales_amount:
+        type: number
+      valid_order_count:
+        type: integer
+      verification_count:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_service.UserStats:
+    properties:
+      address_count:
+        type: integer
+      cart_count:
+        type: integer
+      coupon_unused_count:
+        type: integer
+      inventory_kind_count:
+        type: integer
+      inventory_total_qty:
+        type: integer
+      order_count:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_service.VerifyPreviewView:
+    properties:
+      code:
+        type: string
+      cover_url:
+        type: string
+      order_id:
+        type: integer
+      order_no:
+        type: string
+      product_id:
+        type: integer
+      product_name:
+        type: string
+      quantity:
+        type: integer
+      spec:
+        type: string
+      usage_id:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_storage.UploadResult:
+    properties:
+      filename:
+        type: string
+      full_url:
+        description: http://host/uploads/...
+        type: string
+      path:
+        description: 相对路径 2026/06/30/abc.jpg
+        type: string
+      size:
+        type: integer
+      url:
+        description: /uploads/2026/06/30/abc.jpg
+        type: string
+    type: object
+info:
+  contact:
+    email: support@yujixinjiang.com
+    name: API Support
+  description: 豫记信疆微信小程序后端接口文档，支持在线调试。
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: 豫记信疆 API
+  version: "1.0"
+paths:
+  /activities/{id}:
+    get:
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.ActivityStoreView'
+              type: object
+      summary: 活动详情（子商店）
+      tags:
+      - 用户-商城
+  /activities/{id}/products:
+    get:
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 活动商品列表（子商店）
+      tags:
+      - 用户-商城
+  /admin/announcements:
+    get:
+      parameters:
+      - description: 按商家筛选
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 公告列表（管理端）
+      tags:
+      - 管理端-公告
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: merchant_id=0 为平台公告
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AnnouncementRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Announcement'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建公告（平台或指定商家）
+      tags:
+      - 管理端-公告
+  /admin/announcements/{id}:
+    delete:
+      parameters:
+      - description: 公告 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除公告
+      tags:
+      - 管理端-公告
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 公告 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 公告内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AnnouncementRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Announcement'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新公告
+      tags:
+      - 管理端-公告
+  /admin/categories:
+    get:
+      parameters:
+      - description: 按商家筛选
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 0/1
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 分类列表（管理端，含隐藏）
+      tags:
+      - 管理端-分类
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 分类信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 创建分类
+      tags:
+      - 管理端-分类
+  /admin/categories/{id}:
+    delete:
+      parameters:
+      - description: 分类 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除分类（逻辑删除）
+      tags:
+      - 管理端-分类
+    get:
+      parameters:
+      - description: 分类 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 分类详情
+      tags:
+      - 管理端-分类
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 分类 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 更新字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 更新分类
+      tags:
+      - 管理端-分类
+  /admin/coupons:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 0/1
+        in: query
+        name: status
+        type: integer
+      - description: 按商家筛选
+        in: query
+        name: merchant_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 优惠券列表（管理端）
+      tags:
+      - 管理端-优惠券
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 券信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateCouponRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建优惠券（管理端）
+      tags:
+      - 管理端-优惠券
+  /admin/coupons/{id}:
+    get:
+      parameters:
+      - description: 券 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 优惠券详情（管理端）
+      tags:
+      - 管理端-优惠券
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 券 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 更新字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateCouponRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新优惠券（管理端）
+      tags:
+      - 管理端-优惠券
+  /admin/coupons/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 券 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 状态
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateCouponStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 启用/停用优惠券（管理端）
+      tags:
+      - 管理端-优惠券
+  /admin/dashboard:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.AdminDashboard'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 管理端工作台统计
+      tags:
+      - 管理端
+  /admin/deliveries:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 按商家筛选
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 配送状态
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 配送单列表（管理端）
+      tags:
+      - 管理端-配送
+  /admin/inventory-usages:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 按商家筛选
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 状态
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 背包使用记录（管理端）
+      tags:
+      - 管理端-背包
+  /admin/merchants:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 状态 0=停业 1=营业
+        in: query
+        name: status
+        type: integer
+      - description: 店铺名/联系电话
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商家列表
+      tags:
+      - 管理端-商家
+    post:
+      consumes:
+      - application/json
+      description: 仅需 shop_name；phone、openid 可选，后续可再绑定
+      parameters:
+      - description: 商家信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateMerchantRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 创建商家
+      tags:
+      - 管理端-商家
+  /admin/merchants/{id}:
+    get:
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 商家详情
+      tags:
+      - 管理端-商家
+    patch:
+      consumes:
+      - application/json
+      description: 只传需要修改的字段；status 请用 PATCH /merchants/{id}/status
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateMerchantProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商家资料（选择性）
+      tags:
+      - 管理端-商家
+  /admin/merchants/{id}/images:
+    patch:
+      consumes:
+      - application/json
+      description: 绑定 images 数组；shop_logo 不传则取 images[0]
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 店铺图片
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateMerchantImagesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商家店铺图片
+      tags:
+      - 管理端-商家
+  /admin/merchants/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 状态
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateMerchantStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商家营业状态
+      tags:
+      - 管理端-商家
+  /admin/orders:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 状态码筛选
+        in: query
+        name: status_code
+        type: string
+      - description: 按买家用户 ID 筛选
+        in: query
+        name: account_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 全平台订单
+      tags:
+      - 管理端
+  /admin/orders/{id}:
+    get:
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OrderView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 订单详情（管理端）
+      tags:
+      - 管理端
+  /admin/products:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 商家 ID
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 分类 ID
+        in: query
+        name: category_id
+        type: integer
+      - description: 0=下架 1=上架
+        in: query
+        name: status
+        type: integer
+      - description: 商品名
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商品列表
+      tags:
+      - 管理端-商品
+    post:
+      consumes:
+      - application/json
+      description: 管理员可为任意商家创建商品；分类可传 category_id 或 category_name（不存在则自动创建）；enable_group_buy=1
+        时须传 group_buy_target_count、group_buy_price；enable_coupon 默认 1
+      parameters:
+      - description: 商品信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建商品
+      tags:
+      - 管理端-商品
+  /admin/products/{id}:
+    get:
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商品详情
+      tags:
+      - 管理端-商品
+    patch:
+      consumes:
+      - application/json
+      description: 只传需要修改的字段，未传字段保留原值
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 选择性更新商品
+      tags:
+      - 管理端-商品
+    put:
+      consumes:
+      - application/json
+      description: 只传需要修改的字段，未传字段保留原值；与 PATCH 等价
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商品（选择性）
+      tags:
+      - 管理端-商品
+  /admin/products/{id}/coupon:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 优惠券开关
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductCouponRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 修改商品优惠券开关
+      tags:
+      - 管理端-商品
+  /admin/products/{id}/group-buy:
+    patch:
+      consumes:
+      - application/json
+      description: 设置是否支持拼团、成团人数、团购价；enable_group_buy=1 时须填写 group_buy_target_count（≥2）与
+        group_buy_price（须低于售价）
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 拼团配置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductGroupBuyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 修改商品拼团配置
+      tags:
+      - 管理端-商品
+  /admin/products/{id}/images:
+    patch:
+      consumes:
+      - application/json
+      description: 绑定 images 数组；cover_url 不传则取 images[0]
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 图片列表
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductImagesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商品图片
+      tags:
+      - 管理端-商品
+  /admin/products/{id}/price:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 价格
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductPriceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 修改商品价格
+      tags:
+      - 管理端-商品
+  /admin/products/{id}/sale:
+    patch:
+      consumes:
+      - application/json
+      description: 编辑页一次性保存 enable_group_buy、enable_coupon、拼团人数与团购价；未传字段保留原值
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 销售方式
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductSaleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商品销售方式（拼团/优惠券）
+      tags:
+      - 管理端-商品
+  /admin/products/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 状态
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 上架/下架商品
+      tags:
+      - 管理端-商品
+  /admin/products/{id}/stock:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 库存
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductStockRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 修改商品库存
+      tags:
+      - 管理端-商品
+  /admin/rider/applications:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 0=待审核 1=通过 2=拒绝
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 骑手申请列表
+      tags:
+      - 管理端-骑手
+  /admin/rider/applications/{id}:
+    get:
+      parameters:
+      - description: 申请 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.RiderApplicationView'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 骑手申请详情
+      tags:
+      - 管理端-骑手
+  /admin/rider/applications/{id}/review:
+    patch:
+      consumes:
+      - application/json
+      description: status=1 通过（账号 is_rider=1，角色 type 不变），status=2 拒绝（需填写 reject_reason）
+      parameters:
+      - description: 申请 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 审核结果
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ReviewRiderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.RiderApplicationView'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 审核骑手申请
+      tags:
+      - 管理端-骑手
+  /admin/sales:
+    get:
+      description: 统计有效已支付订单实付总额及核销次数。可选 merchant_id、日期范围
+      parameters:
+      - description: 指定商家，不传为全平台
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 开始日期 YYYY-MM-DD
+        in: query
+        name: start_date
+        type: string
+      - description: 结束日期 YYYY-MM-DD
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.SalesReport'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 销售额报表（管理端）
+      tags:
+      - 管理端-统计
+  /admin/users:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 昵称/手机号
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 用户列表（管理端）
+      tags:
+      - 管理端-用户
+  /admin/verification-records:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 全平台核销记录
+      tags:
+      - 管理端
+  /announcements:
+    get:
+      description: merchant_id=0 或不传为平台公告；传商家 ID 为店铺公告
+      parameters:
+      - description: 商家 ID，0=平台
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      summary: 公告列表（公开）
+      tags:
+      - 用户-商城
+  /auth/avatar:
+    post:
+      consumes:
+      - application/json
+      description: 保存 chooseAvatar 选择的头像地址
+      parameters:
+      - description: 头像地址
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AvatarRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 更新用户头像
+      tags:
+      - 认证
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: 统一登录入口：wx.login 取得 code 后换取 JWT。已绑定 openid 的商家/管理员/骑手按原角色登录，否则自动注册为普通用户
+      parameters:
+      - description: wx.login 返回的 code
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.LoginResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 微信登录
+      tags:
+      - 认证
+  /auth/me:
+    get:
+      description: 返回 JWT 对应账号信息
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 当前登录用户
+      tags:
+      - 认证
+  /auth/profile:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 资料
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新用户资料
+      tags:
+      - 认证
+  /auth/wechat/phone:
+    post:
+      consumes:
+      - application/json
+      description: 使用 getPhoneNumber 组件返回的 code 换取并绑定手机号
+      parameters:
+      - description: 手机号授权 code
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.WeChatPhoneRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Account'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 绑定微信手机号
+      tags:
+      - 认证
+  /categories:
+    get:
+      description: 须传 merchant_id，返回该店铺自有分类
+      parameters:
+      - description: 商家 ID
+        in: query
+        name: merchant_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
+                  type: array
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 商品分类列表（按商家）
+      tags:
+      - 用户-商城
+  /coupons:
+    get:
+      parameters:
+      - description: 商家 ID，不传则仅平台券
+        in: query
+        name: merchant_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 可领取优惠券列表
+      tags:
+      - 优惠券
+  /health:
+    get:
+      description: 检查服务与数据库连接状态
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.HealthData'
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 健康检查
+      tags:
+      - 系统
+  /merchant/activities:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 本店活动列表
+      tags:
+      - 商家端-活动
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 活动信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ActivityRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Activity'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建活动
+      tags:
+      - 商家端-活动
+  /merchant/activities/{id}:
+    delete:
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除活动
+      tags:
+      - 商家端-活动
+    get:
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Activity'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 活动详情（含商品）
+      tags:
+      - 商家端-活动
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 活动信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ActivityRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Activity'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新活动
+      tags:
+      - 商家端-活动
+  /merchant/activities/{id}/products:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 活动商品配置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ActivityProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.ActivityProduct'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 添加活动商品
+      tags:
+      - 商家端-活动
+  /merchant/activities/{id}/products/{product_id}:
+    delete:
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: activity_product.id
+        in: path
+        name: product_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 移除活动商品
+      tags:
+      - 商家端-活动
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: activity_product.id
+        in: path
+        name: product_id
+        required: true
+        type: integer
+      - description: 活动商品配置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ActivityProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.ActivityProduct'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新活动商品
+      tags:
+      - 商家端-活动
+  /merchant/announcements:
+    get:
+      parameters:
+      - description: 管理员指定商家
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 本店公告列表
+      tags:
+      - 商家端-公告
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 公告内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AnnouncementRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Announcement'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建公告
+      tags:
+      - 商家端-公告
+  /merchant/announcements/{id}:
+    delete:
+      parameters:
+      - description: 公告 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除公告
+      tags:
+      - 商家端-公告
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 公告 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 公告内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AnnouncementRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Announcement'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新公告
+      tags:
+      - 商家端-公告
+  /merchant/categories:
+    get:
+      parameters:
+      - description: 管理员指定商家 ID
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 0/1，不传返回全部
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 本店商品分类列表
+      tags:
+      - 商家端-分类
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 管理员指定商家 ID
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 分类信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建商品分类
+      tags:
+      - 商家端-分类
+  /merchant/categories/{id}:
+    delete:
+      parameters:
+      - description: 分类 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 管理员指定商家 ID
+        in: query
+        name: merchant_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除商品分类
+      tags:
+      - 商家端-分类
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 分类 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 管理员指定商家 ID
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 更新字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商品分类
+      tags:
+      - 商家端-分类
+  /merchant/coupons:
+    get:
+      parameters:
+      - description: 管理员代管时指定
+        in: query
+        name: merchant_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 本店优惠券列表
+      tags:
+      - 商家端-优惠券
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 券信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateCouponRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建本店优惠券
+      tags:
+      - 商家端-优惠券
+  /merchant/coupons/{id}:
+    get:
+      parameters:
+      - description: 券 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 优惠券详情（商家端）
+      tags:
+      - 商家端-优惠券
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 券 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 更新字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateCouponRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新本店优惠券
+      tags:
+      - 商家端-优惠券
+  /merchant/coupons/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 券 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 状态
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateCouponStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.Coupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 启用/停用本店优惠券
+      tags:
+      - 商家端-优惠券
+  /merchant/dashboard:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.MerchantDashboard'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商家工作台统计
+      tags:
+      - 商家端
+  /merchant/inventory-usages:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 5=取消待审核
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 背包使用记录（商家）
+      tags:
+      - 商家端-背包
+  /merchant/inventory-usages/{id}:
+    get:
+      parameters:
+      - description: 使用记录 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.InventoryUsageView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 背包使用记录详情（商家）
+      tags:
+      - 商家端-背包
+  /merchant/inventory-usages/{id}/cancel-review:
+    patch:
+      consumes:
+      - application/json
+      description: 骑手配送单用户申请取消后，商家同意则回滚库存并取消配送
+      parameters:
+      - description: 使用记录 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 审核结果
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ReviewOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.InventoryUsageView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 审核背包使用取消申请
+      tags:
+      - 商家端-背包
+  /merchant/orders:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: pending_merchant|pending_use_merchant|...
+        in: query
+        name: status_code
+        type: string
+      - description: order=待订单审核 use=待库存确认
+        in: query
+        name: type
+        type: string
+      - description: 按买家用户 ID 筛选
+        in: query
+        name: account_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商家订单列表
+      tags:
+      - 商家端-订单
+  /merchant/orders/{id}:
+    get:
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OrderView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商家订单详情
+      tags:
+      - 商家端-订单
+  /merchant/orders/{id}/review:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 审核结果
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ReviewOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OrderView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商家订单审核（第一阶段）
+      tags:
+      - 商家端-订单
+  /merchant/orders/{id}/use-review:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 审核结果
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ReviewOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OrderView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商家库存确认（第二阶段）
+      tags:
+      - 商家端-订单
+  /merchant/products:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 分类 ID
+        in: query
+        name: category_id
+        type: integer
+      - description: 0=下架 1=上架
+        in: query
+        name: status
+        type: integer
+      - description: 商品名
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 我的商品列表
+      tags:
+      - 商家端-商品
+    post:
+      consumes:
+      - application/json
+      description: 商家创建自己的商品，merchant_id 自动绑定；分类可传 category_id 或 category_name（不存在则自动创建）；enable_group_buy=1
+        时须传 group_buy_target_count、group_buy_price
+      parameters:
+      - description: 商品信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建商品
+      tags:
+      - 商家端-商品
+  /merchant/products/{id}:
+    get:
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商品详情
+      tags:
+      - 商家端-商品
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 选择性更新商品
+      tags:
+      - 商家端-商品
+    put:
+      consumes:
+      - application/json
+      description: 只传需要修改的字段，未传字段保留原值；与 PATCH 等价
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商品（选择性）
+      tags:
+      - 商家端-商品
+  /merchant/products/{id}/coupon:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 优惠券开关
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductCouponRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 修改商品优惠券开关
+      tags:
+      - 商家端-商品
+  /merchant/products/{id}/group-buy:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 拼团配置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductGroupBuyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 修改商品拼团配置
+      tags:
+      - 商家端-商品
+  /merchant/products/{id}/images:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 图片列表
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductImagesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商品图片
+      tags:
+      - 商家端-商品
+  /merchant/products/{id}/price:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 价格
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductPriceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 修改商品价格
+      tags:
+      - 商家端-商品
+  /merchant/products/{id}/sale:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 销售方式
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductSaleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新商品销售方式（拼团/优惠券）
+      tags:
+      - 商家端-商品
+  /merchant/products/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 状态
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 上架/下架商品
+      tags:
+      - 商家端-商品
+  /merchant/products/{id}/stock:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 库存
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProductStockRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.ProductResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 修改商品库存
+      tags:
+      - 商家端-商品
+  /merchant/profile:
+    get:
+      description: 管理员代管时需传 merchant_id 或 Header X-Merchant-Id
+      parameters:
+      - description: 管理员指定商家 ID
+        in: query
+        name: merchant_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 当前商家资料
+      tags:
+      - 商家端
+    patch:
+      consumes:
+      - application/json
+      description: 只传需要修改的字段；改图片也可继续用 PATCH /merchant/profile/images
+      parameters:
+      - description: 管理员指定商家 ID
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateMerchantProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新当前商家资料（选择性）
+      tags:
+      - 商家端
+  /merchant/profile/images:
+    patch:
+      consumes:
+      - application/json
+      description: 绑定 images 数组；shop_logo 不传则取 images[0]；管理员代管时需传 merchant_id
+      parameters:
+      - description: 管理员指定商家 ID
+        in: query
+        name: merchant_id
+        type: integer
+      - description: 店铺图片
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateMerchantImagesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新店铺图片
+      tags:
+      - 商家端
+  /merchant/sales:
+    get:
+      description: 本店有效已支付订单实付总额及核销次数
+      parameters:
+      - description: 开始日期 YYYY-MM-DD
+        in: query
+        name: start_date
+        type: string
+      - description: 结束日期 YYYY-MM-DD
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.SalesReport'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 销售额报表（商家端）
+      tags:
+      - 商家端-统计
+  /merchant/verification-records:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 商家核销记录
+      tags:
+      - 商家端-核销
+  /merchant/verify:
+    get:
+      description: 根据核销码查询商品信息；仅商品所属商家可查看，数量固定不可选
+      parameters:
+      - description: 核销码
+        in: query
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.VerifyPreviewView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 扫码查询核销信息
+      tags:
+      - 商家端-核销
+    post:
+      consumes:
+      - application/json
+      description: 核销码一次性使用，整单/整次使用记录完成，无需传数量
+      parameters:
+      - description: 核销码
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.VerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 确认核销
+      tags:
+      - 商家端-核销
+  /merchants:
+    get:
+      description: 展示营业中的商家，无需登录
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 店铺名/地址搜索
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  allOf:
+                  - $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+                  - properties:
+                      list:
+                        items:
+                          $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductStoreView'
+                        type: array
+                    type: object
+              type: object
+      summary: 商家列表
+      tags:
+      - 用户-商城
+  /merchants/{id}:
+    get:
+      description: 查看营业中商家信息
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MerchantProfileResp'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 商家详情
+      tags:
+      - 用户-商城
+  /merchants/{id}/activities:
+    get:
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: merchant_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 商家进行中的活动列表
+      tags:
+      - 用户-商城
+  /merchants/{id}/announcements:
+    get:
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      summary: 店铺公告列表
+      tags:
+      - 用户-商城
+  /merchants/{id}/categories:
+    get:
+      description: 返回某营业中店铺自有的商品分类（仅 status=1），供外部按商家+分类筛选商品
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
+                  type: array
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 商家商品分类
+      tags:
+      - 用户-商城
+  /merchants/{id}/products:
+    get:
+      description: 某商家已上架商品，支持分类与关键词筛选
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 分类 ID
+        in: query
+        name: category_id
+        type: integer
+      - description: 商品名
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  allOf:
+                  - $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+                  - properties:
+                      list:
+                        items:
+                          $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductStoreView'
+                        type: array
+                    type: object
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 商家商品列表（路径传 merchant_id）
+      tags:
+      - 用户-商城
+  /merchants/{id}/products/{product_id}:
+    get:
+      description: 某商家下的上架商品详情
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 商品 ID
+        in: path
+        name: product_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductStoreView'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 商品详情
+      tags:
+      - 用户-商城
+  /products:
+    get:
+      description: 根据 merchant_id 返回该商家已上架商品；与 GET /merchants/{id}/products 等价
+      parameters:
+      - description: 商家 ID
+        in: query
+        name: merchant_id
+        required: true
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: 分类 ID
+        in: query
+        name: category_id
+        type: integer
+      - description: 商品名
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  allOf:
+                  - $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+                  - properties:
+                      list:
+                        items:
+                          $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductStoreView'
+                        type: array
+                    type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 按商家 ID 查询商品
+      tags:
+      - 用户-商城
+  /products/{id}/group:
+    get:
+      description: 登录时可返回当前用户参团信息（user_joined、user_join_count、is_leader）；未传 team_id
+        时优先返回用户进行中的团
+      parameters:
+      - description: 商品 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 拼团实例 ID
+        in: query
+        name: team_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.GroupBuyProgress'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 拼团进度
+      tags:
+      - 用户-商城
+  /rider/orders:
+    get:
+      description: scope=pending 待接单 active 配送中 history 历史
+      parameters:
+      - description: pending|active|history
+        in: query
+        name: scope
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 骑手配送单列表
+      tags:
+      - 骑手端
+  /rider/orders/{id}/accept:
+    post:
+      parameters:
+      - description: 配送单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 骑手接单
+      tags:
+      - 骑手端
+  /rider/orders/{id}/complete:
+    post:
+      consumes:
+      - application/json
+      description: 可传送达备注与照片；用户确认收货后订单/使用单才完成
+      parameters:
+      - description: 配送单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 送达信息
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler.CompleteDeliveryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 骑手确认送达
+      tags:
+      - 骑手端
+  /rider/orders/{id}/start:
+    post:
+      parameters:
+      - description: 配送单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 开始配送
+      tags:
+      - 骑手端
+  /upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: multipart 字段 file；返回 url 可用于商品 cover_url / images
+      parameters:
+      - description: 图片文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_storage.UploadResult'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 上传图片
+      tags:
+      - 上传
+  /user/addresses:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_model.UserAddress'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 收货地址列表
+      tags:
+      - 用户-地址
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 地址信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AddressRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.UserAddress'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 新增收货地址
+      tags:
+      - 用户-地址
+  /user/addresses/{id}:
+    delete:
+      description: 逻辑删除
+      parameters:
+      - description: 地址 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除收货地址
+      tags:
+      - 用户-地址
+    get:
+      parameters:
+      - description: 地址 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.UserAddress'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 收货地址详情
+      tags:
+      - 用户-地址
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 地址 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 地址信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AddressRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.UserAddress'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新收货地址
+      tags:
+      - 用户-地址
+  /user/addresses/{id}/default:
+    patch:
+      parameters:
+      - description: 地址 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.UserAddress'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 设为默认地址
+      tags:
+      - 用户-地址
+  /user/cart:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_service.CartItemView'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 购物车
+      tags:
+      - 用户
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 加购信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AddCartRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.CartItem'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 加入购物车
+      tags:
+      - 用户-购物车
+  /user/cart/{id}:
+    delete:
+      parameters:
+      - description: 购物车项 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除购物车项
+      tags:
+      - 用户-购物车
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 购物车项 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 更新内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateCartRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.CartItem'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 更新购物车项
+      tags:
+      - 用户-购物车
+  /user/coupons:
+    get:
+      parameters:
+      - description: 优惠券状态，0=未使用
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 优惠券列表
+      tags:
+      - 用户
+  /user/coupons/applicable:
+    get:
+      description: 根据商品与金额筛选当前用户可用券，并预估优惠
+      parameters:
+      - description: 商品 ID
+        in: query
+        name: product_id
+        required: true
+        type: integer
+      - description: 商家 ID
+        in: query
+        name: merchant_id
+        required: true
+        type: integer
+      - description: 数量
+        in: query
+        name: quantity
+        type: integer
+      - description: 1=直购 2=拼团
+        in: query
+        name: purchase_type
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 下单可用优惠券
+      tags:
+      - 用户-优惠券
+  /user/coupons/claim:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 券模板 ID
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ClaimCouponRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.UserCoupon'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 领取优惠券
+      tags:
+      - 用户-优惠券
+  /user/deliveries:
+    get:
+      description: scope=active|delivering 配送中；pending_confirm 待确认收货；history 已完成
+      parameters:
+      - description: active|pending_confirm|history
+        in: query
+        name: scope
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 我的配送单列表
+      tags:
+      - 用户-配送
+  /user/deliveries/{id}:
+    get:
+      parameters:
+      - description: 配送单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 配送单详情
+      tags:
+      - 用户-配送
+  /user/deliveries/{id}/confirm:
+    post:
+      description: 骑手送达后用户确认；配送单、关联订单/使用记录一并完成
+      parameters:
+      - description: 配送单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 确认收货
+      tags:
+      - 用户-配送
+  /user/inventory:
+    get:
+      description: 购买成功后商品会进入背包；使用 POST /user/inventory/{id}/use
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 背包库存
+      tags:
+      - 用户
+  /user/inventory/{id}/use:
+    post:
+      consumes:
+      - application/json
+      description: 指定数量扣减库存并创建使用记录；自提时返回核销码
+      parameters:
+      - description: 背包记录 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 使用方式
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UseInventoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.InventoryUsageView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 使用背包商品
+      tags:
+      - 用户-背包
+  /user/inventory/usages:
+    get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 背包使用记录列表
+      tags:
+      - 用户-背包
+  /user/inventory/usages/{id}:
+    get:
+      parameters:
+      - description: 使用记录 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.InventoryUsageView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 背包使用记录详情
+      tags:
+      - 用户-背包
+  /user/inventory/usages/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: 自提/未接单配送：立即取消并回滚库存；骑手已接单至用户确认收货前：提交取消申请，商家审核通过后回滚库存
+      parameters:
+      - description: 使用记录 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 取消原因
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler.CancelInventoryUsageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.InventoryUsageView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 取消背包使用
+      tags:
+      - 用户-背包
+  /user/orders:
+    get:
+      parameters:
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      - description: pending_group|pending_merchant|approved|...
+        in: query
+        name: status_code
+        type: string
+      - description: 订单状态筛选
+        in: query
+        name: status
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_query.PageResult'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 历史订单列表
+      tags:
+      - 用户
+    post:
+      consumes:
+      - application/json
+      description: 暂无支付流程，创建后 pay_status=已支付。可选 user_coupon_id 使用优惠券
+      parameters:
+      - description: 下单信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OrderView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 创建订单
+      tags:
+      - 用户-订单
+  /user/orders/{id}:
+    get:
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OrderView'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 订单详情
+      tags:
+      - 用户
+  /user/orders/{id}/cancel:
+    post:
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 取消订单
+      tags:
+      - 用户-订单
+  /user/orders/{id}/confirm-pickup:
+    post:
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OrderView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 确认自取完成
+      tags:
+      - 用户-订单
+  /user/orders/{id}/confirm-receipt:
+    post:
+      description: 购买订单配送场景，等价于确认关联配送单
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 按订单确认收货
+      tags:
+      - 用户-订单
+  /user/orders/{id}/request-use:
+    post:
+      consumes:
+      - application/json
+      description: 商家已通过订单审核后，用户申请自取/配送
+      parameters:
+      - description: 订单 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 使用方式
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.RequestUseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OrderView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 申请使用
+      tags:
+      - 用户-订单
+  /user/overview:
+    get:
+      description: 返回资料摘要与各项数量统计
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.OverviewResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 个人中心概览
+      tags:
+      - 用户
+  /user/profile:
+    get:
+      description: 返回账号、扩展资料、地址列表与统计
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.ProfileDetail'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 完整个人信息
+      tags:
+      - 用户
+  /user/rider/application:
+    get:
+      description: 查看最近一次骑手申请状态
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.RiderApplicationView'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 我的骑手申请
+      tags:
+      - 用户-骑手
+    post:
+      consumes:
+      - application/json
+      description: 提交骑手资格申请，待管理员审核；普通用户、商家账号可申请，管理员/骑手不可
+      parameters:
+      - description: 申请信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ApplyRiderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.RiderApplicationView'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 申请成为骑手
+      tags:
+      - 用户-骑手
+securityDefinitions:
+  BearerAuth:
+    description: '登录后获取的 JWT，格式: Bearer {token}'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
