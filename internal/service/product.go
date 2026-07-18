@@ -31,6 +31,7 @@ type ProductInput struct {
 	IsHot               uint8
 	EnableGroupBuy      uint8
 	EnableCoupon        uint8
+	AllowPickup         uint8
 	GroupBuyTargetCount *uint32
 	GroupBuyPrice       *float64
 	GroupBuyAllowRepeat uint8
@@ -46,11 +47,12 @@ type GroupBuyConfigInput struct {
 }
 
 type ProductListFilter struct {
-	MerchantID       *uint64
-	CategoryID       *uint64
-	Status           *uint8
-	Keyword          string
+	MerchantID         *uint64
+	CategoryID         *uint64
+	Status             *uint8
+	Keyword            string
 	EnableGroupBuyOnly bool
+	AllowPickupOnly    bool
 }
 
 func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*model.Product, error) {
@@ -85,6 +87,7 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		IsHot:               input.IsHot,
 		EnableGroupBuy:      input.EnableGroupBuy,
 		EnableCoupon:        normalizeEnableCoupon(input.EnableCoupon),
+		AllowPickup:         normalizeAllowPickup(input.AllowPickup),
 		GroupBuyTargetCount: input.GroupBuyTargetCount,
 		GroupBuyPrice:       input.GroupBuyPrice,
 		GroupBuyAllowRepeat: normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
@@ -163,6 +166,9 @@ func (s *ProductService) List(page, pageSize int, filter ProductListFilter) ([]m
 	if filter.EnableGroupBuyOnly {
 		q = q.Where("enable_group_buy = 1 AND group_buy_price IS NOT NULL AND group_buy_target_count >= 2")
 	}
+	if filter.AllowPickupOnly {
+		q = q.Where("allow_pickup = 1")
+	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -220,6 +226,7 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		"is_hot":                 input.IsHot,
 		"enable_group_buy":       input.EnableGroupBuy,
 		"enable_coupon":          normalizeEnableCoupon(input.EnableCoupon),
+		"allow_pickup":           normalizeAllowPickup(input.AllowPickup),
 		"group_buy_target_count": input.GroupBuyTargetCount,
 		"group_buy_price":        input.GroupBuyPrice,
 		"group_buy_allow_repeat": normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
@@ -236,6 +243,7 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	}
 	product.EnableGroupBuy = input.EnableGroupBuy
 	product.EnableCoupon = normalizeEnableCoupon(input.EnableCoupon)
+	product.AllowPickup = normalizeAllowPickup(input.AllowPickup)
 	product.GroupBuyTargetCount = input.GroupBuyTargetCount
 	product.GroupBuyPrice = input.GroupBuyPrice
 	product.GroupBuyAllowRepeat = normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat)
@@ -487,6 +495,13 @@ func resolveProductCover(cover string, images []string) string {
 }
 
 func normalizeEnableCoupon(v uint8) uint8 {
+	if v == 0 {
+		return 0
+	}
+	return 1
+}
+
+func normalizeAllowPickup(v uint8) uint8 {
 	if v == 0 {
 		return 0
 	}

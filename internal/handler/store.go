@@ -66,7 +66,8 @@ func (h *StoreHandler) ListMerchantCategories(c *gin.Context) {
 // @Router       /merchants [get]
 func (h *StoreHandler) ListMerchants(c *gin.Context) {
 	page, pageSize := parsePage(c)
-	list, total, err := h.MerchantSvc.ListOpen(page, pageSize, c.Query("keyword"))
+	reservationOnly := c.Query("reservation") == "1"
+	list, total, err := h.MerchantSvc.ListOpen(page, pageSize, c.Query("keyword"), reservationOnly)
 	if err != nil {
 		response.InternalError(c, "获取商家列表失败")
 		return
@@ -156,6 +157,9 @@ func (h *StoreHandler) listMerchantProducts(c *gin.Context, merchantID uint64) {
 	filter := service.ProductListFilter{Keyword: c.Query("keyword")}
 	if c.Query("group_buy") == "1" {
 		filter.EnableGroupBuyOnly = true
+	}
+	if c.Query("pickup") == "1" {
+		filter.AllowPickupOnly = true
 	}
 	if s := c.Query("category_id"); s != "" {
 		v, parseErr := parseUintParamFromString(s)

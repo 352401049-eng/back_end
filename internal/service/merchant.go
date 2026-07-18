@@ -53,17 +53,19 @@ type MerchantCoordinateUpdate struct {
 
 // UpdateMerchantInput 选择性更新商家资料。
 type UpdateMerchantInput struct {
-	ShopName     *string
-	ContactPhone *string
-	Address      *string
-	ShopLogo     *string
-	Images       *[]string
-	Coordinates  *MerchantCoordinateUpdate
+	ShopName         *string
+	ContactPhone     *string
+	Address          *string
+	ShopLogo         *string
+	Images           *[]string
+	Coordinates      *MerchantCoordinateUpdate
+	AllowReservation *uint8
 }
 
 func (in UpdateMerchantInput) hasField() bool {
 	return in.ShopName != nil || in.ContactPhone != nil || in.Address != nil ||
-		in.ShopLogo != nil || in.Images != nil || in.Coordinates != nil
+		in.ShopLogo != nil || in.Images != nil || in.Coordinates != nil ||
+		in.AllowReservation != nil
 }
 
 func (s *MerchantService) Create(input CreateMerchantInput) (*model.MerchantProfile, error) {
@@ -265,6 +267,9 @@ func (s *MerchantService) UpdateProfile(id uint64, input UpdateMerchantInput) (*
 			updates["longitude"] = input.Coordinates.Lng
 		}
 	}
+	if input.AllowReservation != nil {
+		updates["allow_reservation"] = normalizeAllowReservation(*input.AllowReservation)
+	}
 
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.MerchantProfile{}).Where("id = ?", id).Updates(updates).Error; err != nil {
@@ -324,7 +329,7 @@ func (s *MerchantService) GetOpenByID(id uint64) (*model.MerchantProfile, error)
 }
 
 // ListOpen 营业中商家列表（用户端，不返回账号敏感信息）。
-func (s *MerchantService) ListOpen(page, pageSize int, keyword string) ([]model.MerchantProfile, int64, error) {
+func (s *MerchantService) ListOpen(page, pageSize int, keyword string, reservationOnly bool) ([]model.MerchantProfile, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -337,6 +342,9 @@ func (s *MerchantService) ListOpen(page, pageSize int, keyword string) ([]model.
 	offset := (page - 1) * pageSize
 
 	q := query.NotDeleted(s.DB.Model(&model.MerchantProfile{})).Where("status = ?", model.MerchantStatusOpen)
+	if reservationOnly {
+		q = q.Where("allow_reservation = 1")
+	}
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		q = q.Where("shop_name LIKE ? OR address LIKE ?", like, like)
@@ -352,6 +360,13 @@ func (s *MerchantService) ListOpen(page, pageSize int, keyword string) ([]model.
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+func normalizeAllowReservation(v uint8) uint8 {
+	if v == 0 {
+		return 0
+	}
+	return 1
 }
 
 func validateMerchantCoordinates(lat, lng float64) error {

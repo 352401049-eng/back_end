@@ -41,20 +41,21 @@ type UpdateMerchantImagesRequest struct {
 
 // UpdateMerchantProfileRequest 选择性更新商家资料。
 type UpdateMerchantProfileRequest struct {
-	ShopName     *string   `json:"shop_name" example:"豫记小店"`
-	ContactPhone *string   `json:"contact_phone" example:"13800138000"`
-	Address      *string   `json:"address" example:"河南省郑州市"`
-	ShopLogo     *string   `json:"shop_logo"`
-	Images       *[]string `json:"images"`
-	Latitude     FlexNullableFloat64 `json:"latitude"`
-	Longitude    FlexNullableFloat64 `json:"longitude"`
-	Lat          FlexNullableFloat64 `json:"lat"`
-	Lng          FlexNullableFloat64 `json:"lng"`
+	ShopName         *string   `json:"shop_name" example:"豫记小店"`
+	ContactPhone     *string   `json:"contact_phone" example:"13800138000"`
+	Address          *string   `json:"address" example:"河南省郑州市"`
+	ShopLogo         *string   `json:"shop_logo"`
+	Images           *[]string `json:"images"`
+	Latitude         FlexNullableFloat64 `json:"latitude"`
+	Longitude        FlexNullableFloat64 `json:"longitude"`
+	Lat              FlexNullableFloat64 `json:"lat"`
+	Lng              FlexNullableFloat64 `json:"lng"`
+	AllowReservation *uint8    `json:"allow_reservation" example:"1"`
 }
 
 func (r UpdateMerchantProfileRequest) hasField() bool {
 	return r.ShopName != nil || r.ContactPhone != nil || r.Address != nil ||
-		r.ShopLogo != nil || r.Images != nil ||
+		r.ShopLogo != nil || r.Images != nil || r.AllowReservation != nil ||
 		r.Latitude.Present || r.Longitude.Present || r.Lat.Present || r.Lng.Present
 }
 
@@ -72,6 +73,7 @@ type ProductRequest struct {
 	IsHot               uint8    `json:"is_hot" example:"0"`
 	EnableGroupBuy      *uint8   `json:"enable_group_buy" example:"0"`
 	EnableCoupon        *uint8   `json:"enable_coupon" example:"1"`
+	AllowPickup         *uint8   `json:"allow_pickup" example:"1"`
 	GroupBuyTargetCount *uint32  `json:"group_buy_target_count" example:"3"`
 	GroupBuyPrice       *float64 `json:"group_buy_price" example:"79.9"`
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
@@ -94,6 +96,7 @@ type UpdateProductRequest struct {
 	IsHot               *uint8    `json:"is_hot"`
 	EnableGroupBuy      *uint8    `json:"enable_group_buy"`
 	EnableCoupon        *uint8    `json:"enable_coupon"`
+	AllowPickup         *uint8    `json:"allow_pickup"`
 	GroupBuyTargetCount *uint32   `json:"group_buy_target_count"`
 	GroupBuyPrice       *float64  `json:"group_buy_price"`
 	GroupBuyAllowRepeat *uint8    `json:"group_buy_allow_repeat"`
@@ -105,7 +108,7 @@ func (r UpdateProductRequest) hasField() bool {
 	return r.MerchantID != nil || r.CategoryID != nil || r.CategoryName != nil ||
 		r.Name != nil || r.Description != nil || r.CoverURL != nil || r.Images != nil ||
 		r.Price != nil || r.OriginalPrice != nil || r.Stock != nil || r.IsHot != nil ||
-		r.EnableGroupBuy != nil || r.EnableCoupon != nil ||
+		r.EnableGroupBuy != nil || r.EnableCoupon != nil || r.AllowPickup != nil ||
 		r.GroupBuyTargetCount != nil || r.GroupBuyPrice != nil || r.GroupBuyAllowRepeat != nil ||
 		r.ItemType != nil || r.Status != nil
 }
@@ -1282,6 +1285,13 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 	} else {
 		input.EnableCoupon = 1
 	}
+	if req.AllowPickup != nil {
+		input.AllowPickup = *req.AllowPickup
+	} else if existing != nil {
+		input.AllowPickup = existing.AllowPickup
+	} else {
+		input.AllowPickup = 1
+	}
 	if req.GroupBuyTargetCount != nil {
 		input.GroupBuyTargetCount = req.GroupBuyTargetCount
 	} else if existing != nil {
@@ -1314,6 +1324,7 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 		IsHot:               existing.IsHot,
 		EnableGroupBuy:      existing.EnableGroupBuy,
 		EnableCoupon:        existing.EnableCoupon,
+		AllowPickup:         existing.AllowPickup,
 		GroupBuyTargetCount: existing.GroupBuyTargetCount,
 		GroupBuyPrice:       existing.GroupBuyPrice,
 		GroupBuyAllowRepeat: existing.GroupBuyAllowRepeat,
@@ -1360,6 +1371,9 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	if req.EnableCoupon != nil {
 		input.EnableCoupon = *req.EnableCoupon
 	}
+	if req.AllowPickup != nil {
+		input.AllowPickup = *req.AllowPickup
+	}
 	if req.GroupBuyTargetCount != nil {
 		input.GroupBuyTargetCount = req.GroupBuyTargetCount
 	}
@@ -1384,12 +1398,13 @@ func toUpdateMerchantInput(req UpdateMerchantProfileRequest) (service.UpdateMerc
 		return service.UpdateMerchantInput{}, err
 	}
 	return service.UpdateMerchantInput{
-		ShopName:     req.ShopName,
-		ContactPhone: req.ContactPhone,
-		Address:      req.Address,
-		ShopLogo:     req.ShopLogo,
-		Images:       req.Images,
-		Coordinates:  coords,
+		ShopName:         req.ShopName,
+		ContactPhone:     req.ContactPhone,
+		Address:          req.Address,
+		ShopLogo:         req.ShopLogo,
+		Images:           req.Images,
+		Coordinates:      coords,
+		AllowReservation: req.AllowReservation,
 	}, nil
 }
 
@@ -1483,6 +1498,12 @@ func parseProductListFilter(c *gin.Context, merchantScoped bool) (service.Produc
 		}
 		u := uint8(v)
 		filter.Status = &u
+	}
+	if c.Query("group_buy") == "1" {
+		filter.EnableGroupBuyOnly = true
+	}
+	if c.Query("pickup") == "1" {
+		filter.AllowPickupOnly = true
 	}
 	return filter, nil
 }

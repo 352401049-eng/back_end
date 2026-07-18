@@ -21,6 +21,7 @@ type MerchantProfile struct {
 	Latitude     *float64  `gorm:"type:decimal(10,7)" json:"latitude"`
 	Longitude    *float64  `gorm:"type:decimal(10,7)" json:"longitude"`
 	Status       uint8     `gorm:"not null;default:1" json:"status"`
+	AllowReservation uint8 `gorm:"not null;default:0" json:"allow_reservation"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	SoftDelete

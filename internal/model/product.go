@@ -22,6 +22,7 @@ type Product struct {
 	IsHot               uint8     `gorm:"not null;default:0" json:"is_hot"`
 	EnableGroupBuy      uint8     `gorm:"not null;default:0" json:"enable_group_buy"`
 	EnableCoupon        uint8     `gorm:"not null;default:1" json:"enable_coupon"`
+	AllowPickup         uint8     `gorm:"not null;default:1" json:"allow_pickup"`
 	GroupBuyTargetCount *uint32   `gorm:"column:group_buy_target_count" json:"group_buy_target_count,omitempty"`
 	GroupBuyPrice       *float64  `gorm:"column:group_buy_price;type:decimal(10,2)" json:"group_buy_price,omitempty"`
 	GroupBuyAllowRepeat uint8     `gorm:"column:group_buy_allow_repeat;not null;default:0" json:"group_buy_allow_repeat"`
