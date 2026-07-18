@@ -74,6 +74,7 @@ type ProductRequest struct {
 	EnableGroupBuy      *uint8   `json:"enable_group_buy" example:"0"`
 	EnableCoupon        *uint8   `json:"enable_coupon" example:"1"`
 	AllowPickup         *uint8   `json:"allow_pickup" example:"1"`
+	AllowDelivery       *uint8   `json:"allow_delivery" example:"1"`
 	GroupBuyTargetCount *uint32  `json:"group_buy_target_count" example:"3"`
 	GroupBuyPrice       *float64 `json:"group_buy_price" example:"79.9"`
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
@@ -97,6 +98,7 @@ type UpdateProductRequest struct {
 	EnableGroupBuy      *uint8    `json:"enable_group_buy"`
 	EnableCoupon        *uint8    `json:"enable_coupon"`
 	AllowPickup         *uint8    `json:"allow_pickup"`
+	AllowDelivery       *uint8    `json:"allow_delivery"`
 	GroupBuyTargetCount *uint32   `json:"group_buy_target_count"`
 	GroupBuyPrice       *float64  `json:"group_buy_price"`
 	GroupBuyAllowRepeat *uint8    `json:"group_buy_allow_repeat"`
@@ -108,7 +110,7 @@ func (r UpdateProductRequest) hasField() bool {
 	return r.MerchantID != nil || r.CategoryID != nil || r.CategoryName != nil ||
 		r.Name != nil || r.Description != nil || r.CoverURL != nil || r.Images != nil ||
 		r.Price != nil || r.OriginalPrice != nil || r.Stock != nil || r.IsHot != nil ||
-		r.EnableGroupBuy != nil || r.EnableCoupon != nil || r.AllowPickup != nil ||
+		r.EnableGroupBuy != nil || r.EnableCoupon != nil || r.AllowPickup != nil || r.AllowDelivery != nil ||
 		r.GroupBuyTargetCount != nil || r.GroupBuyPrice != nil || r.GroupBuyAllowRepeat != nil ||
 		r.ItemType != nil || r.Status != nil
 }
@@ -1292,6 +1294,13 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 	} else {
 		input.AllowPickup = 1
 	}
+	if req.AllowDelivery != nil {
+		input.AllowDelivery = *req.AllowDelivery
+	} else if existing != nil {
+		input.AllowDelivery = existing.AllowDelivery
+	} else {
+		input.AllowDelivery = 1
+	}
 	if req.GroupBuyTargetCount != nil {
 		input.GroupBuyTargetCount = req.GroupBuyTargetCount
 	} else if existing != nil {
@@ -1325,6 +1334,7 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 		EnableGroupBuy:      existing.EnableGroupBuy,
 		EnableCoupon:        existing.EnableCoupon,
 		AllowPickup:         existing.AllowPickup,
+		AllowDelivery:       existing.AllowDelivery,
 		GroupBuyTargetCount: existing.GroupBuyTargetCount,
 		GroupBuyPrice:       existing.GroupBuyPrice,
 		GroupBuyAllowRepeat: existing.GroupBuyAllowRepeat,
@@ -1373,6 +1383,9 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	}
 	if req.AllowPickup != nil {
 		input.AllowPickup = *req.AllowPickup
+	}
+	if req.AllowDelivery != nil {
+		input.AllowDelivery = *req.AllowDelivery
 	}
 	if req.GroupBuyTargetCount != nil {
 		input.GroupBuyTargetCount = req.GroupBuyTargetCount

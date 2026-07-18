@@ -32,6 +32,7 @@ type ProductInput struct {
 	EnableGroupBuy      uint8
 	EnableCoupon        uint8
 	AllowPickup         uint8
+	AllowDelivery       uint8
 	GroupBuyTargetCount *uint32
 	GroupBuyPrice       *float64
 	GroupBuyAllowRepeat uint8
@@ -88,6 +89,7 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		EnableGroupBuy:      input.EnableGroupBuy,
 		EnableCoupon:        normalizeEnableCoupon(input.EnableCoupon),
 		AllowPickup:         normalizeAllowPickup(input.AllowPickup),
+		AllowDelivery:       normalizeAllowDelivery(input.AllowDelivery),
 		GroupBuyTargetCount: input.GroupBuyTargetCount,
 		GroupBuyPrice:       input.GroupBuyPrice,
 		GroupBuyAllowRepeat: normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
@@ -227,6 +229,7 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		"enable_group_buy":       input.EnableGroupBuy,
 		"enable_coupon":          normalizeEnableCoupon(input.EnableCoupon),
 		"allow_pickup":           normalizeAllowPickup(input.AllowPickup),
+		"allow_delivery":         normalizeAllowDelivery(input.AllowDelivery),
 		"group_buy_target_count": input.GroupBuyTargetCount,
 		"group_buy_price":        input.GroupBuyPrice,
 		"group_buy_allow_repeat": normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
@@ -244,6 +247,7 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	product.EnableGroupBuy = input.EnableGroupBuy
 	product.EnableCoupon = normalizeEnableCoupon(input.EnableCoupon)
 	product.AllowPickup = normalizeAllowPickup(input.AllowPickup)
+	product.AllowDelivery = normalizeAllowDelivery(input.AllowDelivery)
 	product.GroupBuyTargetCount = input.GroupBuyTargetCount
 	product.GroupBuyPrice = input.GroupBuyPrice
 	product.GroupBuyAllowRepeat = normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat)
@@ -502,6 +506,13 @@ func normalizeEnableCoupon(v uint8) uint8 {
 }
 
 func normalizeAllowPickup(v uint8) uint8 {
+	if v == 0 {
+		return 0
+	}
+	return 1
+}
+
+func normalizeAllowDelivery(v uint8) uint8 {
 	if v == 0 {
 		return 0
 	}

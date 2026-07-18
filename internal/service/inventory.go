@@ -20,6 +20,7 @@ var (
 	ErrInventoryUsageInvalid       = errors.New("inventory usage invalid")
 	ErrInventoryRollback           = errors.New("inventory rollback failed")
 	ErrInventoryCancelPending      = errors.New("inventory cancel pending review")
+	ErrVirtualNotDeliverable       = errors.New("virtual product not deliverable")
 )
 
 type InventoryService struct {
@@ -149,6 +150,10 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 	}
 	if inv.Product.ID == 0 {
 		return nil, ErrProductNotFound
+	}
+	// 虚拟商品（如电影票）只能到店核销，不支持骑手配送
+	if inv.Product.ItemType == model.ProductItemTypeVirtual && deliveryType == model.DeliveryTypeDelivery {
+		return nil, ErrVirtualNotDeliverable
 	}
 
 	var addrSnap *model.AddressSnapshot

@@ -236,6 +236,7 @@ curl http://localhost:8080/api/user/addresses -H "Authorization: Bearer $TOKEN"
 - 存量库：依次执行 `sql/updates/004_add_soft_delete.sql`、`005_add_product_sale_flags.sql`
 - 背包流水与使用记录：`009_inventory_usage.sql`
 - 自取/订座：`012_add_pickup_and_reservation.sql`（product 加 `allow_pickup`、merchant_profile 加 `allow_reservation`）
+- 配送开关：`013_add_allow_delivery.sql`（product 加 `allow_delivery`）
 
 ## 商品管理接口（管理端 / 商家端）
 
@@ -350,7 +351,7 @@ curl -X POST http://localhost:8080/api/auth/login \
 ## 下一步
 
 - 部署后访问 `/swagger/index.html` 查看完整 API（约 55+ 路径）
-- 存量库依次执行：`004` … `007_add_merchant_images.sql`、`008_add_account_is_rider.sql`、`012_add_pickup_and_reservation.sql`
+- 存量库依次执行：`004` … `007_add_merchant_images.sql`、`008_add_account_is_rider.sql`、`012_add_pickup_and_reservation.sql`、`013_add_allow_delivery.sql`
 
 ## 前端对接说明
 
