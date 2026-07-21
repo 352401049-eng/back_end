@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
@@ -27,6 +28,7 @@ type SeckillProductView struct {
 	LimitLabels    []string  `json:"limit_labels"`
 	LimitReached   bool      `json:"limit_reached"`
 	LimitReason    string    `json:"limit_reason,omitempty"` // daily|weekly|monthly|activity_max|register_max
+	DeadlineAt     time.Time `json:"deadline_at"`               // 该商品最短到期（活动结束与启用中的限购窗取最早）
 	CanBuy         bool      `json:"can_buy"`
 	ButtonState    string    `json:"button_state"` // buy|sold_out|limit_reached
 }
@@ -59,7 +61,7 @@ func (s *ActivityService) ListSeckillForUser(accountID *uint64) ([]SeckillProduc
 	if err := query.NotDeleted(s.DB).
 		Preload("Product", "is_deleted = ? AND status = ?", model.NotDeleted, model.ProductStatusOn).
 		Where("activity_id IN ? AND status = 1", actIDs).
-		Order("sort_order ASC, id ASC").
+		Order("id ASC").
 		Find(&items).Error; err != nil {
 		return nil, err
 	}
@@ -91,6 +93,7 @@ func (s *ActivityService) ListSeckillForUser(accountID *uint64) ([]SeckillProduc
 		}
 
 		view := buildSeckillProductView(act, ap, ap.Product)
+		view.DeadlineAt = seckillDeadlineAt(act, ap, accountCreatedAt, loggedIn, now)
 		if loggedIn {
 			reached, reason, err := s.seckillLimitStatus(*accountID, ap, accountCreatedAt, now)
 			if err != nil {
@@ -103,6 +106,12 @@ func (s *ActivityService) ListSeckillForUser(accountID *uint64) ([]SeckillProduc
 		view.ButtonState = seckillButtonState(view.LimitReached, view.AvailableStock)
 		out = append(out, view)
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].DeadlineAt.Equal(out[j].DeadlineAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].DeadlineAt.Before(out[j].DeadlineAt)
+	})
 	return out, nil
 }
 
@@ -176,6 +185,35 @@ func seckillButtonState(limitReached bool, available uint32) string {
 		return "limit_reached"
 	}
 	return "buy"
+}
+
+// seckillDeadlineAt 取该商品当前最短到期：活动结束 ∪ 已启用日/周/月窗结束 ∪（登录且启用时）新用户窗截止。
+func seckillDeadlineAt(act *model.Activity, ap *model.ActivityProduct, accountCreatedAt time.Time, loggedIn bool, now time.Time) time.Time {
+	deadline := act.EndAt
+	consider := func(t time.Time) {
+		if t.IsZero() {
+			return
+		}
+		if deadline.IsZero() || t.Before(deadline) {
+			deadline = t
+		}
+	}
+	if ap.DailyMax > 0 {
+		_, end := calendarWindow(now, "day")
+		consider(end)
+	}
+	if ap.WeeklyMax > 0 {
+		_, end := calendarWindow(now, "week")
+		consider(end)
+	}
+	if ap.MonthlyMax > 0 {
+		_, end := calendarWindow(now, "month")
+		consider(end)
+	}
+	if loggedIn && ap.RegisterHours > 0 {
+		consider(registerDeadline(accountCreatedAt, ap.RegisterHours))
+	}
+	return deadline
 }
 
 // seckillLimitStatus 检查日/周/月/全程/新用户窗限购（不含 register 窗外，调用方已过滤）。
