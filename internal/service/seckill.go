@@ -152,24 +152,24 @@ func buildSeckillLimitLabels(ap *model.ActivityProduct) []string {
 	if ap.RegisterHours > 0 {
 		labels = append(labels, fmt.Sprintf("新用户%d小时内", ap.RegisterHours))
 		if ap.RegisterMax > 0 {
-			labels = append(labels, fmt.Sprintf("窗内限购%d单", ap.RegisterMax))
+			labels = append(labels, fmt.Sprintf("窗内限购%d件", ap.RegisterMax))
 		}
 	}
 	if ap.DailyMax > 0 {
-		labels = append(labels, fmt.Sprintf("每日限购%d单", ap.DailyMax))
+		labels = append(labels, fmt.Sprintf("每日限购%d件", ap.DailyMax))
 	}
 	if ap.WeeklyMax > 0 {
-		labels = append(labels, fmt.Sprintf("每周限购%d单", ap.WeeklyMax))
+		labels = append(labels, fmt.Sprintf("每周限购%d件", ap.WeeklyMax))
 	}
 	if ap.MonthlyMax > 0 {
-		labels = append(labels, fmt.Sprintf("每月限购%d单", ap.MonthlyMax))
+		labels = append(labels, fmt.Sprintf("每月限购%d件", ap.MonthlyMax))
 	}
 	activityMax := ap.ActivityMax
 	if activityMax == 0 && ap.PerUserMaxOrders > 0 {
 		activityMax = ap.PerUserMaxOrders
 	}
 	if activityMax > 0 {
-		labels = append(labels, fmt.Sprintf("全程限购%d单", activityMax))
+		labels = append(labels, fmt.Sprintf("全程限购%d件", activityMax))
 	}
 	if ap.PerUserMaxQty > 0 {
 		labels = append(labels, fmt.Sprintf("每人限购%d件", ap.PerUserMaxQty))
@@ -216,70 +216,17 @@ func seckillDeadlineAt(act *model.Activity, ap *model.ActivityProduct, accountCr
 	return deadline
 }
 
-// seckillLimitStatus 检查日/周/月/全程/新用户窗限购 + 每人件数（不含 register 窗外，调用方已过滤）。
-// 返回首个触达的 reason：daily|weekly|monthly|activity_max|register_max|per_user_qty。
+// seckillLimitStatus 检查日/周/月/全程/新用户窗/每人件数限购（不含 register 窗外，调用方已过滤）。
+// 各窗口按已购件数累计。返回首个触达的 reason。
 func (s *ActivityService) seckillLimitStatus(accountID uint64, ap *model.ActivityProduct, accountCreatedAt, now time.Time) (bool, string, error) {
-	reached, reason, err := s.seckillOrderLimitStatus(accountID, ap, accountCreatedAt, now)
-	if err != nil || reached {
-		return reached, reason, err
+	stock := ^uint32(0)
+	if ap.Product != nil {
+		stock = availableActivityStock(ap, ap.Product)
 	}
-	if ap.PerUserMaxQty > 0 {
-		bought, err := sumBoughtQty(s.DB, accountID, ap.ID)
-		if err != nil {
-			return false, "", err
-		}
-		if bought >= ap.PerUserMaxQty {
-			return true, "per_user_qty", nil
-		}
+	aid := accountID
+	remain, err := computeActivityRemaining(s.DB, ap, stock, &aid, accountCreatedAt, now)
+	if err != nil {
+		return false, "", err
 	}
-	return false, "", nil
-}
-
-// seckillOrderLimitStatus 仅检查「单数」类限购（日/周/月/全程/新用户窗），不含每人件数。
-func (s *ActivityService) seckillOrderLimitStatus(accountID uint64, ap *model.ActivityProduct, accountCreatedAt, now time.Time) (bool, string, error) {
-	if ap.RegisterHours > 0 && ap.RegisterMax > 0 {
-		start := accountCreatedAt
-		end := registerDeadline(accountCreatedAt, ap.RegisterHours)
-		n, err := countOrders(s.DB, accountID, ap.ID, start, end)
-		if err != nil {
-			return false, "", err
-		}
-		if uint32(n) >= ap.RegisterMax {
-			return true, "register_max", nil
-		}
-	}
-
-	type orderLimit struct {
-		max    uint32
-		unit   string
-		reason string
-	}
-	limits := []orderLimit{
-		{ap.DailyMax, "day", "daily"},
-		{ap.WeeklyMax, "week", "weekly"},
-		{ap.MonthlyMax, "month", "monthly"},
-	}
-	activityMax := ap.ActivityMax
-	if activityMax == 0 && ap.PerUserMaxOrders > 0 {
-		activityMax = ap.PerUserMaxOrders
-	}
-	limits = append(limits, orderLimit{activityMax, "", "activity_max"})
-
-	for _, lim := range limits {
-		if lim.max == 0 {
-			continue
-		}
-		var start, end time.Time
-		if lim.unit != "" {
-			start, end = calendarWindow(now, lim.unit)
-		}
-		n, err := countOrders(s.DB, accountID, ap.ID, start, end)
-		if err != nil {
-			return false, "", err
-		}
-		if uint32(n) >= lim.max {
-			return true, lim.reason, nil
-		}
-	}
-	return false, "", nil
+	return remain.LimitReached, remain.LimitReason, nil
 }

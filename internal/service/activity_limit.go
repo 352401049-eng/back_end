@@ -44,34 +44,25 @@ func inRegisterWindow(createdAt, now time.Time, hours uint32) bool {
 	return !now.Before(createdAt) && now.Before(deadline)
 }
 
-// countOrders counts non-cancelled order_items for account+activityProduct.
-// When start/end are both non-zero, filters o.created_at ∈ [start, end).
-func countOrders(db *gorm.DB, accountID, activityProductID uint64, start, end time.Time) (int64, error) {
-	// 不用 query.NotDeleted：JOIN `order` 后裸 is_deleted 会歧义
+// sumBoughtQtyInWindow 统计账号对该活动商品的已购件数（非取消）。
+// start/end 均为非零时限制 o.created_at ∈ [start, end)；否则不限时间。
+func sumBoughtQtyInWindow(db *gorm.DB, accountID, activityProductID uint64, start, end time.Time) (uint32, error) {
 	q := db.Table("order_item oi").
+		Select("COALESCE(SUM(oi.quantity), 0)").
 		Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
 		Where("o.account_id = ? AND oi.activity_product_id = ? AND oi.is_deleted = ?", accountID, activityProductID, model.NotDeleted).
 		Where("o.status <> ?", model.OrderStatusCancelled)
 	if !start.IsZero() && !end.IsZero() {
 		q = q.Where("o.created_at >= ? AND o.created_at < ?", start, end)
 	}
-	var n int64
-	if err := q.Count(&n).Error; err != nil {
-		return 0, err
-	}
-	return n, nil
+	var bought uint32
+	err := q.Scan(&bought).Error
+	return bought, err
 }
 
-// sumBoughtQty 统计账号对该活动商品的已购件数（非取消订单），口径与 checkUserLimits 一致。
+// sumBoughtQty 全程已购件数。
 func sumBoughtQty(db *gorm.DB, accountID, activityProductID uint64) (uint32, error) {
-	var bought uint32
-	err := db.Table("order_item oi").
-		Select("COALESCE(SUM(oi.quantity), 0)").
-		Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
-		Where("o.account_id = ? AND oi.activity_product_id = ? AND oi.is_deleted = ?", accountID, activityProductID, model.NotDeleted).
-		Where("o.status <> ?", model.OrderStatusCancelled).
-		Scan(&bought).Error
-	return bought, err
+	return sumBoughtQtyInWindow(db, accountID, activityProductID, time.Time{}, time.Time{})
 }
 
 type activityRemainResult struct {
@@ -88,7 +79,8 @@ func minU32(a, b uint32) uint32 {
 }
 
 // computeActivityRemaining 本单最多可买件数 = 库存与各限购剩余的最小值。
-// 日/周/月/全程/新用户窗按「剩余单数」计入最小值（例：每日 3 单 + 每人 10 件 → 最多买 3）。
+// 日/周/月/全程/新用户窗与每人限购一律按「已购件数」累计（非订单笔数）。
+// 例：每日限购 3 + 每人 10 → 当天最多共买 3 件；首单买满 3 后当天不可再买。
 func computeActivityRemaining(
 	db *gorm.DB,
 	ap *model.ActivityProduct,
@@ -110,7 +102,6 @@ func computeActivityRemaining(
 		out.RemainingQty = minU32(out.RemainingQty, n)
 	}
 
-	// 未登录：按配置满额可用取最小
 	if ap.PerUserMaxQty > 0 {
 		tighten(ap.PerUserMaxQty, "per_user_qty")
 	}
@@ -150,12 +141,12 @@ func computeActivityRemaining(
 		tighten(left, "per_user_qty")
 	}
 
-	type orderLim struct {
+	type qtyLim struct {
 		max    uint32
 		unit   string
 		reason string
 	}
-	lims := []orderLim{
+	lims := []qtyLim{
 		{ap.DailyMax, "day", "daily"},
 		{ap.WeeklyMax, "week", "weekly"},
 		{ap.MonthlyMax, "month", "monthly"},
@@ -169,13 +160,13 @@ func computeActivityRemaining(
 		if lim.unit != "" {
 			start, end = calendarWindow(now, lim.unit)
 		}
-		n, err := countOrders(db, *accountID, ap.ID, start, end)
+		bought, err := sumBoughtQtyInWindow(db, *accountID, ap.ID, start, end)
 		if err != nil {
 			return out, err
 		}
 		var left uint32
-		if uint32(n) < lim.max {
-			left = lim.max - uint32(n)
+		if bought < lim.max {
+			left = lim.max - bought
 		}
 		tighten(left, lim.reason)
 	}
@@ -183,13 +174,13 @@ func computeActivityRemaining(
 	if ap.RegisterHours > 0 && ap.RegisterMax > 0 {
 		start := accountCreatedAt
 		end := registerDeadline(accountCreatedAt, ap.RegisterHours)
-		n, err := countOrders(db, *accountID, ap.ID, start, end)
+		bought, err := sumBoughtQtyInWindow(db, *accountID, ap.ID, start, end)
 		if err != nil {
 			return out, err
 		}
 		var left uint32
-		if uint32(n) < ap.RegisterMax {
-			left = ap.RegisterMax - uint32(n)
+		if bought < ap.RegisterMax {
+			left = ap.RegisterMax - bought
 		}
 		tighten(left, "register_max")
 	}
