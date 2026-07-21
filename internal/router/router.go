@@ -1,12 +1,15 @@
 package router
 
 import (
+	"log"
 	"os"
+	"time"
 
 	"yujixinjiang/backend/internal/config"
 	"yujixinjiang/backend/internal/handler"
 	"yujixinjiang/backend/internal/middleware"
 	"yujixinjiang/backend/internal/model"
+	"yujixinjiang/backend/internal/payment"
 	"yujixinjiang/backend/internal/service"
 	"yujixinjiang/backend/internal/storage"
 	"yujixinjiang/backend/internal/wechat"
@@ -53,8 +56,15 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	couponSvc := &service.CouponService{DB: db}
 	activitySvc := &service.ActivityService{DB: db}
 	announcementSvc := &service.AnnouncementService{DB: db}
-	orderSvc := &service.OrderService{DB: db, InventorySvc: inventorySvc, CouponSvc: couponSvc, ActivitySvc: activitySvc, ZoneSvc: deliveryZoneSvc}
+	payProvider := payment.NewProvider(cfg, db)
+	log.Printf("支付渠道: %s (immediate_settle=%v)", payProvider.Name(), payProvider.ImmediateSettle())
+	orderSvc := &service.OrderService{
+		DB: db, InventorySvc: inventorySvc, CouponSvc: couponSvc,
+		ActivitySvc: activitySvc, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
+	}
+	startGroupExpireWorker(orderSvc)
 	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc}
+	paymentHandler := &handler.PaymentHandler{OrderSvc: orderSvc}
 	deliverySvc := &service.DeliveryService{DB: db}
 	dashboardSvc := &service.DashboardService{DB: db}
 	categorySvc := &service.CategoryService{DB: db}
@@ -113,6 +123,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 	public := r.Group("/api")
 	{
+		public.POST("/payments/wechat/notify", paymentHandler.WeChatNotify)
 		public.POST("/auth/login", authHandler.Login)
 		public.GET("/categories", categoryHandler.ListCategories)
 		public.GET("/products", storeHandler.ListProductsByMerchant)
@@ -158,7 +169,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 		user := authorized.Group("")
 		user.Use(middleware.RequireAccountTypes(model.AccountTypeUser))
-		registerUserRoutes(user, userHandler, couponHandler)
+		registerUserRoutes(user, userHandler, couponHandler, paymentHandler)
 
 		merchant := authorized.Group("/merchant")
 		merchant.Use(middleware.RequireAccountTypes(model.AccountTypeMerchant, model.AccountTypeAdmin))
@@ -176,16 +187,18 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	return r
 }
 
-func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.CouponHandler) {
+func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.CouponHandler, ph *handler.PaymentHandler) {
 	r.GET("/user/overview", h.Overview)
 	r.GET("/user/profile", h.Profile)
 	r.GET("/user/orders", h.Orders)
 	r.POST("/user/orders", h.CreateOrder)
 	r.GET("/user/orders/:id", h.OrderDetail)
+	r.POST("/user/orders/:id/pay", ph.CreatePrepay)
 	r.POST("/user/orders/:id/cancel", h.CancelOrder)
 	r.POST("/user/orders/:id/request-use", h.RequestUse)
 	r.POST("/user/orders/:id/confirm-pickup", h.ConfirmPickup)
 	r.POST("/user/orders/:id/confirm-receipt", h.ConfirmOrderReceipt)
+	r.GET("/user/payment/provider", ph.Provider)
 	r.GET("/user/deliveries", h.ListUserDeliveries)
 	r.GET("/user/deliveries/:id", h.GetUserDelivery)
 	r.POST("/user/deliveries/:id/confirm", h.ConfirmDeliveryReceipt)
@@ -209,6 +222,22 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.PATCH("/user/addresses/:id", h.PatchAddress)
 	r.DELETE("/user/addresses/:id", h.DeleteAddress)
 	r.PATCH("/user/addresses/:id/default", h.SetDefaultAddress)
+}
+
+// startGroupExpireWorker 定时关闭超时未成团拼团并模拟退款。
+func startGroupExpireWorker(orderSvc *service.OrderService) {
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			n, err := orderSvc.ExpireStaleGroupTeams(time.Now())
+			if err != nil {
+				log.Printf("拼团超时部分失败: %v (本批成功 %d)", err, n)
+			} else if n > 0 {
+				log.Printf("拼团超时已处理 %d 个团", n)
+			}
+		}
+	}()
 }
 
 func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *handler.MerchantOrderHandler, ch *handler.CouponHandler, ah *handler.AnnouncementHandler, act *handler.ActivityHandler, dz *handler.DeliveryZoneHandler) {

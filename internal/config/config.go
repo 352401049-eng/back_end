@@ -10,12 +10,22 @@ import (
 )
 
 type Config struct {
-	Port   string
-	DB     DBConfig
-	JWT    JWTConfig
-	WeChat WeChatConfig
-	Backup BackupConfig
-	Upload UploadConfig
+	Port    string
+	DB      DBConfig
+	JWT     JWTConfig
+	WeChat  WeChatConfig
+	Payment PaymentConfig
+	Backup  BackupConfig
+	Upload  UploadConfig
+}
+
+// PaymentConfig 支付渠道。Provider=mock|wechat；wechat 需另配商户参数。
+type PaymentConfig struct {
+	Provider        string
+	WeChatEnabled   bool
+	WeChatMchID     string
+	WeChatAPIKey    string
+	WeChatNotifyURL string
 }
 
 type BackupConfig struct {
@@ -67,6 +77,13 @@ func Load() (*Config, error) {
 		WeChat: WeChatConfig{
 			AppID:  getEnv("WECHAT_APPID", ""),
 			Secret: getEnv("WECHAT_SECRET", ""),
+		},
+		Payment: PaymentConfig{
+			Provider:        getEnv("PAYMENT_PROVIDER", "mock"),
+			WeChatEnabled:   getEnv("WECHAT_PAY_ENABLED", "false") == "true",
+			WeChatMchID:     getEnv("WECHAT_MCH_ID", ""),
+			WeChatAPIKey:    getEnv("WECHAT_PAY_API_KEY", ""),
+			WeChatNotifyURL: getEnv("WECHAT_PAY_NOTIFY_URL", ""),
 		},
 		Backup: loadBackupConfig(),
 	}

@@ -252,11 +252,13 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			DiscountAmount:      discountAmount,
 			UserCouponID:        input.UserCouponID,
 			PayAmount:           payAmount,
-			PayStatus:           model.PayStatusPaid,
-			PaidAt:              &now,
+			PayStatus:           model.PayStatusUnpaid,
 			Remark:              input.Remark,
 		}
 		if err := tx.Create(&order).Error; err != nil {
+			return err
+		}
+		if err := s.settlePaymentInTx(tx, order.ID, payAmount, now); err != nil {
 			return err
 		}
 

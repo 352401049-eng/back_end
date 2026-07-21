@@ -433,6 +433,8 @@ curl -X POST http://localhost:8080/api/auth/login \
 6. 用户待确认：`GET /user/deliveries?scope=pending_confirm`
 7. 用户确认收货：`POST /user/deliveries/{id}/confirm` 或 `POST /user/orders/{id}/confirm-receipt`
 
-### 暂未实现
+### 支付
 
-- 微信支付（当前下单后 `pay_status=1` 直接视为已支付）
+- 默认 `PAYMENT_PROVIDER=mock`：下单事务内记 `pay_status=已支付`；取消/拒单/拼团超时记已退款
+- 预留：`GET /user/payment/provider`、`POST /user/orders/{id}/pay`、`POST /payments/wechat/notify`
+- 切换 `PAYMENT_PROVIDER=wechat` 前需配置 `WECHAT_PAY_*` 并完成统一下单/回调实现；未完成前会拒绝下单结算

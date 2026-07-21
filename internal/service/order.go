@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"yujixinjiang/backend/internal/model"
+	"yujixinjiang/backend/internal/payment"
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
@@ -15,14 +16,14 @@ import (
 )
 
 var (
-	ErrOrderNotFound      = errors.New("order not found")
-	ErrOrderForbidden     = errors.New("order forbidden")
-	ErrOrderStatusInvalid = errors.New("order status invalid")
-	ErrInsufficientStock  = errors.New("insufficient stock")
+	ErrOrderNotFound         = errors.New("order not found")
+	ErrOrderForbidden        = errors.New("order forbidden")
+	ErrOrderStatusInvalid    = errors.New("order status invalid")
+	ErrInsufficientStock     = errors.New("insufficient stock")
 	ErrGroupBuyInvalid       = errors.New("group buy invalid")
 	ErrGroupBuyAlreadyJoined = errors.New("group buy already joined")
-	ErrAddressRequired    = errors.New("address required")
-	ErrInvalidDeliveryType = errors.New("invalid delivery type")
+	ErrAddressRequired       = errors.New("address required")
+	ErrInvalidDeliveryType   = errors.New("invalid delivery type")
 )
 
 type OrderService struct {
@@ -31,6 +32,7 @@ type OrderService struct {
 	CouponSvc    *CouponService
 	ActivitySvc  *ActivityService
 	ZoneSvc      *DeliveryZoneService
+	Payment      payment.Provider
 }
 
 type CreateOrderInput struct {
@@ -195,6 +197,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		}
 		discountAmount = d
 	}
+	subtotal = roundMoney(subtotal)
 	payAmount := roundMoney(subtotal - discountAmount)
 
 	now := time.Now()
@@ -260,11 +263,13 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			DiscountAmount:      discountAmount,
 			UserCouponID:        input.UserCouponID,
 			PayAmount:           payAmount,
-			PayStatus:           model.PayStatusPaid, // 暂无支付，直接视为已支付
-			PaidAt:              &now,
+			PayStatus:           model.PayStatusUnpaid,
 			Remark:              input.Remark,
 		}
 		if err := tx.Create(&order).Error; err != nil {
+			return err
+		}
+		if err := s.settlePaymentInTx(tx, order.ID, payAmount, now); err != nil {
 			return err
 		}
 
@@ -286,7 +291,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			OrderID: order.ID, ProductID: product.ID,
 			ActivityID: activityID, ActivityProductID: activityProductID,
 			PurchaseType: input.PurchaseType,
-			GroupBuyID: groupBuyID, ProductName: product.Name, ProductImage: &product.CoverURL,
+			GroupBuyID:   groupBuyID, ProductName: product.Name, ProductImage: &product.CoverURL,
 			Spec: spec, UnitPrice: unitPrice, Quantity: input.Quantity, Subtotal: subtotal,
 		}
 
@@ -559,6 +564,14 @@ func (s *OrderService) Cancel(accountID, orderID uint64) error {
 		return fmt.Errorf("%w: 请取消套餐父订单", ErrOrderStatusInvalid)
 	}
 	return s.DB.Transaction(func(tx *gorm.DB) error {
+		// 成团成功后禁止用户取消（只能商家拒单），避免团状态被打回
+		okGroup, err := orderHasSuccessfulGroup(tx, orderID)
+		if err != nil {
+			return err
+		}
+		if okGroup {
+			return fmt.Errorf("%w: 已成团订单不可取消，请联系商家", ErrOrderStatusInvalid)
+		}
 		if err := rollbackGroupTeamForOrder(tx, orderID); err != nil {
 			return err
 		}
@@ -583,6 +596,9 @@ func (s *OrderService) Cancel(accountID, orderID uint64) error {
 			if err := s.ActivitySvc.RollbackSoldInTx(tx, orderID); err != nil {
 				return err
 			}
+		}
+		if err := s.refundPaymentInTx(tx, orderID); err != nil {
+			return err
 		}
 		return tx.Model(order).Update("status", model.OrderStatusCancelled).Error
 	})
@@ -807,6 +823,9 @@ func (s *OrderService) MerchantReview(merchantID, orderID uint64, approve bool, 
 				if err := s.ActivitySvc.RollbackSoldInTx(tx, orderID); err != nil {
 					return err
 				}
+			}
+			if err := s.refundPaymentInTx(tx, orderID); err != nil {
+				return err
 			}
 			return tx.Model(order).Updates(map[string]interface{}{
 				"merchant_review_stage": model.MerchantReviewRejected,
@@ -1273,12 +1292,7 @@ func rollbackGroupTeamForOrder(tx *gorm.DB, orderID uint64) error {
 	if err := query.NotDeleted(tx).First(&team, teamID).Error; err != nil {
 		return err
 	}
-	if team.Status == model.GroupBuyTeamSuccess && team.CurrentCount < team.TargetCount {
-		return tx.Model(&team).Updates(map[string]interface{}{
-			"status":     model.GroupBuyTeamPending,
-			"success_at": nil,
-		}).Error
-	}
+	// 成团成功后不再因个人取消把团打回 Pending（用户取消已在 Cancel 拦截）
 	return nil
 }
 

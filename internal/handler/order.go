@@ -6,6 +6,7 @@ import (
 
 	"yujixinjiang/backend/internal/auth"
 	"yujixinjiang/backend/internal/model"
+	"yujixinjiang/backend/internal/payment"
 	"yujixinjiang/backend/internal/query"
 	"yujixinjiang/backend/internal/response"
 	"yujixinjiang/backend/internal/service"
@@ -14,34 +15,34 @@ import (
 )
 
 type CreateOrderRequest struct {
-	ProductID         uint64  `json:"product_id" example:"1"`
-	MerchantID        uint64  `json:"merchant_id"`
-	Quantity          uint32  `json:"quantity" example:"1"`
-	PurchaseType      uint8   `json:"purchase_type" example:"1"`
-	GroupBuyID        *uint64 `json:"group_buy_id"`
-	GroupBuyTeamID    *uint64 `json:"group_buy_team_id"`
-	ActivityProductID *uint64 `json:"activity_product_id" example:"1"`
-	DeliveryType      uint8   `json:"delivery_type" example:"1"`
-	AddressID         *uint64 `json:"address_id"`
-	DeliveryLatitude  *float64 `json:"delivery_latitude"`
-	DeliveryLongitude *float64 `json:"delivery_longitude"`
-	Remark            *string `json:"remark"`
-	CartItemID        *uint64 `json:"cart_item_id"`
-	UserCouponID      *uint64 `json:"user_coupon_id" example:"1"`
+	ProductID         uint64                          `json:"product_id" example:"1"`
+	MerchantID        uint64                          `json:"merchant_id"`
+	Quantity          uint32                          `json:"quantity" example:"1"`
+	PurchaseType      uint8                           `json:"purchase_type" example:"1"`
+	GroupBuyID        *uint64                         `json:"group_buy_id"`
+	GroupBuyTeamID    *uint64                         `json:"group_buy_team_id"`
+	ActivityProductID *uint64                         `json:"activity_product_id" example:"1"`
+	DeliveryType      uint8                           `json:"delivery_type" example:"1"`
+	AddressID         *uint64                         `json:"address_id"`
+	DeliveryLatitude  *float64                        `json:"delivery_latitude"`
+	DeliveryLongitude *float64                        `json:"delivery_longitude"`
+	Remark            *string                         `json:"remark"`
+	CartItemID        *uint64                         `json:"cart_item_id"`
+	UserCouponID      *uint64                         `json:"user_coupon_id" example:"1"`
 	PackageSelections []service.PackageSelectionInput `json:"package_selections"`
 }
 
 type RequestUseRequest struct {
-	DeliveryType      uint8   `json:"delivery_type" binding:"required"`
-	AddressID         *uint64 `json:"address_id"`
+	DeliveryType      uint8    `json:"delivery_type" binding:"required"`
+	AddressID         *uint64  `json:"address_id"`
 	DeliveryLatitude  *float64 `json:"delivery_latitude"`
 	DeliveryLongitude *float64 `json:"delivery_longitude"`
-	Remark            *string `json:"remark"`
+	Remark            *string  `json:"remark"`
 }
 
 // CreateOrder godoc
 // @Summary      创建订单
-// @Description  暂无支付流程，创建后 pay_status=已支付。可选 user_coupon_id 使用优惠券
+// @Description  默认 Mock 支付：下单事务内记已付。可选 user_coupon_id。微信支付见 POST /user/orders/{id}/pay
 // @Tags         用户-订单
 // @Accept       json
 // @Produce      json
@@ -79,9 +80,9 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 		view, err = h.OrderSvc.CreatePackage(accountID, service.CreatePackageOrderInput{
 			ProductID: req.ProductID, MerchantID: req.MerchantID,
 			PackageSelections: req.PackageSelections,
-			PurchaseType: req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
+			PurchaseType:      req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
 			ActivityProductID: req.ActivityProductID,
-			DeliveryType: req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
+			DeliveryType:      req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
 			DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
 			UserCouponID: req.UserCouponID,
 		})
@@ -94,7 +95,7 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 			ProductID: req.ProductID, MerchantID: req.MerchantID, Quantity: req.Quantity,
 			PurchaseType: req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
 			ActivityProductID: req.ActivityProductID,
-			DeliveryType: req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
+			DeliveryType:      req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
 			DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
 			CartItemID: req.CartItemID, UserCouponID: req.UserCouponID,
 		})
@@ -289,6 +290,8 @@ func handleOrderError(c *gin.Context, err error) {
 		response.BadRequest(c, "优惠券不满足使用条件")
 	case errors.Is(err, service.ErrCouponUnavailable):
 		response.BadRequest(c, "优惠券已失效")
+	case errors.Is(err, payment.ErrNotConfigured):
+		response.Fail(c, 503, 503, "支付未配置，请使用模拟支付")
 	default:
 		response.InternalError(c, "操作失败")
 	}

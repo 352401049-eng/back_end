@@ -14,13 +14,13 @@ import (
 )
 
 var (
-	ErrActivityNotFound           = errors.New("activity not found")
-	ErrActivityForbidden          = errors.New("activity forbidden")
-	ErrActivityNotActive          = errors.New("activity not active")
-	ErrActivityProductNotFound    = errors.New("activity product not found")
-	ErrActivityProductDuplicate   = errors.New("activity product duplicate")
-	ErrActivityLimitExceeded      = errors.New("activity purchase limit exceeded")
-	ErrActivityRegisterWindow     = errors.New("not in register purchase window")
+	ErrActivityNotFound         = errors.New("activity not found")
+	ErrActivityForbidden        = errors.New("activity forbidden")
+	ErrActivityNotActive        = errors.New("activity not active")
+	ErrActivityProductNotFound  = errors.New("activity product not found")
+	ErrActivityProductDuplicate = errors.New("activity product duplicate")
+	ErrActivityLimitExceeded    = errors.New("activity purchase limit exceeded")
+	ErrActivityRegisterWindow   = errors.New("not in register purchase window")
 )
 
 type ActivityService struct {
@@ -109,7 +109,7 @@ type ActivityPublicDetailView struct {
 
 type ActivityProductItemView struct {
 	model.ActivityProduct
-	ProductName string `json:"product_name,omitempty"`
+	ProductName  string `json:"product_name,omitempty"`
 	ProductCover string `json:"product_cover,omitempty"`
 	CanGroupBuy  bool   `json:"can_group_buy"`
 	CanUseCoupon bool   `json:"can_use_coupon"`
@@ -263,7 +263,7 @@ func (s *ActivityService) Update(id uint64, input ActivityInput, merchantID *uin
 	updates := map[string]interface{}{
 		"name": input.Name, "description": input.Description, "cover_url": input.CoverURL,
 		"banner_images": toJSONColumn(input.BannerImages),
-		"start_at": input.StartAt, "end_at": input.EndAt, "status": input.Status,
+		"start_at":      input.StartAt, "end_at": input.EndAt, "status": input.Status,
 		"enable_coupon": normalizeEnableCoupon(input.EnableCoupon), "sort_order": input.SortOrder,
 	}
 	if err := s.DB.Model(act).Updates(updates).Error; err != nil {
@@ -336,11 +336,11 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 		DailyMax: input.DailyMax, WeeklyMax: input.WeeklyMax, MonthlyMax: input.MonthlyMax,
 		ActivityMax: input.ActivityMax, RegisterHours: input.RegisterHours, RegisterMax: input.RegisterMax,
 		EnableGroupBuy: input.EnableGroupBuy, GroupBuyPrice: input.GroupBuyPrice,
-		GroupBuyTargetCount: input.GroupBuyTargetCount,
-		GroupBuyAllowRepeat: input.GroupBuyAllowRepeat,
+		GroupBuyTargetCount:     input.GroupBuyTargetCount,
+		GroupBuyAllowRepeat:     input.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: maxJoins,
-		EnableCoupon: normalizeEnableCoupon(input.EnableCoupon),
-		SortOrder: input.SortOrder, Status: status,
+		EnableCoupon:            normalizeEnableCoupon(input.EnableCoupon),
+		SortOrder:               input.SortOrder, Status: status,
 	}
 	if err := s.DB.Create(&ap).Error; err != nil {
 		if isMySQLDuplicateKey(err) {
@@ -398,11 +398,11 @@ func activityProductUpdates(input ActivityProductInput, maxJoins uint32, status 
 		"daily_max": input.DailyMax, "weekly_max": input.WeeklyMax, "monthly_max": input.MonthlyMax,
 		"activity_max": input.ActivityMax, "register_hours": input.RegisterHours, "register_max": input.RegisterMax,
 		"enable_group_buy": input.EnableGroupBuy, "group_buy_price": input.GroupBuyPrice,
-		"group_buy_target_count": input.GroupBuyTargetCount,
-		"group_buy_allow_repeat": input.GroupBuyAllowRepeat,
+		"group_buy_target_count":       input.GroupBuyTargetCount,
+		"group_buy_allow_repeat":       input.GroupBuyAllowRepeat,
 		"group_buy_max_joins_per_user": maxJoins,
-		"enable_coupon": normalizeEnableCoupon(input.EnableCoupon),
-		"sort_order": input.SortOrder, "status": status,
+		"enable_coupon":                normalizeEnableCoupon(input.EnableCoupon),
+		"sort_order":                   input.SortOrder, "status": status,
 	}
 }
 
@@ -1069,13 +1069,17 @@ func (s *ActivityService) RollbackSoldInTx(tx *gorm.DB, orderID uint64) error {
 		return err
 	}
 	for _, it := range items {
-		if it.ActivityProductID == nil {
+		if it.ActivityProductID == nil || it.Quantity == 0 {
 			continue
 		}
-		if err := tx.Model(&model.ActivityProduct{}).
+		res := tx.Model(&model.ActivityProduct{}).
 			Where("id = ? AND sold_count >= ?", *it.ActivityProductID, it.Quantity).
-			Update("sold_count", gorm.Expr("sold_count - ?", it.Quantity)).Error; err != nil {
-			return err
+			Update("sold_count", gorm.Expr("sold_count - ?", it.Quantity))
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("activity sold_count rollback failed for activity_product %d", *it.ActivityProductID)
 		}
 	}
 	return nil

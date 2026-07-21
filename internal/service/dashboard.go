@@ -17,7 +17,10 @@ type DashboardService struct {
 }
 
 // invalidOrderStatusInts 勿用 []uint8 绑定 IN/NOT IN，GORM 会当成 binary。
+// 销售额口径：排除未成团/待支付及终态失败单（Mock 下拼团单虽已付，未成团不计入）。
 var invalidOrderStatusInts = []int{
+	int(model.OrderStatusPendingPay),
+	int(model.OrderStatusPendingGroup),
 	int(model.OrderStatusCancelled),
 	int(model.OrderStatusGroupFailed),
 	int(model.OrderStatusRefunding),
