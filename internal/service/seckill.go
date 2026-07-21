@@ -263,5 +263,15 @@ func (s *ActivityService) seckillLimitStatus(accountID uint64, ap *model.Activit
 			return true, lim.reason, nil
 		}
 	}
+
+	if ap.PerUserMaxQty > 0 {
+		bought, err := sumBoughtQty(s.DB, accountID, ap.ID)
+		if err != nil {
+			return false, "", err
+		}
+		if bought >= ap.PerUserMaxQty {
+			return true, "per_user_qty", nil
+		}
+	}
 	return false, "", nil
 }

@@ -647,7 +647,11 @@ func (h *ActivityHandler) GetPublicProduct(c *gin.Context) {
 		response.BadRequest(c, "活动商品 ID 无效")
 		return
 	}
-	view, err := h.ActivitySvc.GetStoreProduct(activityID, apID)
+	var accountID *uint64
+	if id, ok := auth.AccountID(c); ok {
+		accountID = &id
+	}
+	view, err := h.ActivitySvc.GetStoreProductForUser(activityID, apID, accountID)
 	if err != nil {
 		handleActivityError(c, err)
 		return

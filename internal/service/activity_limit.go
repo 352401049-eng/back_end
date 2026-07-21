@@ -61,3 +61,15 @@ func countOrders(db *gorm.DB, accountID, activityProductID uint64, start, end ti
 	}
 	return n, nil
 }
+
+// sumBoughtQty 统计账号对该活动商品的已购件数（非取消订单），口径与 checkUserLimits 一致。
+func sumBoughtQty(db *gorm.DB, accountID, activityProductID uint64) (uint32, error) {
+	var bought uint32
+	err := db.Table("order_item oi").
+		Select("COALESCE(SUM(oi.quantity), 0)").
+		Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
+		Where("o.account_id = ? AND oi.activity_product_id = ? AND oi.is_deleted = ?", accountID, activityProductID, model.NotDeleted).
+		Where("o.status <> ?", model.OrderStatusCancelled).
+		Scan(&bought).Error
+	return bought, err
+}

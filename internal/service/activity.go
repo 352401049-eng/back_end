@@ -125,6 +125,10 @@ type ActivityProductStoreView struct {
 	CanGroupBuy    bool               `json:"can_group_buy"`
 	CanUseCoupon   bool               `json:"can_use_coupon"`
 	SaleOptions    ProductSaleOptions `json:"sale_options"`
+	LimitLabels    []string           `json:"limit_labels"`
+	LimitReached   bool               `json:"limit_reached"`
+	LimitReason    string             `json:"limit_reason,omitempty"`
+	RemainingQty   uint32             `json:"remaining_qty"`
 }
 
 type ActivityOrderContext struct {
@@ -805,6 +809,11 @@ func (s *ActivityService) ListStoreProducts(activityID uint64, groupBuyOnly bool
 }
 
 func (s *ActivityService) GetStoreProduct(activityID, activityProductID uint64) (*ActivityProductStoreView, error) {
+	return s.GetStoreProductForUser(activityID, activityProductID, nil)
+}
+
+// GetStoreProductForUser 活动商品详情；accountID 非空时按个人已购计算 remaining_qty / limit_reached。
+func (s *ActivityService) GetStoreProductForUser(activityID, activityProductID uint64, accountID *uint64) (*ActivityProductStoreView, error) {
 	act, err := s.GetByID(activityID, nil)
 	if err != nil {
 		return nil, err
@@ -823,6 +832,9 @@ func (s *ActivityService) GetStoreProduct(activityID, activityProductID uint64) 
 		return nil, ErrActivityProductNotFound
 	}
 	view := buildActivityProductStoreView(act, ap, ap.Product)
+	if err := s.enrichActivityProductLimits(&view, ap, accountID); err != nil {
+		return nil, err
+	}
 	return &view, nil
 }
 
@@ -867,7 +879,60 @@ func buildActivityProductStoreView(act *model.Activity, ap *model.ActivityProduc
 			Solo:  solo,
 			Group: group,
 		},
+		LimitLabels:  buildSeckillLimitLabels(ap),
+		RemainingQty: avail,
 	}
+}
+
+// enrichActivityProductLimits 写入限购标签与本单剩余可买件数。
+func (s *ActivityService) enrichActivityProductLimits(view *ActivityProductStoreView, ap *model.ActivityProduct, accountID *uint64) error {
+	view.LimitLabels = buildSeckillLimitLabels(ap)
+	view.RemainingQty = view.AvailableStock
+	view.LimitReached = false
+	view.LimitReason = ""
+
+	if accountID == nil || *accountID == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	var account model.Account
+	if err := query.NotDeleted(s.DB).Select("id", "created_at").First(&account, *accountID).Error; err != nil {
+		// 账号异常时降级为未登录额度，避免详情 500
+		return nil
+	}
+
+	reached, reason, err := s.seckillLimitStatus(*accountID, ap, account.CreatedAt, now)
+	if err != nil {
+		return err
+	}
+	if reached {
+		view.LimitReached = true
+		view.LimitReason = reason
+		view.RemainingQty = 0
+		return nil
+	}
+
+	if ap.PerUserMaxQty > 0 {
+		bought, err := sumBoughtQty(s.DB, *accountID, ap.ID)
+		if err != nil {
+			return err
+		}
+		var qtyLeft uint32
+		if bought < ap.PerUserMaxQty {
+			qtyLeft = ap.PerUserMaxQty - bought
+		}
+		if qtyLeft == 0 {
+			view.LimitReached = true
+			view.LimitReason = "per_user_qty"
+			view.RemainingQty = 0
+			return nil
+		}
+		if qtyLeft < view.RemainingQty {
+			view.RemainingQty = qtyLeft
+		}
+	}
+	return nil
 }
 
 func availableActivityStock(ap *model.ActivityProduct, product *model.Product) uint32 {
@@ -968,13 +1033,7 @@ func (s *ActivityService) checkUserLimits(db *gorm.DB, accountID uint64, ap *mod
 		db = s.DB
 	}
 	if ap.PerUserMaxQty > 0 {
-		var bought uint32
-		err := db.Table("order_item oi").
-			Select("COALESCE(SUM(oi.quantity), 0)").
-			Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
-			Where("o.account_id = ? AND oi.activity_product_id = ? AND oi.is_deleted = ?", accountID, ap.ID, model.NotDeleted).
-			Where("o.status <> ?", model.OrderStatusCancelled).
-			Scan(&bought).Error
+		bought, err := sumBoughtQty(db, accountID, ap.ID)
 		if err != nil {
 			return err
 		}
