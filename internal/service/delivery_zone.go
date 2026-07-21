@@ -133,34 +133,47 @@ func normalizeSpots(spots []model.DeliverySpot) []model.DeliverySpot {
 }
 
 func validateZonePayload(enabled uint8, mode string, points []model.GeoPoint, spots []model.DeliverySpot) error {
-	mode = model.NormalizeDeliveryZoneMode(mode)
-	if mode == model.DeliveryZoneModeSpots {
-		if enabled == model.DeliveryZoneEnabled {
-			return geo.ValidateDeliverySpots(spots)
+	_ = model.NormalizeDeliveryZoneMode(mode)
+	hasSpots := len(spots) > 0
+	hasPoints := len(points) > 0
+	if hasSpots {
+		if err := geo.ValidateDeliverySpots(spots); err != nil {
+			return err
 		}
-		if len(spots) > 0 {
-			return geo.ValidateDeliverySpots(spots)
+	}
+	if hasPoints {
+		if err := geo.ValidatePolygonPoints(points); err != nil {
+			return err
 		}
-		return nil
 	}
-	if enabled == model.DeliveryZoneEnabled {
-		return geo.ValidatePolygonPoints(points)
-	}
-	if len(points) > 0 {
-		return geo.ValidatePolygonPoints(points)
+	if enabled == model.DeliveryZoneEnabled && !hasSpots && !hasPoints {
+		return fmt.Errorf("请至少添加配送点或自定义区域")
 	}
 	return nil
+}
+
+func zoneHasSpots(zone *model.MerchantDeliveryZone) bool {
+	return zone != nil && len(zone.Spots) >= 1
+}
+
+func zoneHasPolygon(zone *model.MerchantDeliveryZone) bool {
+	return zone != nil && len(zone.Points) >= 3
 }
 
 func zoneIsActivelyRestricting(zone *model.MerchantDeliveryZone) bool {
 	if zone == nil || zone.Enabled != model.DeliveryZoneEnabled {
 		return false
 	}
-	mode := model.NormalizeDeliveryZoneMode(zone.Mode)
-	if mode == model.DeliveryZoneModeSpots {
-		return len(zone.Spots) >= 1
+	return zoneHasSpots(zone) || zoneHasPolygon(zone)
+}
+
+func pointInDeliveryZone(lat, lng float64, zone *model.MerchantDeliveryZone) bool {
+	if zone == nil {
+		return false
 	}
-	return len(zone.Points) >= 3
+	inSpot := zoneHasSpots(zone) && geo.PointInAnySpot(lat, lng, zone.Spots)
+	inPoly := zoneHasPolygon(zone) && geo.PointInPolygon(lat, lng, zone.Points)
+	return inSpot || inPoly
 }
 
 func (s *DeliveryZoneService) Upsert(merchantID uint64, input UpsertDeliveryZoneInput) (*DeliveryZoneView, error) {
@@ -327,14 +340,10 @@ func (s *DeliveryZoneService) CheckPoint(merchantID uint64, lat, lng float64) (*
 	if !zoneIsActivelyRestricting(zone) {
 		return &DeliveryZoneCheckResult{InZone: true, ZoneEnabled: false}, nil
 	}
-	mode := model.NormalizeDeliveryZoneMode(zone.Mode)
-	var in bool
-	if mode == model.DeliveryZoneModeSpots {
-		in = geo.PointInAnySpot(lat, lng, zone.Spots)
-	} else {
-		in = geo.PointInPolygon(lat, lng, zone.Points)
-	}
-	return &DeliveryZoneCheckResult{InZone: in, ZoneEnabled: true}, nil
+	return &DeliveryZoneCheckResult{
+		InZone:      pointInDeliveryZone(lat, lng, zone),
+		ZoneEnabled: true,
+	}, nil
 }
 
 // ValidateDeliveryPoint 配送单校验坐标是否在商家配送范围内。
@@ -358,14 +367,7 @@ func (s *DeliveryZoneService) ValidateDeliveryPoint(merchantID uint64, deliveryT
 	if err := geo.ValidateCoordinate(*lat, *lng); err != nil {
 		return fmt.Errorf("%w: %s", ErrDeliveryZoneInvalid, err.Error())
 	}
-	mode := model.NormalizeDeliveryZoneMode(zone.Mode)
-	ok := false
-	if mode == model.DeliveryZoneModeSpots {
-		ok = geo.PointInAnySpot(*lat, *lng, zone.Spots)
-	} else {
-		ok = geo.PointInPolygon(*lat, *lng, zone.Points)
-	}
-	if !ok {
+	if !pointInDeliveryZone(*lat, *lng, zone) {
 		return ErrDeliveryOutOfRange
 	}
 	return nil
