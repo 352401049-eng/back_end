@@ -56,7 +56,7 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 	}
 	var req CreateOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数无效")
+		response.BadRequest(c, "参数无效: "+err.Error())
 		return
 	}
 	if req.ActivityProductID == nil && req.ProductID == 0 {
