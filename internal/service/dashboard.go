@@ -35,6 +35,7 @@ type ProductSalesRank struct {
 	ProductID   uint64 `json:"product_id"`
 	ProductName string `json:"product_name"`
 	MerchantID  uint64 `json:"merchant_id,omitempty"`
+	CoverURL    string `json:"cover_url,omitempty"`
 	SalesCount  uint32 `json:"sales_count"`
 }
 
@@ -313,10 +314,11 @@ func (s *DashboardService) topProducts(merchantID *uint64, limit int) ([]Product
 		ProductID   uint64
 		ProductName string
 		MerchantID  uint64
+		CoverURL    string
 		SalesCount  uint32
 	}
 	q := s.freshDB().Model(&model.OrderItem{}).
-		Select("order_item.product_id, product.name AS product_name, product.merchant_id, SUM(order_item.quantity) AS sales_count").
+		Select("order_item.product_id, product.name AS product_name, product.merchant_id, product.cover_url, SUM(order_item.quantity) AS sales_count").
 		Joins("JOIN `order` ON `order`.id = order_item.order_id AND `order`.is_deleted = 0").
 		Joins("JOIN product ON product.id = order_item.product_id AND product.is_deleted = 0").
 		Where("order_item.is_deleted = 0").
@@ -327,7 +329,7 @@ func (s *DashboardService) topProducts(merchantID *uint64, limit int) ([]Product
 		q = q.Where("product.merchant_id = ?", *merchantID)
 	}
 	var rows []row
-	if err := q.Group("order_item.product_id, product.name, product.merchant_id").
+	if err := q.Group("order_item.product_id, product.name, product.merchant_id, product.cover_url").
 		Order("sales_count DESC").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -335,7 +337,7 @@ func (s *DashboardService) topProducts(merchantID *uint64, limit int) ([]Product
 	for _, r := range rows {
 		out = append(out, ProductSalesRank{
 			ProductID: r.ProductID, ProductName: r.ProductName,
-			MerchantID: r.MerchantID, SalesCount: r.SalesCount,
+			MerchantID: r.MerchantID, CoverURL: r.CoverURL, SalesCount: r.SalesCount,
 		})
 	}
 	return out, nil
