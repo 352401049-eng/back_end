@@ -270,29 +270,40 @@ func (s *DashboardService) orderTrend(merchantID *uint64, days int) ([]DailyStat
 		days = 7
 	}
 	now := time.Now()
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -(days - 1))
+	loc := now.Location()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
 
 	type row struct {
 		Day         string
 		OrderCount  int64
 		SalesAmount float64
 	}
+	// 用 DATE_FORMAT 直接产出 YYYY-MM-DD 字符串，避免 parseTime 下 DATE() 扫成带时区的时间串导致按日对齐失败。
+	dayExpr := "DATE_FORMAT(COALESCE(paid_at, created_at), '%Y-%m-%d')"
 	q := query.NotDeleted(s.freshDB().Model(&model.Order{})).
 		Where("pay_status = ?", model.PayStatusPaid).
 		Where("status NOT IN ?", invalidOrderStatusInts).
 		Where("merchant_review_stage != ?", model.MerchantReviewRejected).
-		Select("DATE(COALESCE(paid_at, created_at)) AS day, COUNT(*) AS order_count, COALESCE(SUM(pay_amount), 0) AS sales_amount").
+		Select(dayExpr+" AS day, COUNT(*) AS order_count, COALESCE(SUM(pay_amount), 0) AS sales_amount").
 		Where("COALESCE(paid_at, created_at) >= ?", start)
 	if merchantID != nil {
 		q = q.Where("merchant_id = ?", *merchantID)
 	}
 	var rows []row
-	if err := q.Group("DATE(COALESCE(paid_at, created_at))").Order("day ASC").Scan(&rows).Error; err != nil {
+	if err := q.Group(dayExpr).Order("day ASC").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	byDay := make(map[string]DailyStat, len(rows))
 	for _, r := range rows {
-		byDay[r.Day] = DailyStat{Date: r.Day, OrderCount: r.OrderCount, SalesAmount: r.SalesAmount}
+		day := normalizeTrendDay(r.Day)
+		if day == "" {
+			continue
+		}
+		byDay[day] = DailyStat{
+			Date:        day,
+			OrderCount:  r.OrderCount,
+			SalesAmount: roundMoney(r.SalesAmount),
+		}
 	}
 	out := make([]DailyStat, 0, days)
 	for i := 0; i < days; i++ {
@@ -304,6 +315,24 @@ func (s *DashboardService) orderTrend(merchantID *uint64, days int) ([]DailyStat
 		}
 	}
 	return out, nil
+}
+
+// normalizeTrendDay 统一为 YYYY-MM-DD，兼容驱动偶发返回带时间的 day 字段。
+func normalizeTrendDay(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
+		return s[:10]
+	}
+	if t, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
+		return t.Format("2006-01-02")
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.In(time.Local).Format("2006-01-02")
+	}
+	return ""
 }
 
 func (s *DashboardService) topProducts(merchantID *uint64, limit int) ([]ProductSalesRank, error) {
