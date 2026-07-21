@@ -360,6 +360,43 @@ func (s *ProductService) UpdateStatus(id uint64, status uint8, scopeMerchantID *
 	return s.GetByID(id, scopeMerchantID)
 }
 
+// Delete 逻辑删除商品；套餐同时软删其分组与候选。
+func (s *ProductService) Delete(id uint64, scopeMerchantID *uint64) error {
+	product, err := s.GetByID(id, scopeMerchantID)
+	if err != nil {
+		return err
+	}
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		if product.ItemType == model.ProductItemTypePackage {
+			var groups []model.ProductPackageGroup
+			if err := query.NotDeleted(tx).Where("package_product_id = ?", id).Find(&groups).Error; err != nil {
+				return err
+			}
+			for _, g := range groups {
+				if err := query.SoftDelete(tx, &model.ProductPackageItem{}, "group_id = ?", g.ID).Error; err != nil {
+					return err
+				}
+				if err := query.SoftDelete(tx, &g).Error; err != nil {
+					return err
+				}
+			}
+		}
+		res := tx.Model(&model.Product{}).
+			Where("id = ? AND is_deleted = ?", id, model.NotDeleted).
+			Updates(map[string]interface{}{
+				"is_deleted": model.Deleted,
+				"status":     model.ProductStatusOff,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrProductNotFound
+		}
+		return nil
+	})
+}
+
 func (s *ProductService) UpdatePrice(id uint64, price float64, originalPrice *float64, scopeMerchantID *uint64) (*model.Product, error) {
 	if price <= 0 {
 		return nil, ErrInvalidProductArg

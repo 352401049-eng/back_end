@@ -578,6 +578,31 @@ func (h *AdminHandler) patchProductUpdate(c *gin.Context, scope *uint64) {
 	response.OK(c, view)
 }
 
+// DeleteProduct godoc
+// @Summary      删除商品（逻辑删除）
+// @Tags         管理端-商品
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "商品 ID"
+// @Success      200  {object}  response.Body
+// @Router       /admin/products/{id} [delete]
+func (h *AdminHandler) DeleteProduct(c *gin.Context) {
+	h.deleteProduct(c, nil)
+}
+
+func (h *AdminHandler) deleteProduct(c *gin.Context, scope *uint64) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	if err := h.ProductSvc.Delete(id, scope); err != nil {
+		h.handleProductError(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
 // UpdateProductStatus godoc
 // @Summary      上架/下架商品
 // @Tags         管理端-商品
@@ -1095,6 +1120,23 @@ func (h *MerchantHandler) PatchProduct(c *gin.Context) {
 	}
 	admin := &AdminHandler{ProductSvc: h.ProductSvc}
 	admin.patchProductUpdate(c, scope)
+}
+
+// DeleteProduct godoc
+// @Summary      删除商品（逻辑删除）
+// @Tags         商家端-商品
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "商品 ID"
+// @Success      200  {object}  response.Body
+// @Router       /merchant/products/{id} [delete]
+func (h *MerchantHandler) DeleteProduct(c *gin.Context) {
+	scope, err := h.merchantScope(c)
+	if err != nil {
+		return
+	}
+	admin := &AdminHandler{ProductSvc: h.ProductSvc}
+	admin.deleteProduct(c, scope)
 }
 
 // UpdateProductStatus godoc
