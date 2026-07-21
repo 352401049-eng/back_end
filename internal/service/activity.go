@@ -969,8 +969,7 @@ func (s *ActivityService) checkUserLimits(db *gorm.DB, accountID uint64, ap *mod
 	}
 	if ap.PerUserMaxQty > 0 {
 		var bought uint32
-		err := query.NotDeleted(db).
-			Table("order_item oi").
+		err := db.Table("order_item oi").
 			Select("COALESCE(SUM(oi.quantity), 0)").
 			Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
 			Where("o.account_id = ? AND oi.activity_product_id = ? AND oi.is_deleted = ?", accountID, ap.ID, model.NotDeleted).

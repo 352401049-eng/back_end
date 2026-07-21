@@ -69,9 +69,11 @@ func (s *ActivityService) ListSeckillForUser(accountID *uint64) ([]SeckillProduc
 	if loggedIn {
 		var account model.Account
 		if err := query.NotDeleted(s.DB).Select("id", "created_at").First(&account, *accountID).Error; err != nil {
-			return nil, err
+			// 账号异常时降级为未登录列表，避免整页 500
+			loggedIn = false
+		} else {
+			accountCreatedAt = account.CreatedAt
 		}
-		accountCreatedAt = account.CreatedAt
 	}
 
 	out := make([]SeckillProductView, 0, len(items))

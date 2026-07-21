@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"yujixinjiang/backend/internal/model"
-	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
 )
@@ -48,8 +47,8 @@ func inRegisterWindow(createdAt, now time.Time, hours uint32) bool {
 // countOrders counts non-cancelled order_items for account+activityProduct.
 // When start/end are both non-zero, filters o.created_at ∈ [start, end).
 func countOrders(db *gorm.DB, accountID, activityProductID uint64, start, end time.Time) (int64, error) {
-	q := query.NotDeleted(db).
-		Table("order_item oi").
+	// 不用 query.NotDeleted：JOIN `order` 后裸 is_deleted 会歧义
+	q := db.Table("order_item oi").
 		Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
 		Where("o.account_id = ? AND oi.activity_product_id = ? AND oi.is_deleted = ?", accountID, activityProductID, model.NotDeleted).
 		Where("o.status <> ?", model.OrderStatusCancelled)

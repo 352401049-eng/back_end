@@ -598,6 +598,7 @@ func (h *ActivityHandler) ListSeckillProducts(c *gin.Context) {
 	}
 	list, err := h.ActivitySvc.ListSeckillForUser(accountID)
 	if err != nil {
+		c.Error(err)
 		response.InternalError(c, "获取秒杀列表失败")
 		return
 	}
