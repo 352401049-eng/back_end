@@ -236,6 +236,89 @@ func (h *AdminHandler) GetMerchant(c *gin.Context) {
 	response.OK(c, profile)
 }
 
+type bindMerchantOperatorBody struct {
+	AccountID FlexUInt64 `json:"account_id"`
+}
+
+// GetMerchantOperator godoc
+// @Summary      获取商家管理员
+// @Tags         管理端-商家
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path  int  true  "商家 ID"
+// @Success      200  {object}  response.Body{data=service.MerchantOperatorView}
+// @Router       /admin/merchants/{id}/operator [get]
+func (h *AdminHandler) GetMerchantOperator(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	view, err := h.MerchantSvc.GetOperator(id)
+	if err != nil {
+		h.handleMerchantError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+// PutMerchantOperator godoc
+// @Summary      绑定/换绑商家管理员
+// @Description  将已有用户账号接管为该店唯一商家管理员（一人一店）
+// @Tags         管理端-商家
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int                       true  "商家 ID"
+// @Param        body  body  bindMerchantOperatorBody  true  "目标账号"
+// @Success      200   {object}  response.Body{data=service.MerchantOperatorView}
+// @Router       /admin/merchants/{id}/operator [put]
+func (h *AdminHandler) PutMerchantOperator(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	var body bindMerchantOperatorBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	accountID := body.AccountID.Uint64()
+	if accountID == 0 {
+		response.BadRequest(c, "请传 account_id")
+		return
+	}
+	view, err := h.MerchantSvc.BindOperator(id, accountID)
+	if err != nil {
+		h.handleMerchantError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+// DeleteMerchantOperator godoc
+// @Summary      解除商家管理员绑定
+// @Tags         管理端-商家
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path  int  true  "商家 ID"
+// @Success      200  {object}  response.Body{data=service.MerchantOperatorView}
+// @Router       /admin/merchants/{id}/operator [delete]
+func (h *AdminHandler) DeleteMerchantOperator(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	view, err := h.MerchantSvc.UnbindOperator(id)
+	if err != nil {
+		h.handleMerchantError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
 // UpdateMerchant godoc
 // @Summary      更新商家资料（选择性）
 // @Description  只传需要修改的字段；status 请用 PATCH /merchants/{id}/status
@@ -740,6 +823,12 @@ func (h *AdminHandler) handleMerchantError(c *gin.Context, err error) {
 		response.Fail(c, 409, 409, "openid 已被使用")
 	case errors.Is(err, service.ErrMerchantNotFound):
 		response.Fail(c, 404, 404, "商家不存在")
+	case errors.Is(err, service.ErrAccountNotFound):
+		response.Fail(c, 404, 404, "用户不存在")
+	case errors.Is(err, service.ErrOperatorAlreadyBound):
+		response.Fail(c, 409, 409, "该用户已是其他店管理员")
+	case errors.Is(err, service.ErrAccountNotBindable):
+		response.BadRequest(c, err.Error())
 	case errors.Is(err, service.ErrInvalidProductArg):
 		response.BadRequest(c, "参数无效")
 	case errors.Is(err, service.ErrInvalidMerchantArg):

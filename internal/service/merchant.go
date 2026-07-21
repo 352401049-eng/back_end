@@ -12,15 +12,18 @@ import (
 )
 
 var (
-	ErrMerchantNotFound   = errors.New("merchant not found")
-	ErrPhoneExists        = errors.New("phone already exists")
-	ErrOpenIDExists       = errors.New("openid already exists")
-	ErrCategoryNotFound   = errors.New("category not found")
-	ErrCategoryForbidden  = errors.New("category forbidden")
-	ErrProductNotFound    = errors.New("product not found")
-	ErrProductForbidden   = errors.New("product forbidden")
-	ErrInvalidProductArg  = errors.New("invalid product argument")
-	ErrInvalidMerchantArg = errors.New("invalid merchant argument")
+	ErrMerchantNotFound      = errors.New("merchant not found")
+	ErrPhoneExists           = errors.New("phone already exists")
+	ErrOpenIDExists          = errors.New("openid already exists")
+	ErrCategoryNotFound      = errors.New("category not found")
+	ErrCategoryForbidden     = errors.New("category forbidden")
+	ErrProductNotFound       = errors.New("product not found")
+	ErrProductForbidden      = errors.New("product forbidden")
+	ErrInvalidProductArg     = errors.New("invalid product argument")
+	ErrInvalidMerchantArg    = errors.New("invalid merchant argument")
+	ErrAccountNotFound       = errors.New("account not found")
+	ErrAccountNotBindable    = errors.New("account not bindable")
+	ErrOperatorAlreadyBound  = errors.New("operator already bound to another shop")
 )
 
 type MerchantService struct {
@@ -314,6 +317,179 @@ func resolveShopLogo(logo *string, images []string) *string {
 		return &s
 	}
 	return nil
+}
+
+// MerchantOperatorView 商家唯一管理员摘要。
+type MerchantOperatorView struct {
+	MerchantID  uint64  `json:"merchant_id"`
+	AccountID   uint64  `json:"account_id"`
+	Nickname    string  `json:"nickname"`
+	Phone       string  `json:"phone"`
+	OpenID      string  `json:"openid"`
+	HasOpenID   bool    `json:"has_openid"`
+	CanLogin    bool    `json:"can_login"`
+	AccountType uint8   `json:"account_type"`
+}
+
+func operatorViewFrom(merchantID uint64, acc *model.Account) MerchantOperatorView {
+	v := MerchantOperatorView{MerchantID: merchantID}
+	if acc == nil {
+		return v
+	}
+	v.AccountID = acc.ID
+	v.AccountType = acc.Type
+	if acc.Nickname != nil {
+		v.Nickname = *acc.Nickname
+	}
+	if acc.Phone != nil {
+		v.Phone = *acc.Phone
+	}
+	if acc.OpenID != nil && *acc.OpenID != "" {
+		v.OpenID = *acc.OpenID
+		v.HasOpenID = true
+	}
+	v.CanLogin = v.HasOpenID && acc.Type == model.AccountTypeMerchant && acc.Status == 1
+	return v
+}
+
+func (s *MerchantService) GetOperator(merchantID uint64) (*MerchantOperatorView, error) {
+	profile, err := s.GetByID(merchantID)
+	if err != nil {
+		return nil, err
+	}
+	view := operatorViewFrom(merchantID, profile.Account)
+	return &view, nil
+}
+
+// BindOperator 将已有账号接管为该店唯一商家管理员（一人一店）。
+func (s *MerchantService) BindOperator(merchantID, accountID uint64) (*MerchantOperatorView, error) {
+	if accountID == 0 {
+		return nil, fmt.Errorf("%w: account_id 无效", ErrInvalidMerchantArg)
+	}
+
+	var view MerchantOperatorView
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var profile model.MerchantProfile
+		if err := query.NotDeleted(tx).Where("id = ?", merchantID).First(&profile).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrMerchantNotFound
+			}
+			return err
+		}
+
+		var target model.Account
+		if err := query.NotDeleted(tx).Where("id = ?", accountID).First(&target).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrAccountNotFound
+			}
+			return err
+		}
+		if target.Status != 1 {
+			return fmt.Errorf("%w: 账号已停用", ErrAccountNotBindable)
+		}
+		if target.Type == model.AccountTypeAdmin {
+			return fmt.Errorf("%w: 不能将平台管理员设为商家管理员", ErrAccountNotBindable)
+		}
+
+		var other model.MerchantProfile
+		err := query.NotDeleted(tx).
+			Where("account_id = ? AND id <> ?", accountID, merchantID).
+			First(&other).Error
+		if err == nil {
+			return ErrOperatorAlreadyBound
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		oldAccountID := profile.AccountID
+		if oldAccountID == accountID {
+			if target.Type != model.AccountTypeMerchant {
+				if err := tx.Model(&target).Update("type", model.AccountTypeMerchant).Error; err != nil {
+					return err
+				}
+				target.Type = model.AccountTypeMerchant
+			}
+			view = operatorViewFrom(merchantID, &target)
+			return nil
+		}
+
+		if err := tx.Model(&profile).Update("account_id", accountID).Error; err != nil {
+			return fmt.Errorf("更新商家绑定失败: %w", err)
+		}
+		if err := tx.Model(&target).Update("type", model.AccountTypeMerchant).Error; err != nil {
+			return fmt.Errorf("更新账号类型失败: %w", err)
+		}
+		target.Type = model.AccountTypeMerchant
+
+		if oldAccountID > 0 {
+			if err := s.releaseOperatorAccount(tx, oldAccountID); err != nil {
+				return err
+			}
+		}
+
+		view = operatorViewFrom(merchantID, &target)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &view, nil
+}
+
+// UnbindOperator 解除店主绑定：新建空商家账号挂上，原管理员改回用户。
+func (s *MerchantService) UnbindOperator(merchantID uint64) (*MerchantOperatorView, error) {
+	var view MerchantOperatorView
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var profile model.MerchantProfile
+		if err := query.NotDeleted(tx).Where("id = ?", merchantID).First(&profile).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrMerchantNotFound
+			}
+			return err
+		}
+
+		oldAccountID := profile.AccountID
+		nick := profile.ShopName
+		placeholder := model.Account{
+			Type:     model.AccountTypeMerchant,
+			Nickname: &nick,
+			Status:   1,
+		}
+		if err := tx.Create(&placeholder).Error; err != nil {
+			return fmt.Errorf("创建占位商家账号失败: %w", err)
+		}
+		if err := tx.Model(&profile).Update("account_id", placeholder.ID).Error; err != nil {
+			return fmt.Errorf("更新商家绑定失败: %w", err)
+		}
+		if oldAccountID > 0 && oldAccountID != placeholder.ID {
+			if err := s.releaseOperatorAccount(tx, oldAccountID); err != nil {
+				return err
+			}
+		}
+		view = operatorViewFrom(merchantID, &placeholder)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &view, nil
+}
+
+// releaseOperatorAccount 原管理员：有微信身份则改回用户，否则软删占位号。
+func (s *MerchantService) releaseOperatorAccount(tx *gorm.DB, accountID uint64) error {
+	var acc model.Account
+	if err := query.NotDeleted(tx).Where("id = ?", accountID).First(&acc).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	hasIdentity := (acc.OpenID != nil && *acc.OpenID != "") || (acc.Phone != nil && *acc.Phone != "")
+	if hasIdentity {
+		return tx.Model(&acc).Update("type", model.AccountTypeUser).Error
+	}
+	return query.SoftDelete(tx, &acc).Error
 }
 
 // GetOpenByID 获取营业中的商家（用户端）。
