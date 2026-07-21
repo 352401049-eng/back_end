@@ -67,62 +67,171 @@ func (s *RankService) freshDB() *gorm.DB {
 	return s.DB.Session(&gorm.Session{NewDB: true})
 }
 
-// ListHotGroups 进行中的拼团，按「还差人数」升序、已拼人数降序。
+type hotGroupRow struct {
+	TeamID        uint64
+	GroupBuyID    uint64
+	ProductID     uint64
+	MerchantID    uint64
+	ProductName   string
+	ProductCover  string
+	GroupPrice    float64
+	ProductPrice  float64
+	OriginalPrice *float64
+	TargetCount   uint32
+	CurrentCount  uint32
+	ExpireAt      time.Time
+}
+
+// ListHotGroups 进行中的拼团。
+// 以「待成团」订单为事实来源，人数按去重账号统计，与用户端待成团列表对齐。
 func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 	if limit < 1 {
 		limit = rankListLimit
 	}
-	now := time.Now()
 
-	type row struct {
-		TeamID        uint64
-		GroupBuyID    uint64
-		ProductID     uint64
-		MerchantID    uint64
-		ProductName   string
-		ProductCover  string
-		GroupPrice    float64
-		ProductPrice  float64
-		OriginalPrice *float64
-		TargetCount   uint32
-		CurrentCount  uint32
-		ExpireAt      time.Time
+	type rawRow struct {
+		TeamID       uint64
+		GroupBuyID   uint64
+		ProductID    uint64
+		MerchantID   uint64
+		ProductName  string
+		ProductCover string
+		UnitPrice    float64
+		ProductPrice float64
+		OrigPrice    *float64
+		GroupPrice   *float64
+		TargetCount  *uint32
+		ProdTarget   *uint32
+		AccountID    uint64
+		ExpireAt     *time.Time
+		CreatedAt    time.Time
 	}
 
-	var rows []row
-	// 不要求 gb.status=1：团已开出后即使商品拼团配置被关掉，未成团仍应出现在热拼榜
-	err := s.freshDB().Table("group_buy_team AS t").
-		Select(`t.id AS team_id, t.group_buy_id, gb.product_id, p.merchant_id,
-			p.name AS product_name, p.cover_url AS product_cover,
-			COALESCE(NULLIF(p.group_buy_price, 0), gb.group_price) AS group_price,
-			p.price AS product_price, p.original_price,
-			t.target_count, t.current_count, t.expire_at`).
-		Joins("JOIN group_buy AS gb ON gb.id = t.group_buy_id AND gb.is_deleted = 0").
-		Joins("JOIN product AS p ON p.id = gb.product_id AND p.is_deleted = 0 AND p.status = ?", model.ProductStatusOn).
-		Where("t.is_deleted = 0 AND t.status = ? AND t.expire_at > ?", model.GroupBuyTeamPending, now).
-		Where("t.current_count < t.target_count").
-		Order("t.target_count - t.current_count ASC, t.current_count DESC, t.id DESC").
-		Limit(limit).
-		Scan(&rows).Error
+	var raw []rawRow
+	err := s.freshDB().Table("order_item AS oi").
+		Select(`oi.group_buy_team_id AS team_id,
+			oi.group_buy_id,
+			oi.product_id,
+			p.merchant_id,
+			p.name AS product_name,
+			p.cover_url AS product_cover,
+			oi.unit_price,
+			p.price AS product_price,
+			p.original_price AS orig_price,
+			p.group_buy_price AS group_price,
+			t.target_count,
+			p.group_buy_target_count AS prod_target,
+			o.account_id,
+			t.expire_at,
+			o.created_at`).
+		Joins("JOIN `order` AS o ON o.id = oi.order_id AND o.is_deleted = 0 AND o.status = ?", model.OrderStatusPendingGroup).
+		Joins("JOIN product AS p ON p.id = oi.product_id AND p.is_deleted = 0").
+		Joins("LEFT JOIN group_buy_team AS t ON t.id = oi.group_buy_team_id AND t.is_deleted = 0").
+		Where("oi.is_deleted = 0").
+		Order("o.id DESC").
+		Scan(&raw).Error
 	if err != nil {
 		return nil, err
 	}
 
+	type agg struct {
+		row     hotGroupRow
+		accounts map[uint64]struct{}
+	}
+	byKey := map[string]*agg{}
+	orderKeys := make([]string, 0)
+
+	for _, r := range raw {
+		key := ""
+		if r.TeamID > 0 {
+			key = "t:" + itoaUint64(r.TeamID)
+		} else {
+			key = "p:" + itoaUint64(r.ProductID)
+		}
+		a := byKey[key]
+		if a == nil {
+			target := uint32(2)
+			if r.TargetCount != nil && *r.TargetCount >= 2 {
+				target = *r.TargetCount
+			} else if r.ProdTarget != nil && *r.ProdTarget >= 2 {
+				target = *r.ProdTarget
+			}
+			price := r.UnitPrice
+			if price <= 0 && r.GroupPrice != nil && *r.GroupPrice > 0 {
+				price = *r.GroupPrice
+			}
+			if price <= 0 {
+				price = r.ProductPrice
+			}
+			expire := r.CreatedAt.Add(24 * time.Hour)
+			if r.ExpireAt != nil && !r.ExpireAt.IsZero() {
+				expire = *r.ExpireAt
+			}
+			a = &agg{
+				row: hotGroupRow{
+					TeamID: r.TeamID, GroupBuyID: r.GroupBuyID,
+					ProductID: r.ProductID, MerchantID: r.MerchantID,
+					ProductName: r.ProductName, ProductCover: r.ProductCover,
+					GroupPrice: price, ProductPrice: r.ProductPrice,
+					OriginalPrice: r.OrigPrice, TargetCount: target,
+					ExpireAt: expire,
+				},
+				accounts: map[uint64]struct{}{},
+			}
+			byKey[key] = a
+			orderKeys = append(orderKeys, key)
+		}
+		a.accounts[r.AccountID] = struct{}{}
+		// 保留更新的过期时间（更晚的）
+		if r.ExpireAt != nil && r.ExpireAt.After(a.row.ExpireAt) {
+			a.row.ExpireAt = *r.ExpireAt
+		}
+	}
+
+	rows := make([]hotGroupRow, 0, len(orderKeys))
+	for _, key := range orderKeys {
+		a := byKey[key]
+		a.row.CurrentCount = uint32(len(a.accounts))
+		// 不因「人数已达目标」过滤：订单仍为 pending_group 就应出现在热拼榜，
+		// 与用户端「待成团」对齐（避免 team.current_count 与真实订单不同步时漏显）。
+		rows = append(rows, a.row)
+	}
+
+	sort.SliceStable(rows, func(i, j int) bool {
+		needI := rows[i].TargetCount - rows[i].CurrentCount
+		needJ := rows[j].TargetCount - rows[j].CurrentCount
+		if needI != needJ {
+			return needI < needJ
+		}
+		if rows[i].CurrentCount != rows[j].CurrentCount {
+			return rows[i].CurrentCount > rows[j].CurrentCount
+		}
+		return rows[i].TeamID > rows[j].TeamID
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
 	teamIDs := make([]uint64, 0, len(rows))
 	for _, r := range rows {
-		teamIDs = append(teamIDs, r.TeamID)
+		if r.TeamID > 0 {
+			teamIDs = append(teamIDs, r.TeamID)
+		}
 	}
 	namesByTeam := s.loadTeamMemberNames(teamIDs)
 
 	out := make([]RankHotGroupItem, 0, len(rows))
 	for _, r := range rows {
 		need := uint32(0)
-		if r.TargetCount > r.CurrentCount {
+		if r.CurrentCount < r.TargetCount {
 			need = r.TargetCount - r.CurrentCount
 		}
 		progress := 0.0
 		if r.TargetCount > 0 {
 			progress = float64(r.CurrentCount) / float64(r.TargetCount)
+			if progress > 1 {
+				progress = 1
+			}
 		}
 		origin := r.ProductPrice
 		if r.OriginalPrice != nil && *r.OriginalPrice > origin {
@@ -139,6 +248,20 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 		})
 	}
 	return out, nil
+}
+
+func itoaUint64(v uint64) string {
+	if v == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	return string(buf[i:])
 }
 
 func (s *RankService) loadTeamMemberNames(teamIDs []uint64) map[uint64][]string {
@@ -166,7 +289,6 @@ func (s *RankService) loadTeamMemberNames(teamIDs []uint64) map[uint64][]string 
 		if name == "" {
 			name = "拼友"
 		}
-		// 取首字展示
 		runes := []rune(name)
 		if len(runes) > 1 {
 			name = string(runes[0])
@@ -251,7 +373,6 @@ func (s *RankService) ListSaveRank(limit int) ([]RankSaveItem, error) {
 		prodByID[products[i].ID] = &products[i]
 	}
 
-	// 进行中活动商品的最优现价
 	type actPrice struct {
 		ActivityID        uint64
 		ActivityProductID uint64
@@ -284,7 +405,6 @@ func (s *RankService) ListSaveRank(limit int) ([]RankSaveItem, error) {
 				price = *ap.GroupBuyPrice
 				tag = "拼团价"
 			}
-			// 秒杀感：活动价低于商品价时标秒杀中（与首页秒杀同源）
 			if p, ok := prodByID[ap.ProductID]; ok && ap.ActivityPrice < p.Price {
 				if tag != "拼团价" {
 					tag = "秒杀中"
