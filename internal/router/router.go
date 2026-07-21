@@ -102,6 +102,9 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	activityHandler := &handler.ActivityHandler{
 		ActivitySvc: activitySvc, MerchantSvc: merchantSvc,
 	}
+	rankHandler := &handler.RankHandler{
+		RankSvc: &service.RankService{DB: db},
+	}
 	deliveryZoneHandler := &handler.DeliveryZoneHandler{
 		ZoneSvc: deliveryZoneSvc, MerchantSvc: merchantSvc,
 	}
@@ -117,6 +120,9 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 		public.GET("/announcements", announcementHandler.ListPublic)
 		public.GET("/seckill/products", middleware.OptionalAuth(cfg.JWT.Secret, db), activityHandler.ListSeckillProducts)
+		public.GET("/rank/hot-groups", rankHandler.ListHotGroups)
+		public.GET("/rank/hot-sales", rankHandler.ListHotSales)
+		public.GET("/rank/save", rankHandler.ListSaveRank)
 		public.GET("/activities/:id", activityHandler.GetPublic)
 		public.GET("/activities/:id/products", activityHandler.ListPublicProducts)
 		public.GET("/activities/:id/products/:activity_product_id", activityHandler.GetPublicProduct)
