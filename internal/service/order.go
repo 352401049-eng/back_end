@@ -11,6 +11,7 @@ import (
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -212,6 +213,20 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 
 	var order model.Order
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		// Re-check activity purchase limits inside the tx (ResolveForOrder is a fast-fail
+		// pre-check only). Lock activity_product first so concurrent creates serialize
+		// before counting — same TOCTOU class CreditSoldInTx already closes for stock.
+		if s.ActivitySvc != nil && activityProductID != nil && actCtx != nil && actCtx.ActivityProduct != nil {
+			var apLock model.ActivityProduct
+			if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+				First(&apLock, *activityProductID).Error; err != nil {
+				return err
+			}
+			if err := s.ActivitySvc.checkUserLimits(tx, accountID, actCtx.ActivityProduct, input.Quantity); err != nil {
+				return err
+			}
+		}
+
 		status := model.OrderStatusPendingFulfill
 		reviewStage := model.MerchantReviewPending
 		if input.PurchaseType == model.PurchaseTypeGroup {

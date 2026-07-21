@@ -36,7 +36,13 @@ type ActivityProduct struct {
 	ActivityStock           uint32    `gorm:"not null;default:0" json:"activity_stock"`
 	SoldCount               uint32    `gorm:"not null;default:0" json:"sold_count"`
 	PerUserMaxQty           uint32    `gorm:"not null;default:0" json:"per_user_max_qty"`
-	PerUserMaxOrders        uint32    `gorm:"not null;default:0" json:"per_user_max_orders"`
+	PerUserMaxOrders        uint32    `gorm:"not null;default:0" json:"per_user_max_orders"` // legacy 全程限购；校验时若 ActivityMax==0 且 PerUserMaxOrders>0 则视 PerUserMaxOrders 为 ActivityMax；写入新数据优先写 ActivityMax
+	DailyMax                uint32    `gorm:"not null;default:0" json:"daily_max"`
+	WeeklyMax               uint32    `gorm:"not null;default:0" json:"weekly_max"`
+	MonthlyMax              uint32    `gorm:"not null;default:0" json:"monthly_max"`
+	ActivityMax             uint32    `gorm:"not null;default:0" json:"activity_max"`
+	RegisterHours           uint32    `gorm:"not null;default:0" json:"register_hours"`
+	RegisterMax             uint32    `gorm:"not null;default:0" json:"register_max"`
 	EnableGroupBuy          uint8     `gorm:"not null;default:0" json:"enable_group_buy"`
 	GroupBuyPrice           *float64  `gorm:"type:decimal(10,2)" json:"group_buy_price,omitempty"`
 	GroupBuyTargetCount     *uint32   `json:"group_buy_target_count,omitempty"`

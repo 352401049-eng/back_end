@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	ErrActivityNotFound        = errors.New("activity not found")
-	ErrActivityForbidden       = errors.New("activity forbidden")
-	ErrActivityNotActive       = errors.New("activity not active")
-	ErrActivityProductNotFound   = errors.New("activity product not found")
-	ErrActivityProductDuplicate  = errors.New("activity product duplicate")
-	ErrActivityLimitExceeded     = errors.New("activity purchase limit exceeded")
+	ErrActivityNotFound           = errors.New("activity not found")
+	ErrActivityForbidden          = errors.New("activity forbidden")
+	ErrActivityNotActive          = errors.New("activity not active")
+	ErrActivityProductNotFound    = errors.New("activity product not found")
+	ErrActivityProductDuplicate   = errors.New("activity product duplicate")
+	ErrActivityLimitExceeded      = errors.New("activity purchase limit exceeded")
+	ErrActivityRegisterWindow     = errors.New("not in register purchase window")
 )
 
 type ActivityService struct {
@@ -45,6 +46,12 @@ type ActivityProductInput struct {
 	ActivityStock           uint32
 	PerUserMaxQty           uint32
 	PerUserMaxOrders        uint32
+	DailyMax                uint32
+	WeeklyMax               uint32
+	MonthlyMax              uint32
+	ActivityMax             uint32
+	RegisterHours           uint32
+	RegisterMax             uint32
 	EnableGroupBuy          uint8
 	GroupBuyPrice           *float64
 	GroupBuyTargetCount     *uint32
@@ -61,6 +68,12 @@ type UpdateActivityProductPatch struct {
 	ActivityStock           *uint32
 	PerUserMaxQty           *uint32
 	PerUserMaxOrders        *uint32
+	DailyMax                *uint32
+	WeeklyMax               *uint32
+	MonthlyMax              *uint32
+	ActivityMax             *uint32
+	RegisterHours           *uint32
+	RegisterMax             *uint32
 	EnableGroupBuy          *uint8
 	GroupBuyPrice           *float64
 	GroupBuyTargetCount     *uint32
@@ -312,6 +325,8 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 		ActivityID: activityID, ProductID: input.ProductID,
 		ActivityPrice: input.ActivityPrice, ActivityStock: input.ActivityStock,
 		PerUserMaxQty: input.PerUserMaxQty, PerUserMaxOrders: input.PerUserMaxOrders,
+		DailyMax: input.DailyMax, WeeklyMax: input.WeeklyMax, MonthlyMax: input.MonthlyMax,
+		ActivityMax: input.ActivityMax, RegisterHours: input.RegisterHours, RegisterMax: input.RegisterMax,
 		EnableGroupBuy: input.EnableGroupBuy, GroupBuyPrice: input.GroupBuyPrice,
 		GroupBuyTargetCount: input.GroupBuyTargetCount,
 		GroupBuyAllowRepeat: input.GroupBuyAllowRepeat,
@@ -372,6 +387,8 @@ func activityProductUpdates(input ActivityProductInput, maxJoins uint32, status 
 	return map[string]interface{}{
 		"activity_price": input.ActivityPrice, "activity_stock": input.ActivityStock,
 		"per_user_max_qty": input.PerUserMaxQty, "per_user_max_orders": input.PerUserMaxOrders,
+		"daily_max": input.DailyMax, "weekly_max": input.WeeklyMax, "monthly_max": input.MonthlyMax,
+		"activity_max": input.ActivityMax, "register_hours": input.RegisterHours, "register_max": input.RegisterMax,
 		"enable_group_buy": input.EnableGroupBuy, "group_buy_price": input.GroupBuyPrice,
 		"group_buy_target_count": input.GroupBuyTargetCount,
 		"group_buy_allow_repeat": input.GroupBuyAllowRepeat,
@@ -421,7 +438,9 @@ func (s *ActivityService) UpdateProductInActivity(activityID, apID uint64, patch
 
 func (p UpdateActivityProductPatch) hasField() bool {
 	return p.ActivityPrice != nil || p.ActivityStock != nil || p.PerUserMaxQty != nil ||
-		p.PerUserMaxOrders != nil || p.EnableGroupBuy != nil || p.GroupBuyPrice != nil ||
+		p.PerUserMaxOrders != nil || p.DailyMax != nil || p.WeeklyMax != nil ||
+		p.MonthlyMax != nil || p.ActivityMax != nil || p.RegisterHours != nil ||
+		p.RegisterMax != nil || p.EnableGroupBuy != nil || p.GroupBuyPrice != nil ||
 		p.GroupBuyTargetCount != nil || p.GroupBuyAllowRepeat != nil ||
 		p.GroupBuyMaxJoinsPerUser != nil || p.EnableCoupon != nil || p.SortOrder != nil || p.Status != nil
 }
@@ -432,6 +451,12 @@ func activityProductInputToPatch(input ActivityProductInput) UpdateActivityProdu
 		ActivityStock:           &input.ActivityStock,
 		PerUserMaxQty:           &input.PerUserMaxQty,
 		PerUserMaxOrders:        &input.PerUserMaxOrders,
+		DailyMax:                &input.DailyMax,
+		WeeklyMax:               &input.WeeklyMax,
+		MonthlyMax:              &input.MonthlyMax,
+		ActivityMax:             &input.ActivityMax,
+		RegisterHours:           &input.RegisterHours,
+		RegisterMax:             &input.RegisterMax,
 		EnableGroupBuy:          &input.EnableGroupBuy,
 		GroupBuyPrice:           input.GroupBuyPrice,
 		GroupBuyTargetCount:     input.GroupBuyTargetCount,
@@ -451,6 +476,12 @@ func mergeActivityProductPatch(ap *model.ActivityProduct, patch UpdateActivityPr
 		ActivityStock:           ap.ActivityStock,
 		PerUserMaxQty:           ap.PerUserMaxQty,
 		PerUserMaxOrders:        ap.PerUserMaxOrders,
+		DailyMax:                ap.DailyMax,
+		WeeklyMax:               ap.WeeklyMax,
+		MonthlyMax:              ap.MonthlyMax,
+		ActivityMax:             ap.ActivityMax,
+		RegisterHours:           ap.RegisterHours,
+		RegisterMax:             ap.RegisterMax,
 		EnableGroupBuy:          ap.EnableGroupBuy,
 		GroupBuyPrice:           ap.GroupBuyPrice,
 		GroupBuyTargetCount:     ap.GroupBuyTargetCount,
@@ -471,6 +502,24 @@ func mergeActivityProductPatch(ap *model.ActivityProduct, patch UpdateActivityPr
 	}
 	if patch.PerUserMaxOrders != nil {
 		merged.PerUserMaxOrders = *patch.PerUserMaxOrders
+	}
+	if patch.DailyMax != nil {
+		merged.DailyMax = *patch.DailyMax
+	}
+	if patch.WeeklyMax != nil {
+		merged.WeeklyMax = *patch.WeeklyMax
+	}
+	if patch.MonthlyMax != nil {
+		merged.MonthlyMax = *patch.MonthlyMax
+	}
+	if patch.ActivityMax != nil {
+		merged.ActivityMax = *patch.ActivityMax
+	}
+	if patch.RegisterHours != nil {
+		merged.RegisterHours = *patch.RegisterHours
+	}
+	if patch.RegisterMax != nil {
+		merged.RegisterMax = *patch.RegisterMax
 	}
 	if patch.EnableGroupBuy != nil {
 		merged.EnableGroupBuy = *patch.EnableGroupBuy
@@ -868,7 +917,7 @@ func (s *ActivityService) ResolveForOrder(accountID uint64, activityProductID ui
 		return nil, ErrInsufficientStock
 	}
 
-	if err := s.checkUserLimits(accountID, &ap, quantity); err != nil {
+	if err := s.checkUserLimits(s.DB, accountID, &ap, quantity); err != nil {
 		return nil, err
 	}
 
@@ -904,10 +953,16 @@ func (s *ActivityService) ResolveForOrder(accountID uint64, activityProductID ui
 	}, nil
 }
 
-func (s *ActivityService) checkUserLimits(accountID uint64, ap *model.ActivityProduct, quantity uint32) error {
+// checkUserLimits enforces per-user qty / calendar / register windows against db.
+// Pass the transaction handle inside OrderService.Create to close the TOCTOU window
+// between ResolveForOrder's pre-check and order insert.
+func (s *ActivityService) checkUserLimits(db *gorm.DB, accountID uint64, ap *model.ActivityProduct, quantity uint32) error {
+	if db == nil {
+		db = s.DB
+	}
 	if ap.PerUserMaxQty > 0 {
 		var bought uint32
-		err := query.NotDeleted(s.DB).
+		err := query.NotDeleted(db).
 			Table("order_item oi").
 			Select("COALESCE(SUM(oi.quantity), 0)").
 			Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
@@ -921,18 +976,58 @@ func (s *ActivityService) checkUserLimits(accountID uint64, ap *model.ActivityPr
 			return ErrActivityLimitExceeded
 		}
 	}
-	if ap.PerUserMaxOrders > 0 {
-		var orderCount int64
-		err := query.NotDeleted(s.DB).
-			Table("order_item oi").
-			Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
-			Where("o.account_id = ? AND oi.activity_product_id = ? AND oi.is_deleted = ?", accountID, ap.ID, model.NotDeleted).
-			Where("o.status <> ?", model.OrderStatusCancelled).
-			Count(&orderCount).Error
+
+	now := time.Now()
+
+	if ap.RegisterHours > 0 {
+		var account model.Account
+		if err := query.NotDeleted(db).Select("id", "created_at").First(&account, accountID).Error; err != nil {
+			return err
+		}
+		if !inRegisterWindow(account.CreatedAt, now, ap.RegisterHours) {
+			return ErrActivityRegisterWindow
+		}
+		if ap.RegisterMax > 0 {
+			start := account.CreatedAt
+			end := registerDeadline(account.CreatedAt, ap.RegisterHours)
+			n, err := countOrders(db, accountID, ap.ID, start, end)
+			if err != nil {
+				return err
+			}
+			if uint32(n) >= ap.RegisterMax {
+				return ErrActivityLimitExceeded
+			}
+		}
+	}
+
+	type orderLimit struct {
+		max  uint32
+		unit string // "" = unbounded (activity_max)
+	}
+	limits := []orderLimit{
+		{ap.DailyMax, "day"},
+		{ap.WeeklyMax, "week"},
+		{ap.MonthlyMax, "month"},
+	}
+	activityMax := ap.ActivityMax
+	if activityMax == 0 && ap.PerUserMaxOrders > 0 {
+		activityMax = ap.PerUserMaxOrders
+	}
+	limits = append(limits, orderLimit{activityMax, ""})
+
+	for _, lim := range limits {
+		if lim.max == 0 {
+			continue
+		}
+		var start, end time.Time
+		if lim.unit != "" {
+			start, end = calendarWindow(now, lim.unit)
+		}
+		n, err := countOrders(db, accountID, ap.ID, start, end)
 		if err != nil {
 			return err
 		}
-		if uint32(orderCount) >= ap.PerUserMaxOrders {
+		if uint32(n) >= lim.max {
 			return ErrActivityLimitExceeded
 		}
 	}

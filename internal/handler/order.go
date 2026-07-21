@@ -221,6 +221,8 @@ func handleOrderError(c *gin.Context, err error) {
 		response.BadRequest(c, "活动未开始或已结束")
 	case errors.Is(err, service.ErrActivityLimitExceeded):
 		response.BadRequest(c, "已超过活动购买限制")
+	case errors.Is(err, service.ErrActivityRegisterWindow):
+		response.BadRequest(c, "不在新用户购买有效期内，请使用普通价下单")
 	case errors.Is(err, service.ErrActivityForbidden):
 		response.Fail(c, 403, 403, "活动不可用")
 	case errors.Is(err, service.ErrAddressRequired):

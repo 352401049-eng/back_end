@@ -116,6 +116,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		public.GET("/products/:id/group", middleware.OptionalAuth(cfg.JWT.Secret, db), storeHandler.GetGroupProgress)
 
 		public.GET("/announcements", announcementHandler.ListPublic)
+		public.GET("/seckill/products", middleware.OptionalAuth(cfg.JWT.Secret, db), activityHandler.ListSeckillProducts)
 		public.GET("/activities/:id", activityHandler.GetPublic)
 		public.GET("/activities/:id/products", activityHandler.ListPublicProducts)
 		public.GET("/activities/:id/products/:activity_product_id", activityHandler.GetPublicProduct)
