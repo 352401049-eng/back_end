@@ -884,59 +884,30 @@ func buildActivityProductStoreView(act *model.Activity, ap *model.ActivityProduc
 	}
 }
 
-// enrichActivityProductLimits 写入限购标签与本单剩余可买件数。
+// enrichActivityProductLimits 写入限购标签与本单剩余可买件数（各限购剩余取最小）。
 func (s *ActivityService) enrichActivityProductLimits(view *ActivityProductStoreView, ap *model.ActivityProduct, accountID *uint64) error {
 	view.LimitLabels = buildSeckillLimitLabels(ap)
-	view.RemainingQty = view.AvailableStock
 	view.LimitReached = false
 	view.LimitReason = ""
 
-	// 配置级件数上限：未登录也按「满额可用」封顶，避免详情页加到库存数。
-	if ap.PerUserMaxQty > 0 && ap.PerUserMaxQty < view.RemainingQty {
-		view.RemainingQty = ap.PerUserMaxQty
-	}
-
-	if accountID == nil || *accountID == 0 {
-		return nil
-	}
-
 	now := time.Now()
-	var account model.Account
-	if err := query.NotDeleted(s.DB).Select("id", "created_at").First(&account, *accountID).Error; err != nil {
-		// 账号异常时降级为未登录额度，避免详情 500
-		return nil
+	var createdAt time.Time
+	if accountID != nil && *accountID > 0 {
+		var account model.Account
+		if err := query.NotDeleted(s.DB).Select("id", "created_at").First(&account, *accountID).Error; err != nil {
+			accountID = nil
+		} else {
+			createdAt = account.CreatedAt
+		}
 	}
 
-	reached, reason, err := s.seckillOrderLimitStatus(*accountID, ap, account.CreatedAt, now)
+	remain, err := computeActivityRemaining(s.DB, ap, view.AvailableStock, accountID, createdAt, now)
 	if err != nil {
 		return err
 	}
-	if reached {
-		view.LimitReached = true
-		view.LimitReason = reason
-		view.RemainingQty = 0
-		return nil
-	}
-
-	if ap.PerUserMaxQty > 0 {
-		bought, err := sumBoughtQty(s.DB, *accountID, ap.ID)
-		if err != nil {
-			return err
-		}
-		var qtyLeft uint32
-		if bought < ap.PerUserMaxQty {
-			qtyLeft = ap.PerUserMaxQty - bought
-		}
-		if qtyLeft == 0 {
-			view.LimitReached = true
-			view.LimitReason = "per_user_qty"
-			view.RemainingQty = 0
-			return nil
-		}
-		if qtyLeft < view.RemainingQty {
-			view.RemainingQty = qtyLeft
-		}
-	}
+	view.RemainingQty = remain.RemainingQty
+	view.LimitReached = remain.LimitReached
+	view.LimitReason = remain.LimitReason
 	return nil
 }
 
@@ -1037,69 +1008,27 @@ func (s *ActivityService) checkUserLimits(db *gorm.DB, accountID uint64, ap *mod
 	if db == nil {
 		db = s.DB
 	}
-	if ap.PerUserMaxQty > 0 {
-		bought, err := sumBoughtQty(db, accountID, ap.ID)
-		if err != nil {
-			return err
-		}
-		if bought+quantity > ap.PerUserMaxQty {
-			return ErrActivityLimitExceeded
-		}
-	}
-
 	now := time.Now()
-
-	if ap.RegisterHours > 0 {
-		var account model.Account
-		if err := query.NotDeleted(db).Select("id", "created_at").First(&account, accountID).Error; err != nil {
-			return err
-		}
-		if !inRegisterWindow(account.CreatedAt, now, ap.RegisterHours) {
-			return ErrActivityRegisterWindow
-		}
-		if ap.RegisterMax > 0 {
-			start := account.CreatedAt
-			end := registerDeadline(account.CreatedAt, ap.RegisterHours)
-			n, err := countOrders(db, accountID, ap.ID, start, end)
-			if err != nil {
-				return err
-			}
-			if uint32(n) >= ap.RegisterMax {
-				return ErrActivityLimitExceeded
-			}
-		}
+	var account model.Account
+	if err := query.NotDeleted(db).Select("id", "created_at").First(&account, accountID).Error; err != nil {
+		return err
 	}
 
-	type orderLimit struct {
-		max  uint32
-		unit string // "" = unbounded (activity_max)
+	if ap.RegisterHours > 0 && !inRegisterWindow(account.CreatedAt, now, ap.RegisterHours) {
+		return ErrActivityRegisterWindow
 	}
-	limits := []orderLimit{
-		{ap.DailyMax, "day"},
-		{ap.WeeklyMax, "week"},
-		{ap.MonthlyMax, "month"},
-	}
-	activityMax := ap.ActivityMax
-	if activityMax == 0 && ap.PerUserMaxOrders > 0 {
-		activityMax = ap.PerUserMaxOrders
-	}
-	limits = append(limits, orderLimit{activityMax, ""})
 
-	for _, lim := range limits {
-		if lim.max == 0 {
-			continue
-		}
-		var start, end time.Time
-		if lim.unit != "" {
-			start, end = calendarWindow(now, lim.unit)
-		}
-		n, err := countOrders(db, accountID, ap.ID, start, end)
-		if err != nil {
-			return err
-		}
-		if uint32(n) >= lim.max {
-			return ErrActivityLimitExceeded
-		}
+	stock := ^uint32(0)
+	if ap.Product != nil {
+		stock = availableActivityStock(ap, ap.Product)
+	}
+	aid := accountID
+	remain, err := computeActivityRemaining(db, ap, stock, &aid, account.CreatedAt, now)
+	if err != nil {
+		return err
+	}
+	if remain.LimitReached || quantity > remain.RemainingQty {
+		return ErrActivityLimitExceeded
 	}
 	return nil
 }
