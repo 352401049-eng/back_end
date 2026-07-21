@@ -17,8 +17,9 @@ type CancelInventoryUsageRequest struct {
 }
 
 type UseInventoryRequest struct {
-	Quantity          uint32   `json:"quantity" example:"1"`
-	DeliveryType      uint8    `json:"delivery_type" binding:"required" example:"1"`
+	Quantity uint32 `json:"quantity" example:"1"`
+	// 用指针 + required：允许传 0（稍后/到店核销），避免 uint8 零值被 required 误拒
+	DeliveryType      *uint8   `json:"delivery_type" binding:"required" example:"1"`
 	AddressID         *uint64  `json:"address_id"`
 	DeliveryLatitude  *float64 `json:"delivery_latitude"`
 	DeliveryLongitude *float64 `json:"delivery_longitude"`
@@ -53,7 +54,7 @@ func (h *UserHandler) UseInventory(c *gin.Context) {
 		return
 	}
 	view, err := h.InventorySvc.Use(accountID, inventoryID, service.UseInventoryInput{
-		Quantity: req.Quantity, DeliveryType: req.DeliveryType,
+		Quantity: req.Quantity, DeliveryType: *req.DeliveryType,
 		AddressID: req.AddressID, DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
 		Remark: req.Remark,
 	})
