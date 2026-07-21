@@ -56,6 +56,18 @@ func (s *DeliveryZoneService) GetByMerchantID(merchantID uint64) (*model.Merchan
 	return &zone, nil
 }
 
+// getByMerchantIDAny 含软删记录，用于 Upsert 复活唯一键冲突行。
+func (s *DeliveryZoneService) getByMerchantIDAny(merchantID uint64) (*model.MerchantDeliveryZone, error) {
+	var zone model.MerchantDeliveryZone
+	if err := s.DB.Unscoped().Where("merchant_id = ?", merchantID).First(&zone).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrDeliveryZoneNotFound
+		}
+		return nil, err
+	}
+	return &zone, nil
+}
+
 func (s *DeliveryZoneService) ToView(zone *model.MerchantDeliveryZone) DeliveryZoneView {
 	if zone == nil {
 		return DeliveryZoneView{Mode: model.DeliveryZoneModePolygon, Points: []model.GeoPoint{}, Spots: []model.DeliverySpot{}}
@@ -152,13 +164,14 @@ func zoneIsActivelyRestricting(zone *model.MerchantDeliveryZone) bool {
 }
 
 func (s *DeliveryZoneService) Upsert(merchantID uint64, input UpsertDeliveryZoneInput) (*DeliveryZoneView, error) {
-	existing, err := s.GetByMerchantID(merchantID)
+	existing, err := s.getByMerchantIDAny(merchantID)
 	if err != nil && !errors.Is(err, ErrDeliveryZoneNotFound) {
 		return nil, err
 	}
+	active := existing != nil && existing.IsDeleted == model.NotDeleted
 
 	enabled := model.DeliveryZoneEnabled
-	if existing != nil {
+	if active {
 		enabled = existing.Enabled
 	}
 	if input.Enabled != nil {
@@ -169,7 +182,7 @@ func (s *DeliveryZoneService) Upsert(merchantID uint64, input UpsertDeliveryZone
 	}
 
 	mode := model.DeliveryZoneModePolygon
-	if existing != nil {
+	if active {
 		mode = model.NormalizeDeliveryZoneMode(existing.Mode)
 	} else if input.HasSpots && len(input.Spots) > 0 && !input.HasPoints {
 		mode = model.DeliveryZoneModeSpots
@@ -179,7 +192,7 @@ func (s *DeliveryZoneService) Upsert(merchantID uint64, input UpsertDeliveryZone
 	}
 
 	points := []model.GeoPoint{}
-	if existing != nil && existing.Points != nil {
+	if active && existing.Points != nil {
 		points = existing.Points
 	}
 	if input.HasPoints {
@@ -190,7 +203,7 @@ func (s *DeliveryZoneService) Upsert(merchantID uint64, input UpsertDeliveryZone
 	}
 
 	spots := []model.DeliverySpot{}
-	if existing != nil && existing.Spots != nil {
+	if active && existing.Spots != nil {
 		spots = existing.Spots
 	}
 	if input.HasSpots {
@@ -220,7 +233,8 @@ func (s *DeliveryZoneService) Upsert(merchantID uint64, input UpsertDeliveryZone
 	existing.Mode = mode
 	existing.Points = points
 	existing.Spots = spots
-	if err := s.DB.Save(existing).Error; err != nil {
+	existing.IsDeleted = model.NotDeleted
+	if err := s.DB.Unscoped().Save(existing).Error; err != nil {
 		return nil, fmt.Errorf("更新配送范围失败: %w", err)
 	}
 	return s.GetView(merchantID)
