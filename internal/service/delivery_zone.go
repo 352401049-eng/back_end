@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"yujixinjiang/backend/internal/geo"
 	"yujixinjiang/backend/internal/model"
@@ -23,9 +24,11 @@ type DeliveryZoneService struct {
 }
 
 type DeliveryZoneView struct {
-	MerchantID uint64           `json:"merchant_id"`
-	Enabled    uint8            `json:"enabled"`
-	Points     []model.GeoPoint `json:"points"`
+	MerchantID uint64               `json:"merchant_id"`
+	Enabled    uint8                `json:"enabled"`
+	Mode       string               `json:"mode"`
+	Points     []model.GeoPoint     `json:"points"`
+	Spots      []model.DeliverySpot `json:"spots"`
 }
 
 type DeliveryZoneCheckResult struct {
@@ -35,7 +38,11 @@ type DeliveryZoneCheckResult struct {
 
 type UpsertDeliveryZoneInput struct {
 	Enabled *uint8
+	Mode    *string
 	Points  []model.GeoPoint
+	Spots   []model.DeliverySpot
+	HasSpots bool // 区分「未传 spots」与「传空数组」
+	HasPoints bool
 }
 
 func (s *DeliveryZoneService) GetByMerchantID(merchantID uint64) (*model.MerchantDeliveryZone, error) {
@@ -51,16 +58,23 @@ func (s *DeliveryZoneService) GetByMerchantID(merchantID uint64) (*model.Merchan
 
 func (s *DeliveryZoneService) ToView(zone *model.MerchantDeliveryZone) DeliveryZoneView {
 	if zone == nil {
-		return DeliveryZoneView{}
+		return DeliveryZoneView{Mode: model.DeliveryZoneModePolygon, Points: []model.GeoPoint{}, Spots: []model.DeliverySpot{}}
 	}
 	points := zone.Points
 	if points == nil {
 		points = []model.GeoPoint{}
 	}
+	spots := zone.Spots
+	if spots == nil {
+		spots = []model.DeliverySpot{}
+	}
+	mode := model.NormalizeDeliveryZoneMode(zone.Mode)
 	return DeliveryZoneView{
 		MerchantID: zone.MerchantID,
 		Enabled:    zone.Enabled,
+		Mode:       mode,
 		Points:     points,
+		Spots:      spots,
 	}
 }
 
@@ -91,44 +105,109 @@ func (s *DeliveryZoneService) GetPublicView(merchantID uint64) (*DeliveryZoneVie
 	return &view, nil
 }
 
+func normalizeSpots(spots []model.DeliverySpot) []model.DeliverySpot {
+	out := make([]model.DeliverySpot, 0, len(spots))
+	for _, sp := range spots {
+		name := strings.TrimSpace(sp.Name)
+		radius := sp.RadiusM
+		if radius == 0 {
+			radius = model.DeliverySpotDefaultM
+		}
+		out = append(out, model.DeliverySpot{
+			Name: name, Latitude: sp.Latitude, Longitude: sp.Longitude, RadiusM: radius,
+		})
+	}
+	return out
+}
+
+func validateZonePayload(enabled uint8, mode string, points []model.GeoPoint, spots []model.DeliverySpot) error {
+	mode = model.NormalizeDeliveryZoneMode(mode)
+	if mode == model.DeliveryZoneModeSpots {
+		if enabled == model.DeliveryZoneEnabled {
+			return geo.ValidateDeliverySpots(spots)
+		}
+		if len(spots) > 0 {
+			return geo.ValidateDeliverySpots(spots)
+		}
+		return nil
+	}
+	if enabled == model.DeliveryZoneEnabled {
+		return geo.ValidatePolygonPoints(points)
+	}
+	if len(points) > 0 {
+		return geo.ValidatePolygonPoints(points)
+	}
+	return nil
+}
+
+func zoneIsActivelyRestricting(zone *model.MerchantDeliveryZone) bool {
+	if zone == nil || zone.Enabled != model.DeliveryZoneEnabled {
+		return false
+	}
+	mode := model.NormalizeDeliveryZoneMode(zone.Mode)
+	if mode == model.DeliveryZoneModeSpots {
+		return len(zone.Spots) >= 1
+	}
+	return len(zone.Points) >= 3
+}
+
 func (s *DeliveryZoneService) Upsert(merchantID uint64, input UpsertDeliveryZoneInput) (*DeliveryZoneView, error) {
+	existing, err := s.GetByMerchantID(merchantID)
+	if err != nil && !errors.Is(err, ErrDeliveryZoneNotFound) {
+		return nil, err
+	}
+
 	enabled := model.DeliveryZoneEnabled
+	if existing != nil {
+		enabled = existing.Enabled
+	}
 	if input.Enabled != nil {
 		if *input.Enabled != model.DeliveryZoneDisabled && *input.Enabled != model.DeliveryZoneEnabled {
 			return nil, fmt.Errorf("%w: enabled 须为 0 或 1", ErrDeliveryZoneInvalid)
 		}
 		enabled = *input.Enabled
 	}
-	if enabled == model.DeliveryZoneEnabled {
-		if err := geo.ValidatePolygonPoints(input.Points); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrDeliveryZoneInvalid, err.Error())
-		}
-	} else if len(input.Points) > 0 {
-		if err := geo.ValidatePolygonPoints(input.Points); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrDeliveryZoneInvalid, err.Error())
-		}
-	} else {
-		input.Points = []model.GeoPoint{}
+
+	mode := model.DeliveryZoneModePolygon
+	if existing != nil {
+		mode = model.NormalizeDeliveryZoneMode(existing.Mode)
+	} else if input.HasSpots && len(input.Spots) > 0 && !input.HasPoints {
+		mode = model.DeliveryZoneModeSpots
+	}
+	if input.Mode != nil {
+		mode = model.NormalizeDeliveryZoneMode(*input.Mode)
 	}
 
-	existing, err := s.GetByMerchantID(merchantID)
-	if err != nil && !errors.Is(err, ErrDeliveryZoneNotFound) {
-		return nil, err
+	points := []model.GeoPoint{}
+	if existing != nil && existing.Points != nil {
+		points = existing.Points
+	}
+	if input.HasPoints {
+		points = input.Points
+		if points == nil {
+			points = []model.GeoPoint{}
+		}
 	}
 
-	points := input.Points
-	if points == nil {
-		points = []model.GeoPoint{}
+	spots := []model.DeliverySpot{}
+	if existing != nil && existing.Spots != nil {
+		spots = existing.Spots
+	}
+	if input.HasSpots {
+		spots = normalizeSpots(input.Spots)
+	}
+
+	if err := validateZonePayload(enabled, mode, points, spots); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrDeliveryZoneInvalid, err.Error())
 	}
 
 	if existing == nil {
 		zone := model.MerchantDeliveryZone{
 			MerchantID: merchantID,
 			Enabled:    enabled,
+			Mode:       mode,
 			Points:     points,
-		}
-		if enabled == model.DeliveryZoneEnabled && len(points) < 3 {
-			return nil, fmt.Errorf("%w: 启用配送范围时至少需要 3 个顶点", ErrDeliveryZoneInvalid)
+			Spots:      spots,
 		}
 		if err := s.DB.Create(&zone).Error; err != nil {
 			return nil, fmt.Errorf("保存配送范围失败: %w", err)
@@ -138,7 +217,9 @@ func (s *DeliveryZoneService) Upsert(merchantID uint64, input UpsertDeliveryZone
 	}
 
 	existing.Enabled = enabled
+	existing.Mode = mode
 	existing.Points = points
+	existing.Spots = spots
 	if err := s.DB.Save(existing).Error; err != nil {
 		return nil, fmt.Errorf("更新配送范围失败: %w", err)
 	}
@@ -153,6 +234,21 @@ func (s *DeliveryZoneService) Patch(merchantID uint64, input UpsertDeliveryZoneI
 				e := model.DeliveryZoneEnabled
 				input.Enabled = &e
 			}
+			if input.Mode == nil {
+				m := model.DeliveryZoneModePolygon
+				if input.HasSpots && len(input.Spots) > 0 {
+					m = model.DeliveryZoneModeSpots
+				}
+				input.Mode = &m
+			}
+			if !input.HasPoints {
+				input.Points = []model.GeoPoint{}
+				input.HasPoints = true
+			}
+			if !input.HasSpots {
+				input.Spots = []model.DeliverySpot{}
+				input.HasSpots = true
+			}
 			return s.Upsert(merchantID, input)
 		}
 		return nil, err
@@ -165,25 +261,30 @@ func (s *DeliveryZoneService) Patch(merchantID uint64, input UpsertDeliveryZoneI
 		}
 		enabled = *input.Enabled
 	}
-
-	points := existing.Points
-	if input.Points != nil {
-		points = input.Points
+	mode := model.NormalizeDeliveryZoneMode(existing.Mode)
+	if input.Mode != nil {
+		mode = model.NormalizeDeliveryZoneMode(*input.Mode)
 	}
-	if enabled == model.DeliveryZoneEnabled {
-		if err := geo.ValidatePolygonPoints(points); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrDeliveryZoneInvalid, err.Error())
+	points := existing.Points
+	if input.HasPoints {
+		points = input.Points
+		if points == nil {
+			points = []model.GeoPoint{}
 		}
-	} else if len(points) > 0 {
-		if err := geo.ValidatePolygonPoints(points); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrDeliveryZoneInvalid, err.Error())
-		}
+	}
+	spots := existing.Spots
+	if input.HasSpots {
+		spots = normalizeSpots(input.Spots)
+	}
+
+	if err := validateZonePayload(enabled, mode, points, spots); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrDeliveryZoneInvalid, err.Error())
 	}
 
 	existing.Enabled = enabled
-	if input.Points != nil {
-		existing.Points = points
-	}
+	existing.Mode = mode
+	existing.Points = points
+	existing.Spots = spots
 	if err := s.DB.Save(existing).Error; err != nil {
 		return nil, fmt.Errorf("更新配送范围失败: %w", err)
 	}
@@ -209,10 +310,16 @@ func (s *DeliveryZoneService) CheckPoint(merchantID uint64, lat, lng float64) (*
 		}
 		return nil, err
 	}
-	if zone.Enabled != model.DeliveryZoneEnabled || len(zone.Points) < 3 {
+	if !zoneIsActivelyRestricting(zone) {
 		return &DeliveryZoneCheckResult{InZone: true, ZoneEnabled: false}, nil
 	}
-	in := geo.PointInPolygon(lat, lng, zone.Points)
+	mode := model.NormalizeDeliveryZoneMode(zone.Mode)
+	var in bool
+	if mode == model.DeliveryZoneModeSpots {
+		in = geo.PointInAnySpot(lat, lng, zone.Spots)
+	} else {
+		in = geo.PointInPolygon(lat, lng, zone.Points)
+	}
 	return &DeliveryZoneCheckResult{InZone: in, ZoneEnabled: true}, nil
 }
 
@@ -228,7 +335,7 @@ func (s *DeliveryZoneService) ValidateDeliveryPoint(merchantID uint64, deliveryT
 		}
 		return err
 	}
-	if zone.Enabled != model.DeliveryZoneEnabled || len(zone.Points) < 3 {
+	if !zoneIsActivelyRestricting(zone) {
 		return nil
 	}
 	if lat == nil || lng == nil {
@@ -237,7 +344,14 @@ func (s *DeliveryZoneService) ValidateDeliveryPoint(merchantID uint64, deliveryT
 	if err := geo.ValidateCoordinate(*lat, *lng); err != nil {
 		return fmt.Errorf("%w: %s", ErrDeliveryZoneInvalid, err.Error())
 	}
-	if !geo.PointInPolygon(*lat, *lng, zone.Points) {
+	mode := model.NormalizeDeliveryZoneMode(zone.Mode)
+	ok := false
+	if mode == model.DeliveryZoneModeSpots {
+		ok = geo.PointInAnySpot(*lat, *lng, zone.Spots)
+	} else {
+		ok = geo.PointInPolygon(*lat, *lng, zone.Points)
+	}
+	if !ok {
 		return ErrDeliveryOutOfRange
 	}
 	return nil

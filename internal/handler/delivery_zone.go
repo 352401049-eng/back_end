@@ -22,9 +22,20 @@ type deliveryZonePointBody struct {
 	Lng       FlexFloat64 `json:"lng"`
 }
 
+type deliveryZoneSpotBody struct {
+	Name      string      `json:"name"`
+	Latitude  FlexFloat64 `json:"latitude"`
+	Longitude FlexFloat64 `json:"longitude"`
+	Lat       FlexFloat64 `json:"lat"`
+	Lng       FlexFloat64 `json:"lng"`
+	RadiusM   FlexUInt32  `json:"radius_m"`
+}
+
 type upsertDeliveryZoneBody struct {
 	Enabled FlexUInt8Ptr            `json:"enabled"`
+	Mode    *string                 `json:"mode"`
 	Points  []deliveryZonePointBody `json:"points"`
+	Spots   []deliveryZoneSpotBody  `json:"spots"`
 }
 
 type checkDeliveryZoneBody struct {
@@ -44,6 +55,20 @@ func parseGeoPointBody(p deliveryZonePointBody) model.GeoPoint {
 		lng = p.Lng.Float64()
 	}
 	return model.GeoPoint{Latitude: lat, Longitude: lng}
+}
+
+func parseSpotBody(p deliveryZoneSpotBody) model.DeliverySpot {
+	lat := p.Latitude.Float64()
+	if lat == 0 && p.Lat.Float64() != 0 {
+		lat = p.Lat.Float64()
+	}
+	lng := p.Longitude.Float64()
+	if lng == 0 && p.Lng.Float64() != 0 {
+		lng = p.Lng.Float64()
+	}
+	return model.DeliverySpot{
+		Name: p.Name, Latitude: lat, Longitude: lng, RadiusM: p.RadiusM.Uint32(),
+	}
 }
 
 func parseCheckCoordinates(body checkDeliveryZoneBody) (float64, float64) {
@@ -68,12 +93,25 @@ func parseUpsertDeliveryZoneBody(c *gin.Context) (service.UpsertDeliveryZoneInpu
 		v := raw.Enabled.Value
 		input.Enabled = &v
 	}
+	if raw.Mode != nil {
+		m := model.NormalizeDeliveryZoneMode(*raw.Mode)
+		input.Mode = &m
+	}
 	if raw.Points != nil {
 		points := make([]model.GeoPoint, 0, len(raw.Points))
 		for _, p := range raw.Points {
 			points = append(points, parseGeoPointBody(p))
 		}
 		input.Points = points
+		input.HasPoints = true
+	}
+	if raw.Spots != nil {
+		spots := make([]model.DeliverySpot, 0, len(raw.Spots))
+		for _, p := range raw.Spots {
+			spots = append(spots, parseSpotBody(p))
+		}
+		input.Spots = spots
+		input.HasSpots = true
 	}
 	return input, nil
 }
@@ -118,8 +156,8 @@ func (h *DeliveryZoneHandler) PutMerchant(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	if input.Points == nil {
-		response.BadRequest(c, "请传 points 顶点数组")
+	if input.Mode == nil && !input.HasPoints && !input.HasSpots {
+		response.BadRequest(c, "请传 mode、points 或 spots")
 		return
 	}
 	view, err := h.ZoneSvc.Upsert(*scope, input)
@@ -149,8 +187,8 @@ func (h *DeliveryZoneHandler) PatchMerchant(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	if input.Enabled == nil && input.Points == nil {
-		response.BadRequest(c, "请至少传 enabled 或 points")
+	if input.Enabled == nil && input.Mode == nil && !input.HasPoints && !input.HasSpots {
+		response.BadRequest(c, "请至少传 enabled、mode、points 或 spots")
 		return
 	}
 	view, err := h.ZoneSvc.Patch(*scope, input)
@@ -223,8 +261,8 @@ func (h *DeliveryZoneHandler) PutAdmin(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	if input.Points == nil {
-		response.BadRequest(c, "请传 points 顶点数组")
+	if input.Mode == nil && !input.HasPoints && !input.HasSpots {
+		response.BadRequest(c, "请传 mode、points 或 spots")
 		return
 	}
 	view, err := h.ZoneSvc.Upsert(merchantID, input)
@@ -256,8 +294,8 @@ func (h *DeliveryZoneHandler) PatchAdmin(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	if input.Enabled == nil && input.Points == nil {
-		response.BadRequest(c, "请至少传 enabled 或 points")
+	if input.Enabled == nil && input.Mode == nil && !input.HasPoints && !input.HasSpots {
+		response.BadRequest(c, "请至少传 enabled、mode、points 或 spots")
 		return
 	}
 	view, err := h.ZoneSvc.Patch(merchantID, input)

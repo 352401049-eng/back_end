@@ -57,6 +57,35 @@ func ValidatePolygonPoints(points []model.GeoPoint) error {
 	return nil
 }
 
+// ValidateDeliverySpots 校验配送点列表。
+func ValidateDeliverySpots(spots []model.DeliverySpot) error {
+	if len(spots) < 1 {
+		return fmt.Errorf("至少添加 1 个配送点")
+	}
+	if len(spots) > model.DeliverySpotMaxCount {
+		return fmt.Errorf("最多 %d 个配送点", model.DeliverySpotMaxCount)
+	}
+	for i, s := range spots {
+		if err := ValidateCoordinate(s.Latitude, s.Longitude); err != nil {
+			return fmt.Errorf("第 %d 个配送点: %w", i+1, err)
+		}
+		if s.RadiusM < model.DeliverySpotRadiusMinM || s.RadiusM > model.DeliverySpotRadiusMaxM {
+			return fmt.Errorf("第 %d 个配送点半径须在 %d~%d 米", i+1, model.DeliverySpotRadiusMinM, model.DeliverySpotRadiusMaxM)
+		}
+	}
+	return nil
+}
+
+// PointInAnySpot 点是否落在任一配送点半径内。
+func PointInAnySpot(lat, lng float64, spots []model.DeliverySpot) bool {
+	for _, s := range spots {
+		if DistanceMeters(lat, lng, s.Latitude, s.Longitude) <= float64(s.RadiusM) {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateCoordinate 校验单点经纬度范围。
 func ValidateCoordinate(lat, lng float64) error {
 	if lat < -90 || lat > 90 {
