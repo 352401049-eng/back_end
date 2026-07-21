@@ -289,9 +289,12 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 		return nil, err
 	}
 	var product model.Product
-	if err := query.NotDeleted(s.DB).
-		Where("id = ? AND merchant_id = ?", input.ProductID, act.MerchantID).
-		First(&product).Error; err != nil {
+	pq := query.NotDeleted(s.DB).Where("id = ?", input.ProductID)
+	// 商家专场活动仍限制同店商品；平台活动（merchant_id=0）可跨店挂品
+	if act.MerchantID != 0 {
+		pq = pq.Where("merchant_id = ?", act.MerchantID)
+	}
+	if err := pq.First(&product).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrProductNotFound
 		}
@@ -853,7 +856,7 @@ func buildActivityProductStoreView(act *model.Activity, ap *model.ActivityProduc
 
 	return ActivityProductStoreView{
 		ActivityProduct: *ap,
-		MerchantID:      act.MerchantID,
+		MerchantID:      p.MerchantID,
 		ProductName:     p.Name,
 		ProductCover:    cover,
 		OriginalPrice:   p.Price,
@@ -895,9 +898,6 @@ func (s *ActivityService) ResolveForOrder(accountID uint64, activityProductID ui
 	if err != nil {
 		return nil, err
 	}
-	if act.MerchantID != merchantID {
-		return nil, ErrActivityForbidden
-	}
 	if !act.IsActiveNow(time.Now()) {
 		return nil, ErrActivityNotActive
 	}
@@ -906,6 +906,13 @@ func (s *ActivityService) ResolveForOrder(accountID uint64, activityProductID ui
 	}
 	if ap.Product == nil || ap.Product.Status != model.ProductStatusOn {
 		return nil, ErrProductNotFound
+	}
+	// 订单商家必须与商品所属商家一致；商家专场活动另校验活动归属
+	if ap.Product.MerchantID != merchantID {
+		return nil, ErrActivityForbidden
+	}
+	if act.MerchantID != 0 && act.MerchantID != merchantID {
+		return nil, ErrActivityForbidden
 	}
 
 	product := *ap.Product
@@ -1075,7 +1082,8 @@ func (s *ActivityService) RollbackSoldInTx(tx *gorm.DB, orderID uint64) error {
 }
 
 func validateActivityInput(input ActivityInput) error {
-	if input.MerchantID == 0 || strings.TrimSpace(input.Name) == "" {
+	// MerchantID=0 表示平台跨店活动；>0 为商家专场
+	if strings.TrimSpace(input.Name) == "" {
 		return ErrInvalidProductArg
 	}
 	if !input.EndAt.After(input.StartAt) {

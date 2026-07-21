@@ -120,7 +120,7 @@ func buildSeckillProductView(act *model.Activity, ap *model.ActivityProduct, p *
 	return SeckillProductView{
 		ID:             ap.ID,
 		ActivityID:     ap.ActivityID,
-		MerchantID:     act.MerchantID,
+		MerchantID:     p.MerchantID,
 		ProductID:      ap.ProductID,
 		ProductName:    p.Name,
 		ProductCover:   cover,

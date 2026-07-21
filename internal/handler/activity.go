@@ -673,4 +673,184 @@ func handleActivityError(c *gin.Context, err error) {
 	}
 }
 
+// ——— 管理端：平台跨店活动（merchant_id=0）———
+
+func (h *ActivityHandler) ListAdmin(c *gin.Context) {
+	page, pageSize := parsePage(c)
+	list, total, err := h.ActivitySvc.List(page, pageSize, service.ActivityListFilter{})
+	if err != nil {
+		response.InternalError(c, "获取活动失败")
+		return
+	}
+	response.OK(c, query.PageResult{List: h.ActivitySvc.ToStoreViews(list, false), Total: total, Page: page, PageSize: pageSize})
+}
+
+func (h *ActivityHandler) CreateAdmin(c *gin.Context) {
+	var req ActivityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	act, err := h.ActivitySvc.Create(toActivityInput(req, 0))
+	if err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	response.OK(c, act)
+}
+
+func (h *ActivityHandler) GetAdmin(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	view, err := h.ActivitySvc.GetDetailView(id, nil)
+	if err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+func (h *ActivityHandler) UpdateAdmin(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	var req ActivityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	act, err := h.ActivitySvc.Update(id, toActivityInput(req, 0), nil)
+	if err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	response.OK(c, act)
+}
+
+func (h *ActivityHandler) DeleteAdmin(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	if err := h.ActivitySvc.Delete(id, nil); err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
+func (h *ActivityHandler) ListAdminProducts(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	list, err := h.ActivitySvc.ListProductItemViews(id, nil, false)
+	if err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	response.OK(c, list)
+}
+
+func (h *ActivityHandler) AddAdminProduct(c *gin.Context) {
+	activityID, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	req, err := parseActivityProductAddBody(c)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	ap, err := h.ActivitySvc.AddProduct(activityID, toActivityProductInput(req), nil)
+	if err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	view, err := h.ActivitySvc.GetProductItemView(activityID, ap.ID, nil)
+	if err != nil {
+		response.OK(c, ap)
+		return
+	}
+	response.OK(c, view)
+}
+
+func (h *ActivityHandler) GetAdminProduct(c *gin.Context) {
+	activityID, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "活动 ID 无效")
+		return
+	}
+	apID, err := parseActivityProductID(c)
+	if err != nil {
+		response.BadRequest(c, "活动商品 ID 无效")
+		return
+	}
+	view, err := h.ActivitySvc.GetProductItemView(activityID, apID, nil)
+	if err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+func (h *ActivityHandler) UpdateAdminProduct(c *gin.Context) {
+	activityID, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "活动 ID 无效")
+		return
+	}
+	apID, err := parseActivityProductID(c)
+	if err != nil {
+		response.BadRequest(c, "活动商品 ID 无效")
+		return
+	}
+	req, err := parseActivityProductUpdateBody(c)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	ap, err := h.ActivitySvc.UpdateProductInActivity(activityID, apID, toActivityProductPatch(req), nil)
+	if err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	view, err := h.ActivitySvc.GetProductItemView(activityID, ap.ID, nil)
+	if err != nil {
+		response.OK(c, ap)
+		return
+	}
+	response.OK(c, view)
+}
+
+func (h *ActivityHandler) UpdateAdminProductPut(c *gin.Context) {
+	h.UpdateAdminProduct(c)
+}
+
+func (h *ActivityHandler) RemoveAdminProduct(c *gin.Context) {
+	activityID, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "活动 ID 无效")
+		return
+	}
+	apID, err := parseActivityProductID(c)
+	if err != nil {
+		response.BadRequest(c, "活动商品 ID 无效")
+		return
+	}
+	if err := h.ActivitySvc.RemoveProductInActivity(activityID, apID, nil); err != nil {
+		handleActivityError(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
 var _ model.Activity

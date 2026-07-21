@@ -159,7 +159,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 		admin := authorized.Group("/admin")
 		admin.Use(middleware.RequireAccountTypes(model.AccountTypeAdmin))
-		registerAdminRoutes(admin, adminHandler, adminDashboardHandler, couponHandler, adminExtraHandler, announcementHandler, deliveryZoneHandler)
+		registerAdminRoutes(admin, adminHandler, adminDashboardHandler, couponHandler, adminExtraHandler, announcementHandler, deliveryZoneHandler, activityHandler)
 
 		rider := authorized.Group("/rider")
 		rider.Use(middleware.RequireRider())
@@ -214,23 +214,38 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.DELETE("/delivery-zone", dz.DeleteMerchant)
 	r.GET("/dashboard", mo.Dashboard)
 	r.GET("/sales", mo.SalesReport)
-	r.POST("/products", h.CreateProduct)
+
+	// 商品/分类/活动：商家只读；写操作仅管理员（管理端走 /admin）
+	catalogWrite := r.Group("")
+	catalogWrite.Use(middleware.RejectMerchantCatalogWrites())
+	{
+		catalogWrite.POST("/products", h.CreateProduct)
+		catalogWrite.PUT("/products/:id", h.UpdateProduct)
+		catalogWrite.PATCH("/products/:id", h.PatchProduct)
+		catalogWrite.PATCH("/products/:id/status", h.UpdateProductStatus)
+		catalogWrite.PATCH("/products/:id/price", h.UpdateProductPrice)
+		catalogWrite.PATCH("/products/:id/stock", h.UpdateProductStock)
+		catalogWrite.PATCH("/products/:id/group-buy", h.UpdateProductGroupBuy)
+		catalogWrite.PATCH("/products/:id/coupon", h.UpdateProductCoupon)
+		catalogWrite.PATCH("/products/:id/sale", h.UpdateProductSale)
+		catalogWrite.PATCH("/products/:id/images", h.UpdateProductImages)
+
+		catalogWrite.POST("/categories", h.CreateCategory)
+		catalogWrite.PATCH("/categories/:id", h.UpdateCategory)
+		catalogWrite.DELETE("/categories/:id", h.DeleteCategory)
+
+		catalogWrite.POST("/activities", act.CreateMerchant)
+		catalogWrite.PATCH("/activities/:id", act.UpdateMerchant)
+		catalogWrite.DELETE("/activities/:id", act.DeleteMerchant)
+		catalogWrite.POST("/activities/:id/products", act.AddProduct)
+		catalogWrite.PATCH("/activities/:id/products/:activity_product_id", act.UpdateProduct)
+		catalogWrite.PUT("/activities/:id/products/:activity_product_id", act.UpdateProductPut)
+		catalogWrite.DELETE("/activities/:id/products/:activity_product_id", act.RemoveProduct)
+	}
+
 	r.GET("/products", h.ListProducts)
 	r.GET("/products/:id", h.GetProduct)
-	r.PUT("/products/:id", h.UpdateProduct)
-	r.PATCH("/products/:id", h.PatchProduct)
-	r.PATCH("/products/:id/status", h.UpdateProductStatus)
-	r.PATCH("/products/:id/price", h.UpdateProductPrice)
-	r.PATCH("/products/:id/stock", h.UpdateProductStock)
-	r.PATCH("/products/:id/group-buy", h.UpdateProductGroupBuy)
-	r.PATCH("/products/:id/coupon", h.UpdateProductCoupon)
-	r.PATCH("/products/:id/sale", h.UpdateProductSale)
-	r.PATCH("/products/:id/images", h.UpdateProductImages)
-
 	r.GET("/categories", h.ListCategories)
-	r.POST("/categories", h.CreateCategory)
-	r.PATCH("/categories/:id", h.UpdateCategory)
-	r.DELETE("/categories/:id", h.DeleteCategory)
 
 	r.GET("/orders", mo.ListOrders)
 	r.GET("/orders/:id", mo.GetOrder)
@@ -255,19 +270,12 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.DELETE("/announcements/:id", ah.DeleteMerchant)
 
 	r.GET("/activities", act.ListMerchant)
-	r.POST("/activities", act.CreateMerchant)
 	r.GET("/activities/:id", act.GetMerchant)
-	r.PATCH("/activities/:id", act.UpdateMerchant)
-	r.DELETE("/activities/:id", act.DeleteMerchant)
 	r.GET("/activities/:id/products", act.ListMerchantProducts)
-	r.POST("/activities/:id/products", act.AddProduct)
 	r.GET("/activities/:id/products/:activity_product_id", act.GetMerchantProduct)
-	r.PATCH("/activities/:id/products/:activity_product_id", act.UpdateProduct)
-	r.PUT("/activities/:id/products/:activity_product_id", act.UpdateProductPut)
-	r.DELETE("/activities/:id/products/:activity_product_id", act.RemoveProduct)
 }
 
-func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handler.AdminDashboardHandler, ch *handler.CouponHandler, ae *handler.AdminExtraHandler, ah *handler.AnnouncementHandler, dz *handler.DeliveryZoneHandler) {
+func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handler.AdminDashboardHandler, ch *handler.CouponHandler, ae *handler.AdminExtraHandler, ah *handler.AnnouncementHandler, dz *handler.DeliveryZoneHandler, act *handler.ActivityHandler) {
 	r.POST("/merchants", h.CreateMerchant)
 	r.GET("/merchants", h.ListMerchants)
 	r.GET("/merchants/:id", h.GetMerchant)
@@ -291,6 +299,18 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 	r.PATCH("/products/:id/coupon", h.UpdateProductCoupon)
 	r.PATCH("/products/:id/sale", h.UpdateProductSale)
 	r.PATCH("/products/:id/images", h.UpdateProductImages)
+
+	r.GET("/activities", act.ListAdmin)
+	r.POST("/activities", act.CreateAdmin)
+	r.GET("/activities/:id", act.GetAdmin)
+	r.PATCH("/activities/:id", act.UpdateAdmin)
+	r.DELETE("/activities/:id", act.DeleteAdmin)
+	r.GET("/activities/:id/products", act.ListAdminProducts)
+	r.POST("/activities/:id/products", act.AddAdminProduct)
+	r.GET("/activities/:id/products/:activity_product_id", act.GetAdminProduct)
+	r.PATCH("/activities/:id/products/:activity_product_id", act.UpdateAdminProduct)
+	r.PUT("/activities/:id/products/:activity_product_id", act.UpdateAdminProductPut)
+	r.DELETE("/activities/:id/products/:activity_product_id", act.RemoveAdminProduct)
 
 	r.GET("/dashboard", ad.Dashboard)
 	r.GET("/sales", ad.SalesReport)
