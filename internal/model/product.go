@@ -5,6 +5,7 @@ import "time"
 const (
 	ProductItemTypePhysical = 1
 	ProductItemTypeVirtual  = 2
+	ProductItemTypePackage  = 3 // 平台套餐（跨店组合）
 )
 
 type Product struct {

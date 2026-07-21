@@ -227,6 +227,33 @@ func (h *StoreHandler) GetMerchantProduct(c *gin.Context) {
 	response.OK(c, h.ProductSvc.ToStoreView(product))
 }
 
+// GetProduct godoc
+// @Summary      商品详情（含平台套餐）
+// @Description  上架商品详情；套餐返回 package_groups
+// @Tags         用户-商城
+// @Produce      json
+// @Param        id   path  int  true  "商品 ID"
+// @Success      200  {object}  response.Body{data=service.ProductDetailView}
+// @Failure      404  {object}  response.Body
+// @Router       /products/{id} [get]
+func (h *StoreHandler) GetProduct(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "商品 ID 无效")
+		return
+	}
+	view, err := h.ProductSvc.GetOnShelfPublic(id)
+	if err != nil {
+		if errors.Is(err, service.ErrProductNotFound) || errors.Is(err, service.ErrMerchantNotFound) {
+			response.Fail(c, 404, 404, "商品不存在或已下架")
+			return
+		}
+		response.InternalError(c, "获取商品失败")
+		return
+	}
+	response.OK(c, view)
+}
+
 func optionalAccountID(c *gin.Context) *uint64 {
 	if id, ok := auth.AccountID(c); ok {
 		return &id

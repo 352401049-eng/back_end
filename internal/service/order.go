@@ -143,6 +143,9 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			First(&product).Error; err != nil {
 			return nil, ErrProductNotFound
 		}
+		if product.ItemType == model.ProductItemTypePackage {
+			return nil, fmt.Errorf("%w: 套餐请使用套餐下单接口", ErrInvalidProductArg)
+		}
 		if product.Stock < input.Quantity {
 			return nil, ErrInsufficientStock
 		}
@@ -528,12 +531,19 @@ func (s *OrderService) Cancel(accountID, orderID uint64) error {
 	if err != nil {
 		return err
 	}
+	isPackageParent := order.PackageProductID != nil && order.ParentOrderID == nil && order.MerchantID == 0
 	if order.Status != model.OrderStatusPendingPay && order.Status != model.OrderStatusPendingGroup {
-		if order.Status == model.OrderStatusPendingFulfill && order.MerchantReviewStage == model.MerchantReviewPending {
-			// allow cancel before merchant review
+		if order.Status == model.OrderStatusPendingFulfill &&
+			(order.MerchantReviewStage == model.MerchantReviewPending ||
+				(isPackageParent && order.MerchantReviewStage == model.MerchantReviewNone)) {
+			// allow cancel before merchant review / 套餐父单
 		} else {
 			return ErrOrderStatusInvalid
 		}
+	}
+	// 子单不可单独取消，须取消父单级联
+	if order.ParentOrderID != nil {
+		return fmt.Errorf("%w: 请取消套餐父订单", ErrOrderStatusInvalid)
 	}
 	return s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := rollbackGroupTeamForOrder(tx, orderID); err != nil {
@@ -549,7 +559,11 @@ func (s *OrderService) Cancel(accountID, orderID uint64) error {
 				return err
 			}
 		}
-		if err := restoreProductStockForOrder(tx, orderID); err != nil {
+		if isPackageParent {
+			if err := cancelPackageChildrenInTx(tx, orderID, s.InventorySvc, s.CouponSvc); err != nil {
+				return err
+			}
+		} else if err := restoreProductStockForOrder(tx, orderID); err != nil {
 			return err
 		}
 		if s.ActivitySvc != nil {
@@ -627,7 +641,11 @@ func (s *OrderService) GetView(accountID, orderID uint64, merchantID *uint64) (*
 	if err != nil {
 		return nil, err
 	}
-	if err := query.NotDeleted(s.DB).Preload("Items", "is_deleted = ?", model.NotDeleted).First(order, order.ID).Error; err != nil {
+	if err := query.NotDeleted(s.DB).
+		Preload("Items", "is_deleted = ?", model.NotDeleted).
+		Preload("Children", "is_deleted = ?", model.NotDeleted).
+		Preload("Children.Items", "is_deleted = ?", model.NotDeleted).
+		First(order, order.ID).Error; err != nil {
 		return nil, err
 	}
 	view := toOrderView(order)
@@ -653,6 +671,8 @@ func (s *OrderService) List(accountID uint64, merchantID *uint64, page, pageSize
 		q = q.Where("merchant_id = ?", *merchantID)
 	} else if accountID > 0 {
 		q = q.Where("account_id = ?", accountID)
+		// 用户端只展示顶层订单（套餐父单 / 普通单），子单挂在父单 children
+		q = q.Where("parent_order_id IS NULL")
 	}
 	if buyerAccountID != nil {
 		q = q.Where("account_id = ?", *buyerAccountID)
@@ -668,6 +688,8 @@ func (s *OrderService) List(accountID uint64, merchantID *uint64, page, pageSize
 	}
 	var orders []model.Order
 	if err := q.Preload("Items", "is_deleted = ?", model.NotDeleted).
+		Preload("Children", "is_deleted = ?", model.NotDeleted).
+		Preload("Children.Items", "is_deleted = ?", model.NotDeleted).
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&orders).Error; err != nil {
 		return nil, 0, err
 	}

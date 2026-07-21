@@ -75,9 +75,11 @@ func (a *AddressSnapshot) Scan(value interface{}) error {
 
 type Order struct {
 	ID                  uint64           `gorm:"primaryKey" json:"id"`
+	ParentOrderID       *uint64          `gorm:"column:parent_order_id;index" json:"parent_order_id,omitempty"`
 	OrderNo             string           `gorm:"size:32;not null" json:"order_no"`
 	AccountID           uint64           `gorm:"not null" json:"account_id"`
 	MerchantID          uint64           `gorm:"not null" json:"merchant_id"`
+	PackageProductID    *uint64          `gorm:"column:package_product_id;index" json:"package_product_id,omitempty"`
 	ActivityID          *uint64          `gorm:"column:activity_id" json:"activity_id,omitempty"`
 	Status              uint8            `gorm:"not null;default:0" json:"status"`
 	MerchantReviewStage uint8            `gorm:"not null;default:0" json:"merchant_review_stage"`
@@ -93,7 +95,8 @@ type Order struct {
 	CreatedAt           time.Time        `json:"created_at"`
 	UpdatedAt           time.Time        `json:"updated_at"`
 	SoftDelete
-	Items []OrderItem `gorm:"foreignKey:OrderID" json:"items,omitempty"`
+	Items    []OrderItem `gorm:"foreignKey:OrderID" json:"items,omitempty"`
+	Children []Order     `gorm:"foreignKey:ParentOrderID" json:"children,omitempty"`
 }
 
 func (Order) TableName() string { return "order" }
@@ -169,6 +172,9 @@ func OrderStatusCode(status, reviewStage uint8) string {
 			return "pending_use_merchant"
 		case MerchantReviewUseApproved:
 			return "approved"
+		case MerchantReviewNone:
+			// 套餐父单等无商家审核阶段的待履约
+			return "pending_fulfill"
 		}
 	}
 	if status == OrderStatusPendingVerify {

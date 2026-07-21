@@ -38,6 +38,7 @@ type ProductInput struct {
 	GroupBuyAllowRepeat uint8
 	ItemType            uint8
 	Status              uint8
+	PackageGroups       []PackageGroupInput // item_type=套餐时必填
 }
 
 type GroupBuyConfigInput struct {
@@ -54,21 +55,51 @@ type ProductListFilter struct {
 	Keyword            string
 	EnableGroupBuyOnly bool
 	AllowPickupOnly    bool
+	ExcludePackage     bool // 选品辅助：排除套餐
+	ItemType           *uint8
+}
+
+// ProductDetailView 商品详情（管理端/用户端），套餐附带分组。
+type ProductDetailView struct {
+	model.Product
+	PackageGroups []PackageGroupView `json:"package_groups,omitempty"`
+	CanGroupBuy   bool               `json:"can_group_buy"`
+	CanUseCoupon  bool               `json:"can_use_coupon"`
+	GroupBuyID    *uint64            `json:"group_buy_id,omitempty"`
+	SaleOptions   ProductSaleOptions `json:"sale_options"`
 }
 
 func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*model.Product, error) {
 	if err := s.validateInput(input); err != nil {
 		return nil, err
 	}
+	isPackage := input.ItemType == model.ProductItemTypePackage
+	if isPackage && scopeMerchantID != nil {
+		return nil, fmt.Errorf("%w: 仅管理端可创建套餐", ErrProductForbidden)
+	}
+	if isPackage && len(input.PackageGroups) == 0 {
+		return nil, fmt.Errorf("%w: 请配置套餐分组", ErrInvalidProductArg)
+	}
 	merchantID := input.MerchantID
 	if scopeMerchantID != nil {
 		merchantID = *scopeMerchantID
 	}
-	if merchantID == 0 {
+	if isPackage {
+		merchantID = 0
+		input.EnableGroupBuy = 0
+		input.GroupBuyTargetCount = nil
+		input.GroupBuyPrice = nil
+		input.GroupBuyAllowRepeat = 0
+	} else if merchantID == 0 {
 		return nil, ErrInvalidProductArg
 	}
-	if err := s.ensureMerchantExists(merchantID); err != nil {
-		return nil, err
+	if merchantID > 0 {
+		if err := s.ensureMerchantExists(merchantID); err != nil {
+			return nil, err
+		}
+	}
+	if isPackage && strings.TrimSpace(input.CategoryName) == "" && input.CategoryID == 0 {
+		input.CategoryName = "套餐"
 	}
 	categoryID, err := s.resolveCategoryID(input, merchantID, 0)
 	if err != nil {
@@ -108,8 +139,19 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		product.Status = model.ProductStatusOff
 	}
 
-	if err := s.DB.Create(&product).Error; err != nil {
-		return nil, fmt.Errorf("创建商品失败: %w", err)
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&product).Error; err != nil {
+			return fmt.Errorf("创建商品失败: %w", err)
+		}
+		if isPackage {
+			if err := s.replacePackageGroups(tx, product.ID, input.PackageGroups); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if err := s.syncGroupBuy(&product); err != nil {
 		return nil, fmt.Errorf("同步拼团配置失败: %w", err)
@@ -171,6 +213,12 @@ func (s *ProductService) List(page, pageSize int, filter ProductListFilter) ([]m
 	if filter.AllowPickupOnly {
 		q = q.Where("allow_pickup = 1")
 	}
+	if filter.ExcludePackage {
+		q = q.Where("item_type <> ?", model.ProductItemTypePackage)
+	}
+	if filter.ItemType != nil {
+		q = q.Where("item_type = ?", *filter.ItemType)
+	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -194,12 +242,36 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		return nil, err
 	}
 
+	isPackage := input.ItemType == model.ProductItemTypePackage || product.ItemType == model.ProductItemTypePackage
+	if product.ItemType == model.ProductItemTypePackage {
+		input.ItemType = model.ProductItemTypePackage
+		isPackage = true
+	}
+	if isPackage && scopeMerchantID != nil {
+		return nil, fmt.Errorf("%w: 仅管理端可编辑套餐", ErrProductForbidden)
+	}
+	if isPackage && input.ItemType != model.ProductItemTypePackage {
+		return nil, fmt.Errorf("%w: 套餐不可改为普通商品", ErrInvalidProductArg)
+	}
+	if !isPackage && input.ItemType == model.ProductItemTypePackage {
+		return nil, fmt.Errorf("%w: 普通商品不可改为套餐", ErrInvalidProductArg)
+	}
+
 	merchantID := product.MerchantID
-	if scopeMerchantID == nil && input.MerchantID > 0 {
+	if isPackage {
+		merchantID = 0
+		input.EnableGroupBuy = 0
+		input.GroupBuyTargetCount = nil
+		input.GroupBuyPrice = nil
+		input.GroupBuyAllowRepeat = 0
+	} else if scopeMerchantID == nil && input.MerchantID > 0 {
 		merchantID = input.MerchantID
 		if err := s.ensureMerchantExists(merchantID); err != nil {
 			return nil, err
 		}
+	}
+	if isPackage && strings.TrimSpace(input.CategoryName) == "" && input.CategoryID == 0 {
+		input.CategoryID = product.CategoryID
 	}
 	categoryID, err := s.resolveCategoryID(input, merchantID, product.CategoryID)
 	if err != nil {
@@ -241,8 +313,19 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		updates["group_buy_price"] = nil
 		updates["group_buy_allow_repeat"] = 0
 	}
-	if err := s.DB.Model(product).Updates(updates).Error; err != nil {
-		return nil, fmt.Errorf("更新商品失败: %w", err)
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(product).Updates(updates).Error; err != nil {
+			return fmt.Errorf("更新商品失败: %w", err)
+		}
+		if isPackage && len(input.PackageGroups) > 0 {
+			if err := s.replacePackageGroups(tx, id, input.PackageGroups); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	product.EnableGroupBuy = input.EnableGroupBuy
 	product.EnableCoupon = normalizeEnableCoupon(input.EnableCoupon)
@@ -455,14 +538,29 @@ func (s *ProductService) validateInput(input ProductInput) error {
 	if input.Name == "" || cover == "" {
 		return ErrInvalidProductArg
 	}
-	if input.CategoryID == 0 && strings.TrimSpace(input.CategoryName) == "" {
+	isPackage := input.ItemType == model.ProductItemTypePackage
+	if !isPackage && input.CategoryID == 0 && strings.TrimSpace(input.CategoryName) == "" {
 		return ErrInvalidProductArg
 	}
 	if input.Price <= 0 {
 		return ErrInvalidProductArg
 	}
-	if input.ItemType != 0 && input.ItemType != model.ProductItemTypePhysical && input.ItemType != model.ProductItemTypeVirtual {
+	if input.ItemType != 0 &&
+		input.ItemType != model.ProductItemTypePhysical &&
+		input.ItemType != model.ProductItemTypeVirtual &&
+		input.ItemType != model.ProductItemTypePackage {
 		return ErrInvalidProductArg
+	}
+	if isPackage {
+		if input.EnableGroupBuy == 1 {
+			return fmt.Errorf("%w: 套餐不支持拼团", ErrInvalidProductArg)
+		}
+		// 创建时必须带分组；更新时未传则保留原分组
+		if len(input.PackageGroups) > 0 {
+			if err := validatePackageGroupsInput(input.PackageGroups); err != nil {
+				return err
+			}
+		}
 	}
 	if input.EnableCoupon != 0 && input.EnableCoupon != 1 {
 		return ErrInvalidProductArg
@@ -471,6 +569,55 @@ func (s *ProductService) validateInput(input ProductInput) error {
 		return ErrInvalidProductArg
 	}
 	return validateGroupBuyConfig(input)
+}
+
+// GetDetailView 商品详情（含套餐分组）。
+func (s *ProductService) GetDetailView(id uint64, scopeMerchantID *uint64) (*ProductDetailView, error) {
+	product, err := s.GetByID(id, scopeMerchantID)
+	if err != nil {
+		return nil, err
+	}
+	return s.toDetailView(product)
+}
+
+// GetOnShelfPublic 上架商品详情（支持平台套餐 merchant_id=0）。
+func (s *ProductService) GetOnShelfPublic(id uint64) (*ProductDetailView, error) {
+	var product model.Product
+	if err := query.NotDeleted(s.DB).Preload("Category", "is_deleted = ?", model.NotDeleted).
+		Where("id = ? AND status = ?", id, model.ProductStatusOn).
+		First(&product).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProductNotFound
+		}
+		return nil, err
+	}
+	if product.MerchantID > 0 {
+		if err := s.ensureMerchantOpen(product.MerchantID); err != nil {
+			return nil, err
+		}
+	} else if product.ItemType != model.ProductItemTypePackage {
+		return nil, ErrProductNotFound
+	}
+	return s.toDetailView(&product)
+}
+
+func (s *ProductService) toDetailView(product *model.Product) (*ProductDetailView, error) {
+	store := s.ToStoreView(product)
+	view := &ProductDetailView{
+		Product:      *product,
+		CanGroupBuy:  store.CanGroupBuy,
+		CanUseCoupon: store.CanUseCoupon,
+		GroupBuyID:   store.GroupBuyID,
+		SaleOptions:  store.SaleOptions,
+	}
+	if product.ItemType == model.ProductItemTypePackage {
+		groups, err := s.LoadPackageGroups(product.ID)
+		if err != nil {
+			return nil, err
+		}
+		view.PackageGroups = groups
+	}
+	return view, nil
 }
 
 func validateGroupBuyConfig(input ProductInput) error {

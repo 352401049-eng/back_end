@@ -80,6 +80,7 @@ type ProductRequest struct {
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
 	ItemType            uint8    `json:"item_type" example:"1"`
 	Status         uint8    `json:"status" example:"0"`
+	PackageGroups  []service.PackageGroupInput `json:"package_groups"`
 }
 
 // UpdateProductRequest 选择性更新商品：只传需要修改的字段，未传字段保留原值。
@@ -104,6 +105,7 @@ type UpdateProductRequest struct {
 	GroupBuyAllowRepeat *uint8    `json:"group_buy_allow_repeat"`
 	ItemType            *uint8    `json:"item_type"`
 	Status              *uint8    `json:"status"`
+	PackageGroups       []service.PackageGroupInput `json:"package_groups"`
 }
 
 func (r UpdateProductRequest) hasField() bool {
@@ -112,7 +114,7 @@ func (r UpdateProductRequest) hasField() bool {
 		r.Price != nil || r.OriginalPrice != nil || r.Stock != nil || r.IsHot != nil ||
 		r.EnableGroupBuy != nil || r.EnableCoupon != nil || r.AllowPickup != nil || r.AllowDelivery != nil ||
 		r.GroupBuyTargetCount != nil || r.GroupBuyPrice != nil || r.GroupBuyAllowRepeat != nil ||
-		r.ItemType != nil || r.Status != nil
+		r.ItemType != nil || r.Status != nil || len(r.PackageGroups) > 0
 }
 
 type UpdateProductImagesRequest struct {
@@ -437,11 +439,15 @@ func (h *AdminHandler) CreateProduct(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	if req.MerchantID == 0 {
+	isPackage := req.ItemType == model.ProductItemTypePackage
+	if !isPackage && req.MerchantID == 0 {
 		response.BadRequest(c, "请指定 merchant_id")
 		return
 	}
-	if err := validateProductCategory(req, false); err != nil {
+	if isPackage {
+		req.MerchantID = 0
+	}
+	if err := validateProductCategory(req, isPackage); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
@@ -450,7 +456,12 @@ func (h *AdminHandler) CreateProduct(c *gin.Context) {
 		h.handleProductError(c, err)
 		return
 	}
-	response.OK(c, product)
+	view, err := h.ProductSvc.GetDetailView(product.ID, nil)
+	if err != nil {
+		h.handleProductError(c, err)
+		return
+	}
+	response.OK(c, view)
 }
 
 // ListProducts godoc
@@ -495,12 +506,12 @@ func (h *AdminHandler) GetProduct(c *gin.Context) {
 		response.BadRequest(c, "ID 无效")
 		return
 	}
-	product, err := h.ProductSvc.GetByID(id, nil)
+	view, err := h.ProductSvc.GetDetailView(id, nil)
 	if err != nil {
 		h.handleProductError(c, err)
 		return
 	}
-	response.OK(c, product)
+	response.OK(c, view)
 }
 
 // UpdateProduct godoc
@@ -562,7 +573,12 @@ func (h *AdminHandler) patchProductUpdate(c *gin.Context, scope *uint64) {
 		h.handleProductError(c, err)
 		return
 	}
-	response.OK(c, product)
+	view, err := h.ProductSvc.GetDetailView(product.ID, scope)
+	if err != nil {
+		h.handleProductError(c, err)
+		return
+	}
+	response.OK(c, view)
 }
 
 // UpdateProductStatus godoc
@@ -851,7 +867,13 @@ func (h *AdminHandler) handleProductError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrCategoryForbidden):
 		response.Fail(c, 403, 403, "分类不属于该商家")
 	case errors.Is(err, service.ErrInvalidProductArg):
-		response.BadRequest(c, "参数无效")
+		msg := err.Error()
+		if i := strings.Index(msg, ": "); i >= 0 && i+2 < len(msg) {
+			msg = msg[i+2:]
+		} else {
+			msg = "参数无效"
+		}
+		response.BadRequest(c, msg)
 	default:
 		response.InternalError(c, "操作失败")
 	}
@@ -967,6 +989,10 @@ func (h *MerchantHandler) CreateProduct(c *gin.Context) {
 	var req ProductRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数无效")
+		return
+	}
+	if req.ItemType == model.ProductItemTypePackage {
+		response.BadRequest(c, "商家不可创建套餐商品")
 		return
 	}
 	if err := validateProductCategory(req, false); err != nil {
@@ -1405,6 +1431,9 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 	} else if existing != nil {
 		input.GroupBuyAllowRepeat = existing.GroupBuyAllowRepeat
 	}
+	if len(req.PackageGroups) > 0 {
+		input.PackageGroups = req.PackageGroups
+	}
 	return input
 }
 
@@ -1490,6 +1519,9 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	}
 	if req.Status != nil {
 		input.Status = *req.Status
+	}
+	if len(req.PackageGroups) > 0 {
+		input.PackageGroups = req.PackageGroups
 	}
 	return input
 }
@@ -1606,6 +1638,17 @@ func parseProductListFilter(c *gin.Context, merchantScoped bool) (service.Produc
 	}
 	if c.Query("pickup") == "1" {
 		filter.AllowPickupOnly = true
+	}
+	if c.Query("exclude_package") == "1" {
+		filter.ExcludePackage = true
+	}
+	if s := c.Query("item_type"); s != "" {
+		v, err := strconv.ParseUint(s, 10, 8)
+		if err != nil {
+			return filter, errors.New("item_type 参数无效")
+		}
+		u := uint8(v)
+		filter.ItemType = &u
 	}
 	return filter, nil
 }

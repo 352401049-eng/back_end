@@ -542,9 +542,10 @@ func (s *CategoryService) DeleteForMerchant(id, merchantID uint64, scoped bool) 
 }
 
 // FindOrCreateByName 按商家与名称查找一级分类，不存在则自动创建。
+// merchantID=0 表示平台分类（套餐等）。
 func (s *CategoryService) FindOrCreateByName(merchantID uint64, name string) (*model.ProductCategory, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || merchantID == 0 {
+	if name == "" {
 		return nil, ErrInvalidProductArg
 	}
 	if utf8.RuneCountInString(name) > 64 {

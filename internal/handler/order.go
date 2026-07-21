@@ -15,7 +15,7 @@ import (
 
 type CreateOrderRequest struct {
 	ProductID         uint64  `json:"product_id" example:"1"`
-	MerchantID        uint64  `json:"merchant_id" binding:"required"`
+	MerchantID        uint64  `json:"merchant_id"`
 	Quantity          uint32  `json:"quantity" example:"1"`
 	PurchaseType      uint8   `json:"purchase_type" example:"1"`
 	GroupBuyID        *uint64 `json:"group_buy_id"`
@@ -28,6 +28,7 @@ type CreateOrderRequest struct {
 	Remark            *string `json:"remark"`
 	CartItemID        *uint64 `json:"cart_item_id"`
 	UserCouponID      *uint64 `json:"user_coupon_id" example:"1"`
+	PackageSelections []service.PackageSelectionInput `json:"package_selections"`
 }
 
 type RequestUseRequest struct {
@@ -63,14 +64,28 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 		response.BadRequest(c, "请指定 product_id 或 activity_product_id")
 		return
 	}
-	view, err := h.OrderSvc.Create(accountID, service.CreateOrderInput{
-		ProductID: req.ProductID, MerchantID: req.MerchantID, Quantity: req.Quantity,
-		PurchaseType: req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
-		ActivityProductID: req.ActivityProductID,
-		DeliveryType: req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
-		DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
-		CartItemID: req.CartItemID, UserCouponID: req.UserCouponID,
-	})
+	var view *service.OrderView
+	var err error
+	if len(req.PackageSelections) > 0 {
+		view, err = h.OrderSvc.CreatePackage(accountID, service.CreatePackageOrderInput{
+			ProductID: req.ProductID, PackageSelections: req.PackageSelections,
+			DeliveryType: req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
+			DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
+		})
+	} else {
+		if req.MerchantID == 0 {
+			response.BadRequest(c, "请指定 merchant_id")
+			return
+		}
+		view, err = h.OrderSvc.Create(accountID, service.CreateOrderInput{
+			ProductID: req.ProductID, MerchantID: req.MerchantID, Quantity: req.Quantity,
+			PurchaseType: req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
+			ActivityProductID: req.ActivityProductID,
+			DeliveryType: req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
+			DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
+			CartItemID: req.CartItemID, UserCouponID: req.UserCouponID,
+		})
+	}
 	if err != nil {
 		handleOrderError(c, err)
 		return
@@ -208,7 +223,21 @@ func handleOrderError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrOrderNotFound):
 		response.Fail(c, 404, 404, "订单不存在")
 	case errors.Is(err, service.ErrOrderStatusInvalid):
-		response.BadRequest(c, "当前状态不允许此操作")
+		msg := "当前状态不允许此操作"
+		if raw := err.Error(); len(raw) > len(service.ErrOrderStatusInvalid.Error()) {
+			if i := len(service.ErrOrderStatusInvalid.Error()); i+2 < len(raw) && raw[i:i+2] == ": " {
+				msg = raw[i+2:]
+			}
+		}
+		response.BadRequest(c, msg)
+	case errors.Is(err, service.ErrInvalidProductArg):
+		msg := err.Error()
+		if i := len(service.ErrInvalidProductArg.Error()); i+2 < len(msg) && msg[i:i+2] == ": " {
+			msg = msg[i+2:]
+		} else {
+			msg = "参数无效"
+		}
+		response.BadRequest(c, msg)
 	case errors.Is(err, service.ErrInsufficientStock):
 		response.BadRequest(c, "库存不足")
 	case errors.Is(err, service.ErrGroupBuyInvalid):
