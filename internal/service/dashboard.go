@@ -80,18 +80,21 @@ type SalesReportFilter struct {
 	EndDate    *time.Time // exclusive, day after end
 }
 
+func (s *DashboardService) freshDB() *gorm.DB {
+	// NewDB 切断与 s.DB 的 Statement 共享，避免并发/链式复用导致 Where 条件串台
+	return s.DB.Session(&gorm.Session{NewDB: true})
+}
+
 func (s *DashboardService) Admin() (*AdminDashboard, error) {
 	d := &AdminDashboard{}
-	// 每次统计用独立 session，避免 Where 条件在同一 db 上累积
-	q := func() *gorm.DB { return query.NotDeleted(s.DB) }
-	q().Model(&model.Order{}).Count(&d.OrderCount)
-	q().Model(&model.Order{}).Where("status = ?", model.OrderStatusCompleted).Count(&d.CompletedOrderCount)
-	q().Model(&model.VerificationRecord{}).Count(&d.VerificationCount)
-	q().Model(&model.RiderApplication{}).Where("status = ?", model.RiderApplicationPending).Count(&d.PendingRiderApps)
-	q().Model(&model.MerchantProfile{}).Count(&d.MerchantCount)
-	q().Model(&model.Product{}).Count(&d.ProductCount)
-	q().Model(&model.Product{}).Where("stock <= ?", 10).Count(&d.LowStockProductCount)
-	q().Model(&model.Account{}).Where("type = ?", model.AccountTypeUser).Count(&d.UserCount)
+	s.freshDB().Model(&model.Order{}).Where("is_deleted = ?", model.NotDeleted).Count(&d.OrderCount)
+	s.freshDB().Model(&model.Order{}).Where("is_deleted = ? AND status = ?", model.NotDeleted, model.OrderStatusCompleted).Count(&d.CompletedOrderCount)
+	s.freshDB().Model(&model.VerificationRecord{}).Where("is_deleted = ?", model.NotDeleted).Count(&d.VerificationCount)
+	s.freshDB().Model(&model.RiderApplication{}).Where("is_deleted = ? AND status = ?", model.NotDeleted, model.RiderApplicationPending).Count(&d.PendingRiderApps)
+	s.freshDB().Model(&model.MerchantProfile{}).Where("is_deleted = ?", model.NotDeleted).Count(&d.MerchantCount)
+	s.freshDB().Model(&model.Product{}).Where("is_deleted = ?", model.NotDeleted).Count(&d.ProductCount)
+	s.freshDB().Model(&model.Product{}).Where("is_deleted = ? AND stock <= ?", model.NotDeleted, 10).Count(&d.LowStockProductCount)
+	s.freshDB().Model(&model.Account{}).Where("is_deleted = ? AND type = ?", model.NotDeleted, model.AccountTypeUser).Count(&d.UserCount)
 
 	allTimeSales, err := s.SalesReport(SalesReportFilter{MerchantID: nil})
 	if err != nil {
@@ -113,19 +116,25 @@ func (s *DashboardService) Admin() (*AdminDashboard, error) {
 
 func (s *DashboardService) Merchant(merchantID uint64) (*MerchantDashboard, error) {
 	d := &MerchantDashboard{}
-	q := func() *gorm.DB { return query.NotDeleted(s.DB) }
-	q().Model(&model.Product{}).Where("merchant_id = ?", merchantID).Count(&d.ProductCount)
-	q().Model(&model.Order{}).Where("merchant_id = ? AND status = ? AND merchant_review_stage = ?",
-		merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPending).Count(&d.PendingOrderReview)
-	q().Model(&model.Order{}).Where("merchant_id = ? AND status = ? AND merchant_review_stage = ?",
-		merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPendingUse).Count(&d.PendingUseReview)
+	s.freshDB().Model(&model.Product{}).Where("is_deleted = ? AND merchant_id = ?", model.NotDeleted, merchantID).Count(&d.ProductCount)
+	s.freshDB().Model(&model.Order{}).Where(
+		"is_deleted = ? AND merchant_id = ? AND status = ? AND merchant_review_stage = ?",
+		model.NotDeleted, merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPending,
+	).Count(&d.PendingOrderReview)
+	s.freshDB().Model(&model.Order{}).Where(
+		"is_deleted = ? AND merchant_id = ? AND status = ? AND merchant_review_stage = ?",
+		model.NotDeleted, merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPendingUse,
+	).Count(&d.PendingUseReview)
 
 	start, end := todayRange()
-	q().Model(&model.VerificationRecord{}).
-		Where("merchant_id = ? AND verified_at >= ? AND verified_at < ?", merchantID, start, end).
-		Count(&d.TodayVerificationCount)
+	s.freshDB().Model(&model.VerificationRecord{}).Where(
+		"is_deleted = ? AND merchant_id = ? AND verified_at >= ? AND verified_at < ?",
+		model.NotDeleted, merchantID, start, end,
+	).Count(&d.TodayVerificationCount)
 
-	q().Model(&model.Product{}).Where("merchant_id = ? AND stock <= ?", merchantID, 10).Count(&d.LowStockCount)
+	s.freshDB().Model(&model.Product{}).Where(
+		"is_deleted = ? AND merchant_id = ? AND stock <= ?", model.NotDeleted, merchantID, 10,
+	).Count(&d.LowStockCount)
 
 	var err error
 	d.OrderTrend, err = s.orderTrend(&merchantID, 7)
@@ -155,7 +164,10 @@ func (s *DashboardService) SalesReport(filter SalesReportFilter) (*SalesReport, 
 	}
 	if filter.MerchantID != nil {
 		var mp model.MerchantProfile
-		if err := query.NotDeleted(s.DB).Select("shop_name").First(&mp, *filter.MerchantID).Error; err == nil {
+		if err := s.freshDB().Model(&model.MerchantProfile{}).
+			Select("shop_name").
+			Where("is_deleted = ? AND id = ?", model.NotDeleted, *filter.MerchantID).
+			First(&mp).Error; err == nil {
 			report.MerchantName = mp.ShopName
 		}
 	}
@@ -166,11 +178,13 @@ func (s *DashboardService) SalesReport(filter SalesReportFilter) (*SalesReport, 
 	if err := orderQ.Count(&report.ValidOrderCount).Error; err != nil {
 		return nil, err
 	}
-	if err := orderQ.Select("COALESCE(SUM(pay_amount),0)").Scan(&report.TotalSalesAmount).Error; err != nil {
+	// Count 后再聚合金额：另起查询，避免复用已执行过的 statement
+	sumQ := applySalesTimeRange(s.validSalesOrderQuery(filter.MerchantID), filter.StartDate, filter.EndDate)
+	if err := sumQ.Select("COALESCE(SUM(pay_amount),0)").Scan(&report.TotalSalesAmount).Error; err != nil {
 		return nil, err
 	}
 
-	vrQ := query.NotDeleted(s.DB.Model(&model.VerificationRecord{}))
+	vrQ := s.freshDB().Model(&model.VerificationRecord{}).Where("is_deleted = ?", model.NotDeleted)
 	if filter.MerchantID != nil {
 		vrQ = vrQ.Where("merchant_id = ?", *filter.MerchantID)
 	}
@@ -184,7 +198,7 @@ func (s *DashboardService) SalesReport(filter SalesReportFilter) (*SalesReport, 
 }
 
 func (s *DashboardService) validSalesOrderQuery(merchantID *uint64) *gorm.DB {
-	q := query.NotDeleted(s.DB.Model(&model.Order{})).
+	q := query.NotDeleted(s.freshDB().Model(&model.Order{})).
 		Where("pay_status = ?", model.PayStatusPaid).
 		Where("status NOT IN ?", invalidOrderStatusInts).
 		Where("merchant_review_stage != ?", model.MerchantReviewRejected)
@@ -262,7 +276,7 @@ func (s *DashboardService) orderTrend(merchantID *uint64, days int) ([]DailyStat
 		OrderCount  int64
 		SalesAmount float64
 	}
-	q := query.NotDeleted(s.DB.Model(&model.Order{})).
+	q := query.NotDeleted(s.freshDB().Model(&model.Order{})).
 		Where("pay_status = ?", model.PayStatusPaid).
 		Where("status NOT IN ?", invalidOrderStatusInts).
 		Where("merchant_review_stage != ?", model.MerchantReviewRejected).
@@ -301,7 +315,7 @@ func (s *DashboardService) topProducts(merchantID *uint64, limit int) ([]Product
 		MerchantID  uint64
 		SalesCount  uint32
 	}
-	q := s.DB.Model(&model.OrderItem{}).
+	q := s.freshDB().Model(&model.OrderItem{}).
 		Select("order_item.product_id, product.name AS product_name, product.merchant_id, SUM(order_item.quantity) AS sales_count").
 		Joins("JOIN `order` ON `order`.id = order_item.order_id AND `order`.is_deleted = 0").
 		Joins("JOIN product ON product.id = order_item.product_id AND product.is_deleted = 0").
