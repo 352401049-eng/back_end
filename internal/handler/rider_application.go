@@ -73,6 +73,11 @@ func (h *UserHandler) GetRiderApplication(c *gin.Context) {
 	}
 	app, err := h.RiderSvc.GetLatestByAccount(accountID)
 	if err != nil {
+		if errors.Is(err, service.ErrRiderApplicationNotFound) {
+			// 未申请过：返回 200 + null，避免「我的」页每次打开都打出 404
+			response.OK(c, nil)
+			return
+		}
 		handleRiderApplyError(c, err)
 		return
 	}
