@@ -82,15 +82,16 @@ type SalesReportFilter struct {
 
 func (s *DashboardService) Admin() (*AdminDashboard, error) {
 	d := &AdminDashboard{}
-	db := query.NotDeleted(s.DB)
-	db.Model(&model.Order{}).Count(&d.OrderCount)
-	db.Model(&model.Order{}).Where("status = ?", model.OrderStatusCompleted).Count(&d.CompletedOrderCount)
-	db.Model(&model.VerificationRecord{}).Count(&d.VerificationCount)
-	db.Model(&model.RiderApplication{}).Where("status = ?", model.RiderApplicationPending).Count(&d.PendingRiderApps)
-	db.Model(&model.MerchantProfile{}).Count(&d.MerchantCount)
-	db.Model(&model.Product{}).Count(&d.ProductCount)
-	db.Model(&model.Product{}).Where("stock <= ?", 10).Count(&d.LowStockProductCount)
-	db.Model(&model.Account{}).Where("type = ?", model.AccountTypeUser).Count(&d.UserCount)
+	// 每次统计用独立 session，避免 Where 条件在同一 db 上累积
+	q := func() *gorm.DB { return query.NotDeleted(s.DB) }
+	q().Model(&model.Order{}).Count(&d.OrderCount)
+	q().Model(&model.Order{}).Where("status = ?", model.OrderStatusCompleted).Count(&d.CompletedOrderCount)
+	q().Model(&model.VerificationRecord{}).Count(&d.VerificationCount)
+	q().Model(&model.RiderApplication{}).Where("status = ?", model.RiderApplicationPending).Count(&d.PendingRiderApps)
+	q().Model(&model.MerchantProfile{}).Count(&d.MerchantCount)
+	q().Model(&model.Product{}).Count(&d.ProductCount)
+	q().Model(&model.Product{}).Where("stock <= ?", 10).Count(&d.LowStockProductCount)
+	q().Model(&model.Account{}).Where("type = ?", model.AccountTypeUser).Count(&d.UserCount)
 
 	allTimeSales, err := s.SalesReport(SalesReportFilter{MerchantID: nil})
 	if err != nil {
@@ -112,19 +113,19 @@ func (s *DashboardService) Admin() (*AdminDashboard, error) {
 
 func (s *DashboardService) Merchant(merchantID uint64) (*MerchantDashboard, error) {
 	d := &MerchantDashboard{}
-	db := query.NotDeleted(s.DB)
-	db.Model(&model.Product{}).Where("merchant_id = ?", merchantID).Count(&d.ProductCount)
-	db.Model(&model.Order{}).Where("merchant_id = ? AND status = ? AND merchant_review_stage = ?",
+	q := func() *gorm.DB { return query.NotDeleted(s.DB) }
+	q().Model(&model.Product{}).Where("merchant_id = ?", merchantID).Count(&d.ProductCount)
+	q().Model(&model.Order{}).Where("merchant_id = ? AND status = ? AND merchant_review_stage = ?",
 		merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPending).Count(&d.PendingOrderReview)
-	db.Model(&model.Order{}).Where("merchant_id = ? AND status = ? AND merchant_review_stage = ?",
+	q().Model(&model.Order{}).Where("merchant_id = ? AND status = ? AND merchant_review_stage = ?",
 		merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPendingUse).Count(&d.PendingUseReview)
 
 	start, end := todayRange()
-	db.Model(&model.VerificationRecord{}).
+	q().Model(&model.VerificationRecord{}).
 		Where("merchant_id = ? AND verified_at >= ? AND verified_at < ?", merchantID, start, end).
 		Count(&d.TodayVerificationCount)
 
-	db.Model(&model.Product{}).Where("merchant_id = ? AND stock <= ?", merchantID, 10).Count(&d.LowStockCount)
+	q().Model(&model.Product{}).Where("merchant_id = ? AND stock <= ?", merchantID, 10).Count(&d.LowStockCount)
 
 	var err error
 	d.OrderTrend, err = s.orderTrend(&merchantID, 7)
@@ -300,7 +301,7 @@ func (s *DashboardService) topProducts(merchantID *uint64, limit int) ([]Product
 		MerchantID  uint64
 		SalesCount  uint32
 	}
-	q := query.NotDeleted(s.DB.Model(&model.OrderItem{})).
+	q := s.DB.Model(&model.OrderItem{}).
 		Select("order_item.product_id, product.name AS product_name, product.merchant_id, SUM(order_item.quantity) AS sales_count").
 		Joins("JOIN `order` ON `order`.id = order_item.order_id AND `order`.is_deleted = 0").
 		Joins("JOIN product ON product.id = order_item.product_id AND product.is_deleted = 0").
