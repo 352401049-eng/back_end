@@ -129,6 +129,7 @@ type ActivityProductStoreView struct {
 	LimitReached   bool               `json:"limit_reached"`
 	LimitReason    string             `json:"limit_reason,omitempty"`
 	RemainingQty   uint32             `json:"remaining_qty"`
+	PackageGroups  []PackageGroupView `json:"package_groups,omitempty"`
 }
 
 type ActivityOrderContext struct {
@@ -832,6 +833,13 @@ func (s *ActivityService) GetStoreProductForUser(activityID, activityProductID u
 		return nil, ErrActivityProductNotFound
 	}
 	view := buildActivityProductStoreView(act, ap, ap.Product)
+	if ap.Product.ItemType == model.ProductItemTypePackage {
+		groups, err := (&ProductService{DB: s.DB}).LoadPackageGroups(ap.Product.ID)
+		if err != nil {
+			return nil, err
+		}
+		view.PackageGroups = groups
+	}
 	if err := s.enrichActivityProductLimits(&view, ap, accountID); err != nil {
 		return nil, err
 	}

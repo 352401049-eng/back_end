@@ -207,13 +207,11 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			return nil, err
 		}
 		gb = *ensured
-		if input.GroupBuyID != nil && *input.GroupBuyID != gb.ID {
-			var byID model.GroupBuy
-			if err := query.NotDeleted(s.DB).First(&byID, *input.GroupBuyID).Error; err != nil {
-				return nil, ErrGroupBuyInvalid
-			}
-			gb = byID
+		resolved, err := resolveClientGroupBuy(s.DB, product.ID, gb, input.GroupBuyID)
+		if err != nil {
+			return nil, err
 		}
+		gb = resolved
 		groupBuyID = &gb.ID
 	}
 
@@ -394,6 +392,21 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, 
 		return 0, err
 	}
 	return team.ID, nil
+}
+
+// resolveClientGroupBuy 接受客户端 group_buy_id 时必须属于当前商品且启用中，防止跨品拼团劫持。
+func resolveClientGroupBuy(db *gorm.DB, productID uint64, ensured model.GroupBuy, clientID *uint64) (model.GroupBuy, error) {
+	if clientID == nil || *clientID == 0 || *clientID == ensured.ID {
+		return ensured, nil
+	}
+	var byID model.GroupBuy
+	if err := query.NotDeleted(db).First(&byID, *clientID).Error; err != nil {
+		return model.GroupBuy{}, ErrGroupBuyInvalid
+	}
+	if byID.ProductID != productID || byID.Status != 1 {
+		return model.GroupBuy{}, ErrGroupBuyInvalid
+	}
+	return byID, nil
 }
 
 // ensureActiveGroupBuy 保证商品有可用的 group_buy 行（活动拼团也可能未同步商品拼团配置）。
@@ -1361,7 +1374,31 @@ func (s *OrderService) creditOrderInventory(tx *gorm.DB, accountID, orderID uint
 	if s.InventorySvc == nil || len(items) == 0 {
 		return nil
 	}
+	// 店内套餐：头行是套餐商品本身，入背包只入组件 SKU
+	items = filterOutPackageProductItems(tx, orderID, items)
+	if len(items) == 0 {
+		return nil
+	}
 	return s.InventorySvc.CreditFromOrder(tx, accountID, orderID, items)
+}
+
+func filterOutPackageProductItems(tx *gorm.DB, orderID uint64, items []model.OrderItem) []model.OrderItem {
+	var order model.Order
+	if err := query.NotDeleted(tx).Select("id", "package_product_id").First(&order, orderID).Error; err != nil {
+		return items
+	}
+	if order.PackageProductID == nil || *order.PackageProductID == 0 {
+		return items
+	}
+	pkgID := *order.PackageProductID
+	out := make([]model.OrderItem, 0, len(items))
+	for _, it := range items {
+		if it.ProductID == pkgID {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // deductProductStockInTx 下单时扣减商品库存（需 stock >= quantity）。

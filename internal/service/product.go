@@ -74,29 +74,18 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		return nil, err
 	}
 	isPackage := input.ItemType == model.ProductItemTypePackage
-	if isPackage && scopeMerchantID != nil {
-		return nil, fmt.Errorf("%w: 仅管理端可创建套餐", ErrProductForbidden)
-	}
 	if isPackage && len(input.PackageGroups) == 0 {
-		return nil, fmt.Errorf("%w: 请配置套餐分组", ErrInvalidProductArg)
+		return nil, fmt.Errorf("%w: 请配置套餐分组（固定包含或可选）", ErrInvalidProductArg)
 	}
 	merchantID := input.MerchantID
 	if scopeMerchantID != nil {
 		merchantID = *scopeMerchantID
 	}
-	if isPackage {
-		merchantID = 0
-		input.EnableGroupBuy = 0
-		input.GroupBuyTargetCount = nil
-		input.GroupBuyPrice = nil
-		input.GroupBuyAllowRepeat = 0
-	} else if merchantID == 0 {
-		return nil, ErrInvalidProductArg
+	if merchantID == 0 {
+		return nil, fmt.Errorf("%w: 请指定所属商家", ErrInvalidProductArg)
 	}
-	if merchantID > 0 {
-		if err := s.ensureMerchantExists(merchantID); err != nil {
-			return nil, err
-		}
+	if err := s.ensureMerchantExists(merchantID); err != nil {
+		return nil, err
 	}
 	if isPackage && strings.TrimSpace(input.CategoryName) == "" && input.CategoryID == 0 {
 		input.CategoryName = "套餐"
@@ -144,7 +133,7 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 			return fmt.Errorf("创建商品失败: %w", err)
 		}
 		if isPackage {
-			if err := s.replacePackageGroups(tx, product.ID, input.PackageGroups); err != nil {
+			if err := s.replacePackageGroups(tx, product.ID, merchantID, input.PackageGroups); err != nil {
 				return err
 			}
 		}
@@ -247,9 +236,6 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		input.ItemType = model.ProductItemTypePackage
 		isPackage = true
 	}
-	if isPackage && scopeMerchantID != nil {
-		return nil, fmt.Errorf("%w: 仅管理端可编辑套餐", ErrProductForbidden)
-	}
 	if isPackage && input.ItemType != model.ProductItemTypePackage {
 		return nil, fmt.Errorf("%w: 套餐不可改为普通商品", ErrInvalidProductArg)
 	}
@@ -258,17 +244,14 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	}
 
 	merchantID := product.MerchantID
-	if isPackage {
-		merchantID = 0
-		input.EnableGroupBuy = 0
-		input.GroupBuyTargetCount = nil
-		input.GroupBuyPrice = nil
-		input.GroupBuyAllowRepeat = 0
-	} else if scopeMerchantID == nil && input.MerchantID > 0 {
+	if scopeMerchantID == nil && input.MerchantID > 0 {
 		merchantID = input.MerchantID
 		if err := s.ensureMerchantExists(merchantID); err != nil {
 			return nil, err
 		}
+	}
+	if isPackage && merchantID == 0 {
+		return nil, fmt.Errorf("%w: 店内套餐须指定商家", ErrInvalidProductArg)
 	}
 	if isPackage && strings.TrimSpace(input.CategoryName) == "" && input.CategoryID == 0 {
 		input.CategoryID = product.CategoryID
@@ -318,7 +301,7 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 			return fmt.Errorf("更新商品失败: %w", err)
 		}
 		if isPackage && len(input.PackageGroups) > 0 {
-			if err := s.replacePackageGroups(tx, id, input.PackageGroups); err != nil {
+			if err := s.replacePackageGroups(tx, id, merchantID, input.PackageGroups); err != nil {
 				return err
 			}
 		}
@@ -552,9 +535,6 @@ func (s *ProductService) validateInput(input ProductInput) error {
 		return ErrInvalidProductArg
 	}
 	if isPackage {
-		if input.EnableGroupBuy == 1 {
-			return fmt.Errorf("%w: 套餐不支持拼团", ErrInvalidProductArg)
-		}
 		// 创建时必须带分组；更新时未传则保留原分组
 		if len(input.PackageGroups) > 0 {
 			if err := validatePackageGroupsInput(input.PackageGroups); err != nil {
@@ -595,8 +575,6 @@ func (s *ProductService) GetOnShelfPublic(id uint64) (*ProductDetailView, error)
 		if err := s.ensureMerchantOpen(product.MerchantID); err != nil {
 			return nil, err
 		}
-	} else if product.ItemType != model.ProductItemTypePackage {
-		return nil, ErrProductNotFound
 	}
 	return s.toDetailView(&product)
 }

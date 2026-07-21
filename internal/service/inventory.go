@@ -101,6 +101,7 @@ func (s *InventoryService) RollbackOrderCredit(tx *gorm.DB, orderID uint64) erro
 	if err := query.NotDeleted(tx).Where("order_id = ?", orderID).Find(&items).Error; err != nil {
 		return err
 	}
+	items = filterOutPackageProductItems(tx, orderID, items)
 	for _, it := range items {
 		spec := orderItemSpec(it)
 		rollbackQty := int32(it.Quantity)

@@ -64,13 +64,26 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 		response.BadRequest(c, "请指定 product_id 或 activity_product_id")
 		return
 	}
+	usePackage := len(req.PackageSelections) > 0
+	if !usePackage {
+		if req.ActivityProductID != nil {
+			usePackage = h.OrderSvc.IsActivityProductPackage(*req.ActivityProductID)
+		} else if req.ProductID > 0 {
+			usePackage = h.OrderSvc.IsProductPackage(req.ProductID)
+		}
+	}
+
 	var view *service.OrderView
 	var err error
-	if len(req.PackageSelections) > 0 {
+	if usePackage {
 		view, err = h.OrderSvc.CreatePackage(accountID, service.CreatePackageOrderInput{
-			ProductID: req.ProductID, PackageSelections: req.PackageSelections,
+			ProductID: req.ProductID, MerchantID: req.MerchantID,
+			PackageSelections: req.PackageSelections,
+			PurchaseType: req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
+			ActivityProductID: req.ActivityProductID,
 			DeliveryType: req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
 			DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
+			UserCouponID: req.UserCouponID,
 		})
 	} else {
 		if req.MerchantID == 0 {

@@ -440,12 +440,9 @@ func (h *AdminHandler) CreateProduct(c *gin.Context) {
 		return
 	}
 	isPackage := req.ItemType == model.ProductItemTypePackage
-	if !isPackage && req.MerchantID == 0 {
+	if req.MerchantID == 0 {
 		response.BadRequest(c, "请指定 merchant_id")
 		return
-	}
-	if isPackage {
-		req.MerchantID = 0
 	}
 	if err := validateProductCategory(req, isPackage); err != nil {
 		response.BadRequest(c, err.Error())
@@ -991,11 +988,7 @@ func (h *MerchantHandler) CreateProduct(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	if req.ItemType == model.ProductItemTypePackage {
-		response.BadRequest(c, "商家不可创建套餐商品")
-		return
-	}
-	if err := validateProductCategory(req, false); err != nil {
+	if err := validateProductCategory(req, req.ItemType == model.ProductItemTypePackage); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
