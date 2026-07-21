@@ -216,9 +216,27 @@ func seckillDeadlineAt(act *model.Activity, ap *model.ActivityProduct, accountCr
 	return deadline
 }
 
-// seckillLimitStatus 检查日/周/月/全程/新用户窗限购（不含 register 窗外，调用方已过滤）。
-// 返回首个触达的 reason：daily|weekly|monthly|activity_max|register_max。
+// seckillLimitStatus 检查日/周/月/全程/新用户窗限购 + 每人件数（不含 register 窗外，调用方已过滤）。
+// 返回首个触达的 reason：daily|weekly|monthly|activity_max|register_max|per_user_qty。
 func (s *ActivityService) seckillLimitStatus(accountID uint64, ap *model.ActivityProduct, accountCreatedAt, now time.Time) (bool, string, error) {
+	reached, reason, err := s.seckillOrderLimitStatus(accountID, ap, accountCreatedAt, now)
+	if err != nil || reached {
+		return reached, reason, err
+	}
+	if ap.PerUserMaxQty > 0 {
+		bought, err := sumBoughtQty(s.DB, accountID, ap.ID)
+		if err != nil {
+			return false, "", err
+		}
+		if bought >= ap.PerUserMaxQty {
+			return true, "per_user_qty", nil
+		}
+	}
+	return false, "", nil
+}
+
+// seckillOrderLimitStatus 仅检查「单数」类限购（日/周/月/全程/新用户窗），不含每人件数。
+func (s *ActivityService) seckillOrderLimitStatus(accountID uint64, ap *model.ActivityProduct, accountCreatedAt, now time.Time) (bool, string, error) {
 	if ap.RegisterHours > 0 && ap.RegisterMax > 0 {
 		start := accountCreatedAt
 		end := registerDeadline(accountCreatedAt, ap.RegisterHours)
@@ -261,16 +279,6 @@ func (s *ActivityService) seckillLimitStatus(accountID uint64, ap *model.Activit
 		}
 		if uint32(n) >= lim.max {
 			return true, lim.reason, nil
-		}
-	}
-
-	if ap.PerUserMaxQty > 0 {
-		bought, err := sumBoughtQty(s.DB, accountID, ap.ID)
-		if err != nil {
-			return false, "", err
-		}
-		if bought >= ap.PerUserMaxQty {
-			return true, "per_user_qty", nil
 		}
 	}
 	return false, "", nil

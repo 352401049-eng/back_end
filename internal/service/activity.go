@@ -891,6 +891,11 @@ func (s *ActivityService) enrichActivityProductLimits(view *ActivityProductStore
 	view.LimitReached = false
 	view.LimitReason = ""
 
+	// 配置级件数上限：未登录也按「满额可用」封顶，避免详情页加到库存数。
+	if ap.PerUserMaxQty > 0 && ap.PerUserMaxQty < view.RemainingQty {
+		view.RemainingQty = ap.PerUserMaxQty
+	}
+
 	if accountID == nil || *accountID == 0 {
 		return nil
 	}
@@ -902,7 +907,7 @@ func (s *ActivityService) enrichActivityProductLimits(view *ActivityProductStore
 		return nil
 	}
 
-	reached, reason, err := s.seckillLimitStatus(*accountID, ap, account.CreatedAt, now)
+	reached, reason, err := s.seckillOrderLimitStatus(*accountID, ap, account.CreatedAt, now)
 	if err != nil {
 		return err
 	}
