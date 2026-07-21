@@ -36,9 +36,6 @@ definitions:
       status:
         example: 1
         type: integer
-    required:
-    - activity_price
-    - product_id
     type: object
   internal_handler.ActivityRequest:
     properties:
@@ -88,6 +85,29 @@ definitions:
     required:
     - product_id
     type: object
+  internal_handler.AddressPatchRequest:
+    properties:
+      city:
+        type: string
+      contact_name:
+        type: string
+      contact_phone:
+        type: string
+      detail:
+        type: string
+      district:
+        type: string
+      is_default:
+        type: integer
+      latitude:
+        $ref: '#/definitions/internal_handler.FlexNullableFloat64'
+      location_name:
+        $ref: '#/definitions/internal_handler.FlexNullableString'
+      longitude:
+        $ref: '#/definitions/internal_handler.FlexNullableFloat64'
+      province:
+        type: string
+    type: object
   internal_handler.AddressRequest:
     properties:
       city:
@@ -108,6 +128,12 @@ definitions:
       is_default:
         example: 0
         type: integer
+      latitude:
+        $ref: '#/definitions/internal_handler.FlexNullableFloat64'
+      location_name:
+        $ref: '#/definitions/internal_handler.FlexNullableString'
+      longitude:
+        $ref: '#/definitions/internal_handler.FlexNullableFloat64'
       province:
         example: 河南省
         type: string
@@ -295,6 +321,10 @@ definitions:
         type: integer
       cart_item_id:
         type: integer
+      delivery_latitude:
+        type: number
+      delivery_longitude:
+        type: number
       delivery_type:
         example: 1
         type: integer
@@ -320,6 +350,33 @@ definitions:
         type: integer
     required:
     - merchant_id
+    type: object
+  internal_handler.FlexNullableFloat64:
+    properties:
+      "null":
+        type: boolean
+      present:
+        type: boolean
+      value:
+        format: float64
+        type: number
+    type: object
+  internal_handler.FlexNullableString:
+    properties:
+      "null":
+        type: boolean
+      present:
+        type: boolean
+      value:
+        type: string
+    type: object
+  internal_handler.FlexUInt8Ptr:
+    properties:
+      set:
+        type: boolean
+      value:
+        format: int32
+        type: integer
     type: object
   internal_handler.HealthData:
     properties:
@@ -355,6 +412,8 @@ definitions:
         type: integer
       address:
         type: string
+      allow_reservation:
+        type: integer
       contact_phone:
         type: string
       created_at:
@@ -365,6 +424,10 @@ definitions:
         items:
           type: string
         type: array
+      latitude:
+        type: number
+      longitude:
+        type: number
       shop_logo:
         type: string
       shop_name:
@@ -376,6 +439,12 @@ definitions:
     type: object
   internal_handler.ProductRequest:
     properties:
+      allow_delivery:
+        example: 1
+        type: integer
+      allow_pickup:
+        example: 1
+        type: integer
       category_id:
         example: 1
         type: integer
@@ -439,6 +508,10 @@ definitions:
     type: object
   internal_handler.ProductResp:
     properties:
+      allow_delivery:
+        type: integer
+      allow_pickup:
+        type: integer
       category:
         $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
       category_id:
@@ -492,6 +565,10 @@ definitions:
     properties:
       address_id:
         type: integer
+      delivery_latitude:
+        type: number
+      delivery_longitude:
+        type: number
       delivery_type:
         type: integer
       remark:
@@ -518,6 +595,44 @@ definitions:
         type: integer
     required:
     - status
+    type: object
+  internal_handler.UpdateActivityProductRequest:
+    properties:
+      activity_price:
+        example: 9.9
+        type: number
+      activity_stock:
+        example: 100
+        type: integer
+      enable_coupon:
+        example: 1
+        type: integer
+      enable_group_buy:
+        example: 1
+        type: integer
+      group_buy_allow_repeat:
+        example: 0
+        type: integer
+      group_buy_max_joins_per_user:
+        example: 1
+        type: integer
+      group_buy_price:
+        example: 7.9
+        type: number
+      group_buy_target_count:
+        example: 3
+        type: integer
+      per_user_max_orders:
+        example: 0
+        type: integer
+      per_user_max_qty:
+        example: 1
+        type: integer
+      sort_order:
+        type: integer
+      status:
+        example: 1
+        type: integer
     type: object
   internal_handler.UpdateCartRequest:
     properties:
@@ -590,6 +705,9 @@ definitions:
       address:
         example: 河南省郑州市
         type: string
+      allow_reservation:
+        example: 1
+        type: integer
       contact_phone:
         example: "13800138000"
         type: string
@@ -597,6 +715,14 @@ definitions:
         items:
           type: string
         type: array
+      lat:
+        $ref: '#/definitions/internal_handler.FlexNullableFloat64'
+      latitude:
+        $ref: '#/definitions/internal_handler.FlexNullableFloat64'
+      lng:
+        $ref: '#/definitions/internal_handler.FlexNullableFloat64'
+      longitude:
+        $ref: '#/definitions/internal_handler.FlexNullableFloat64'
       shop_logo:
         type: string
       shop_name:
@@ -663,6 +789,10 @@ definitions:
     type: object
   internal_handler.UpdateProductRequest:
     properties:
+      allow_delivery:
+        type: integer
+      allow_pickup:
+        type: integer
       category_id:
         type: integer
       category_name:
@@ -749,6 +879,10 @@ definitions:
     properties:
       address_id:
         type: integer
+      delivery_latitude:
+        type: number
+      delivery_longitude:
+        type: number
       delivery_type:
         example: 1
         type: integer
@@ -775,6 +909,37 @@ definitions:
         type: string
     required:
     - code
+    type: object
+  internal_handler.checkDeliveryZoneBody:
+    properties:
+      lat:
+        type: number
+      latitude:
+        type: number
+      lng:
+        type: number
+      longitude:
+        type: number
+    type: object
+  internal_handler.deliveryZonePointBody:
+    properties:
+      lat:
+        type: number
+      latitude:
+        type: number
+      lng:
+        type: number
+      longitude:
+        type: number
+    type: object
+  internal_handler.upsertDeliveryZoneBody:
+    properties:
+      enabled:
+        $ref: '#/definitions/internal_handler.FlexUInt8Ptr'
+      points:
+        items:
+          $ref: '#/definitions/internal_handler.deliveryZonePointBody'
+        type: array
     type: object
   yujixinjiang_backend_internal_model.Account:
     properties:
@@ -895,6 +1060,12 @@ definitions:
         type: string
       district:
         type: string
+      latitude:
+        type: number
+      location_name:
+        type: string
+      longitude:
+        type: number
       province:
         type: string
     type: object
@@ -1024,6 +1195,13 @@ definitions:
       user_confirmed:
         type: integer
     type: object
+  yujixinjiang_backend_internal_model.GeoPoint:
+    properties:
+      latitude:
+        type: number
+      longitude:
+        type: number
+    type: object
   yujixinjiang_backend_internal_model.MerchantProfile:
     properties:
       account:
@@ -1032,6 +1210,8 @@ definitions:
         type: integer
       address:
         type: string
+      allow_reservation:
+        type: integer
       contact_phone:
         type: string
       created_at:
@@ -1042,6 +1222,10 @@ definitions:
         items:
           type: string
         type: array
+      latitude:
+        type: number
+      longitude:
+        type: number
       shop_logo:
         type: string
       shop_name:
@@ -1129,6 +1313,10 @@ definitions:
     type: object
   yujixinjiang_backend_internal_model.Product:
     properties:
+      allow_delivery:
+        type: integer
+      allow_pickup:
+        type: integer
       category:
         $ref: '#/definitions/yujixinjiang_backend_internal_model.ProductCategory'
       category_id:
@@ -1219,6 +1407,12 @@ definitions:
         type: integer
       is_default:
         type: integer
+      latitude:
+        type: number
+      location_name:
+        type: string
+      longitude:
+        type: number
       province:
         type: string
       updated_at:
@@ -1348,6 +1542,104 @@ definitions:
       message:
         type: string
     type: object
+  yujixinjiang_backend_internal_service.ActivityProductStoreView:
+    properties:
+      activity_id:
+        type: integer
+      activity_price:
+        type: number
+      activity_stock:
+        type: integer
+      available_stock:
+        type: integer
+      can_group_buy:
+        type: boolean
+      can_use_coupon:
+        type: boolean
+      created_at:
+        type: string
+      enable_coupon:
+        type: integer
+      enable_group_buy:
+        type: integer
+      group_buy_allow_repeat:
+        type: integer
+      group_buy_max_joins_per_user:
+        type: integer
+      group_buy_price:
+        type: number
+      group_buy_target_count:
+        type: integer
+      id:
+        type: integer
+      merchant_id:
+        type: integer
+      original_price:
+        type: number
+      per_user_max_orders:
+        type: integer
+      per_user_max_qty:
+        type: integer
+      product:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.Product'
+      product_cover:
+        type: string
+      product_id:
+        type: integer
+      product_name:
+        type: string
+      sale_options:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductSaleOptions'
+      sold_count:
+        type: integer
+      sort_order:
+        type: integer
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  yujixinjiang_backend_internal_service.ActivityPublicDetailView:
+    properties:
+      banner_images:
+        items:
+          type: string
+        type: array
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      enable_coupon:
+        type: integer
+      enable_group_buy:
+        type: integer
+      end_at:
+        type: string
+      group_buy_product_count:
+        type: integer
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      merchant_id:
+        type: integer
+      name:
+        type: string
+      products:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_service.ActivityProductStoreView'
+        type: array
+      sort_order:
+        type: integer
+      start_at:
+        type: string
+      status:
+        type: integer
+      updated_at:
+        type: string
+    type: object
   yujixinjiang_backend_internal_service.ActivityStoreView:
     properties:
       banner_images:
@@ -1362,8 +1654,12 @@ definitions:
         type: string
       enable_coupon:
         type: integer
+      enable_group_buy:
+        type: integer
       end_at:
         type: string
+      group_buy_product_count:
+        type: integer
       id:
         type: integer
       is_active:
@@ -1460,6 +1756,51 @@ definitions:
       updated_at:
         type: string
     type: object
+  yujixinjiang_backend_internal_service.ClaimableCouponView:
+    properties:
+      can_claim:
+        type: boolean
+      claimed:
+        type: boolean
+      created_at:
+        type: string
+      discount_amount:
+        type: number
+      discount_rate:
+        type: integer
+      end_at:
+        type: string
+      id:
+        type: integer
+      max_discount:
+        type: number
+      merchant_id:
+        type: integer
+      min_amount:
+        type: number
+      name:
+        type: string
+      received_count:
+        type: integer
+      remaining_quota:
+        type: integer
+      scope_ids:
+        items:
+          type: integer
+        type: array
+      scope_type:
+        type: integer
+      start_at:
+        type: string
+      status:
+        type: integer
+      total_quota:
+        type: integer
+      type:
+        type: integer
+      updated_at:
+        type: string
+    type: object
   yujixinjiang_backend_internal_service.DailyStat:
     properties:
       date:
@@ -1505,6 +1846,24 @@ definitions:
         type: string
       user_confirmed:
         type: integer
+    type: object
+  yujixinjiang_backend_internal_service.DeliveryZoneCheckResult:
+    properties:
+      in_zone:
+        type: boolean
+      zone_enabled:
+        type: boolean
+    type: object
+  yujixinjiang_backend_internal_service.DeliveryZoneView:
+    properties:
+      enabled:
+        type: integer
+      merchant_id:
+        type: integer
+      points:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_model.GeoPoint'
+        type: array
     type: object
   yujixinjiang_backend_internal_service.GroupBuyProgress:
     properties:
@@ -1616,6 +1975,25 @@ definitions:
           $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductSalesRank'
         type: array
     type: object
+  yujixinjiang_backend_internal_service.MerchantStoreOverview:
+    properties:
+      active_activities:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_service.ActivityStoreView'
+        type: array
+      claimable_coupons:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_service.ClaimableCouponView'
+        type: array
+      delivery_zone:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView'
+      group_buy_products:
+        items:
+          $ref: '#/definitions/yujixinjiang_backend_internal_service.ProductStoreView'
+        type: array
+      merchant:
+        $ref: '#/definitions/yujixinjiang_backend_internal_model.MerchantProfile'
+    type: object
   yujixinjiang_backend_internal_service.OrderView:
     properties:
       account_id:
@@ -1698,6 +2076,10 @@ definitions:
     type: object
   yujixinjiang_backend_internal_service.ProductStoreView:
     properties:
+      allow_delivery:
+        type: integer
+      allow_pickup:
+        type: integer
       can_group_buy:
         type: boolean
       can_use_coupon:
@@ -1823,6 +2205,55 @@ definitions:
       verification_count:
         type: integer
     type: object
+  yujixinjiang_backend_internal_service.UserDeliveryBadges:
+    properties:
+      active:
+        type: integer
+      completed:
+        type: integer
+      pending_confirm:
+        type: integer
+      total:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_service.UserInventoryUsageBadges:
+    properties:
+      cancel_pending:
+        type: integer
+      completed:
+        type: integer
+      pending_ship:
+        type: integer
+      pending_verify:
+        type: integer
+      total:
+        type: integer
+    type: object
+  yujixinjiang_backend_internal_service.UserOrderBadges:
+    properties:
+      approved:
+        type: integer
+      cancelled:
+        type: integer
+      completed:
+        type: integer
+      delivering:
+        type: integer
+      group_failed:
+        type: integer
+      pending_confirm:
+        type: integer
+      pending_group:
+        type: integer
+      pending_merchant:
+        type: integer
+      pending_rider:
+        type: integer
+      pending_use_merchant:
+        type: integer
+      ready_pickup:
+        type: integer
+    type: object
   yujixinjiang_backend_internal_service.UserStats:
     properties:
       address_count:
@@ -1831,10 +2262,16 @@ definitions:
         type: integer
       coupon_unused_count:
         type: integer
+      delivery_badges:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.UserDeliveryBadges'
       inventory_kind_count:
         type: integer
       inventory_total_qty:
         type: integer
+      inventory_usage_badges:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.UserInventoryUsageBadges'
+      order_badges:
+        $ref: '#/definitions/yujixinjiang_backend_internal_service.UserOrderBadges'
       order_count:
         type: integer
     type: object
@@ -1905,17 +2342,52 @@ paths:
             - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
             - properties:
                 data:
-                  $ref: '#/definitions/yujixinjiang_backend_internal_service.ActivityStoreView'
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.ActivityPublicDetailView'
               type: object
       summary: 活动详情（子商店）
       tags:
       - 用户-商城
   /activities/{id}/products:
     get:
+      description: 含直购/拼团价格 sale_options；group_buy=1 仅返回可团购商品
       parameters:
       - description: 活动 ID
         in: path
         name: id
+        required: true
+        type: integer
+      - description: 仅团购商品
+        in: query
+        name: group_buy
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_service.ActivityProductStoreView'
+                  type: array
+              type: object
+      summary: 活动商品列表（子商店）
+      tags:
+      - 用户-商城
+  /activities/{id}/products/{activity_product_id}:
+    get:
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 活动商品 ID
+        in: path
+        name: activity_product_id
         required: true
         type: integer
       produces:
@@ -1924,8 +2396,45 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
-      summary: 活动商品列表（子商店）
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.ActivityProductStoreView'
+              type: object
+      summary: 活动商品详情
+      tags:
+      - 用户-商城
+  /activities/{id}/products/{activity_product_id}/group:
+    get:
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 活动商品 ID
+        in: path
+        name: activity_product_id
+        required: true
+        type: integer
+      - description: 指定团 ID
+        in: query
+        name: team_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.GroupBuyProgress'
+              type: object
+      summary: 活动商品拼团进度
       tags:
       - 用户-商城
   /admin/announcements:
@@ -2526,6 +3035,114 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新商家资料（选择性）
+      tags:
+      - 管理端-商家
+  /admin/merchants/{id}/delivery-zone:
+    delete:
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除商家配送范围
+      tags:
+      - 管理端-商家
+    get:
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 获取商家配送范围
+      tags:
+      - 管理端-商家
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.upsertDeliveryZoneBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 部分更新商家配送范围
+      tags:
+      - 管理端-商家
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 配送范围
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.upsertDeliveryZoneBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 保存商家配送范围
       tags:
       - 管理端-商家
   /admin/merchants/{id}/images:
@@ -3486,6 +4103,7 @@ paths:
       - 用户-商城
   /coupons:
     get:
+      description: 平台券或指定商家券；登录后返回 claimed/can_claim
       parameters:
       - description: 商家 ID，不传则仅平台券
         in: query
@@ -3497,7 +4115,14 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_service.ClaimableCouponView'
+                  type: array
+              type: object
       summary: 可领取优惠券列表
       tags:
       - 优惠券
@@ -3655,6 +4280,32 @@ paths:
       tags:
       - 商家端-活动
   /merchant/activities/{id}/products:
+    get:
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_model.ActivityProduct'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 活动商品列表
+      tags:
+      - 商家端-活动
     post:
       consumes:
       - application/json
@@ -3687,7 +4338,7 @@ paths:
       summary: 添加活动商品
       tags:
       - 商家端-活动
-  /merchant/activities/{id}/products/{product_id}:
+  /merchant/activities/{id}/products/{activity_product_id}:
     delete:
       parameters:
       - description: 活动 ID
@@ -3695,9 +4346,9 @@ paths:
         name: id
         required: true
         type: integer
-      - description: activity_product.id
+      - description: 活动商品 ID
         in: path
-        name: product_id
+        name: activity_product_id
         required: true
         type: integer
       produces:
@@ -3712,26 +4363,56 @@ paths:
       summary: 移除活动商品
       tags:
       - 商家端-活动
-    patch:
-      consumes:
-      - application/json
+    get:
       parameters:
       - description: 活动 ID
         in: path
         name: id
         required: true
         type: integer
-      - description: activity_product.id
+      - description: 活动商品 ID（activity_product.id）
         in: path
-        name: product_id
+        name: activity_product_id
         required: true
         type: integer
-      - description: 活动商品配置
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.ActivityProduct'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 活动商品详情
+      tags:
+      - 商家端-活动
+    patch:
+      consumes:
+      - application/json
+      description: 部分更新，只传需要修改的字段；路径 activity_product_id 为 activity_product 表主键
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 活动商品 ID
+        in: path
+        name: activity_product_id
+        required: true
+        type: integer
+      - description: 要更新的字段
         in: body
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_handler.ActivityProductRequest'
+          $ref: '#/definitions/internal_handler.UpdateActivityProductRequest'
       produces:
       - application/json
       responses:
@@ -3747,6 +4428,44 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新活动商品
+      tags:
+      - 商家端-活动
+    put:
+      consumes:
+      - application/json
+      description: 与 PATCH 相同，便于部分客户端使用 PUT
+      parameters:
+      - description: 活动 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 活动商品 ID
+        in: path
+        name: activity_product_id
+        required: true
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateActivityProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.ActivityProduct'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 全量更新活动商品
       tags:
       - 商家端-活动
   /merchant/announcements:
@@ -4141,6 +4860,93 @@ paths:
       summary: 商家工作台统计
       tags:
       - 商家端
+  /merchant/delivery-zone:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      security:
+      - BearerAuth: []
+      summary: 删除配送范围
+      tags:
+      - 商家端-配送范围
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 获取本店配送范围
+      tags:
+      - 商家端-配送范围
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.upsertDeliveryZoneBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 部分更新配送范围
+      tags:
+      - 商家端-配送范围
+    put:
+      consumes:
+      - application/json
+      description: 创建或覆盖多边形顶点；enabled=1 时 points 至少 3 点
+      parameters:
+      - description: 配送范围
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.upsertDeliveryZoneBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 保存配送范围（全量）
+      tags:
+      - 商家端-配送范围
   /merchant/inventory-usages:
     get:
       parameters:
@@ -5085,6 +5891,95 @@ paths:
       summary: 商家商品分类
       tags:
       - 用户-商城
+  /merchants/{id}/coupons:
+    get:
+      description: 返回该商家券及可选平台通用券；登录后返回 claimed/can_claim
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 是否包含平台通用券，默认 true
+        in: query
+        name: include_platform
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/yujixinjiang_backend_internal_service.ClaimableCouponView'
+                  type: array
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 商家可领取优惠券
+      tags:
+      - 用户-商城
+  /merchants/{id}/delivery-zone:
+    get:
+      description: 仅返回已启用的配送多边形，供店铺页地图展示
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView'
+              type: object
+      summary: 商家配送范围（用户端）
+      tags:
+      - 用户-商城
+  /merchants/{id}/delivery-zone/check:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 坐标
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.checkDeliveryZoneBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneCheckResult'
+              type: object
+      summary: 校验坐标是否在配送范围内
+      tags:
+      - 用户-商城
   /merchants/{id}/products:
     get:
       description: 某商家已上架商品，支持分类与关键词筛选
@@ -5167,6 +6062,38 @@ paths:
           schema:
             $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
       summary: 商品详情
+      tags:
+      - 用户-商城
+  /merchants/{id}/store:
+    get:
+      description: 一次返回进行中的限时活动、可领优惠券、团购商品
+      parameters:
+      - description: 商家 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 优惠券是否含平台通用券
+        in: query
+        name: include_platform
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_service.MerchantStoreOverview'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+      summary: 商家店铺聚合页
       tags:
       - 用户-商城
   /products:
@@ -5489,6 +6416,38 @@ paths:
       security:
       - BearerAuth: []
       summary: 收货地址详情
+      tags:
+      - 用户-地址
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 地址 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 要更新的字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AddressPatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/yujixinjiang_backend_internal_response.Body'
+            - properties:
+                data:
+                  $ref: '#/definitions/yujixinjiang_backend_internal_model.UserAddress'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 部分更新收货地址
       tags:
       - 用户-地址
     put:
@@ -6182,7 +7141,7 @@ paths:
       - 用户-订单
   /user/overview:
     get:
-      description: 返回资料摘要与各项数量统计
+      description: 返回资料摘要与各项数量统计（订单/配送/背包/库存使用角标）
       produces:
       - application/json
       responses:

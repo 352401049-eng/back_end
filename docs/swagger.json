@@ -46,7 +46,7 @@
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.ActivityStoreView"
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.ActivityPublicDetailView"
                                         }
                                     }
                                 }
@@ -58,6 +58,7 @@
         },
         "/activities/{id}/products": {
             "get": {
+                "description": "含直购/拼团价格 sale_options；group_buy=1 仅返回可团购商品",
                 "produces": [
                     "application/json"
                 ],
@@ -72,13 +73,134 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "仅团购商品",
+                        "name": "group_buy",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/yujixinjiang_backend_internal_service.ActivityProductStoreView"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/activities/{id}/products/{activity_product_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户-商城"
+                ],
+                "summary": "活动商品详情",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "活动 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "活动商品 ID",
+                        "name": "activity_product_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.ActivityProductStoreView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/activities/{id}/products/{activity_product_id}/group": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户-商城"
+                ],
+                "summary": "活动商品拼团进度",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "活动 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "活动商品 ID",
+                        "name": "activity_product_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "指定团 ID",
+                        "name": "team_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.GroupBuyProgress"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -1105,6 +1227,192 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/internal_handler.MerchantProfileResp"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/merchants/{id}/delivery-zone": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-商家"
+                ],
+                "summary": "获取商家配送范围",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "商家 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-商家"
+                ],
+                "summary": "保存商家配送范围",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "商家 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "配送范围",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.upsertDeliveryZoneBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-商家"
+                ],
+                "summary": "删除商家配送范围",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "商家 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-商家"
+                ],
+                "summary": "部分更新商家配送范围",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "商家 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要更新的字段",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.upsertDeliveryZoneBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView"
                                         }
                                     }
                                 }
@@ -2755,6 +3063,7 @@
         },
         "/coupons": {
             "get": {
+                "description": "平台券或指定商家券；登录后返回 claimed/can_claim",
                 "produces": [
                     "application/json"
                 ],
@@ -2774,7 +3083,22 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/yujixinjiang_backend_internal_service.ClaimableCouponView"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -3048,6 +3372,52 @@
             }
         },
         "/merchant/activities/{id}/products": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "商家端-活动"
+                ],
+                "summary": "活动商品列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "活动 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/yujixinjiang_backend_internal_model.ActivityProduct"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
@@ -3104,7 +3474,120 @@
                 }
             }
         },
-        "/merchant/activities/{id}/products/{product_id}": {
+        "/merchant/activities/{id}/products/{activity_product_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "商家端-活动"
+                ],
+                "summary": "活动商品详情",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "活动 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "活动商品 ID（activity_product.id）",
+                        "name": "activity_product_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_model.ActivityProduct"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "与 PATCH 相同，便于部分客户端使用 PUT",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "商家端-活动"
+                ],
+                "summary": "全量更新活动商品",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "活动 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "活动商品 ID",
+                        "name": "activity_product_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要更新的字段",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.UpdateActivityProductRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_model.ActivityProduct"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -3128,8 +3611,8 @@
                     },
                     {
                         "type": "integer",
-                        "description": "activity_product.id",
-                        "name": "product_id",
+                        "description": "活动商品 ID",
+                        "name": "activity_product_id",
                         "in": "path",
                         "required": true
                     }
@@ -3149,6 +3632,7 @@
                         "BearerAuth": []
                     }
                 ],
+                "description": "部分更新，只传需要修改的字段；路径 activity_product_id 为 activity_product 表主键",
                 "consumes": [
                     "application/json"
                 ],
@@ -3169,18 +3653,18 @@
                     },
                     {
                         "type": "integer",
-                        "description": "activity_product.id",
-                        "name": "product_id",
+                        "description": "活动商品 ID",
+                        "name": "activity_product_id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "活动商品配置",
+                        "description": "要更新的字段",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_handler.ActivityProductRequest"
+                            "$ref": "#/definitions/internal_handler.UpdateActivityProductRequest"
                         }
                     }
                 ],
@@ -3881,6 +4365,161 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/yujixinjiang_backend_internal_service.MerchantDashboard"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/merchant/delivery-zone": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "商家端-配送范围"
+                ],
+                "summary": "获取本店配送范围",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "创建或覆盖多边形顶点；enabled=1 时 points 至少 3 点",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "商家端-配送范围"
+                ],
+                "summary": "保存配送范围（全量）",
+                "parameters": [
+                    {
+                        "description": "配送范围",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.upsertDeliveryZoneBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "商家端-配送范围"
+                ],
+                "summary": "删除配送范围",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "商家端-配送范围"
+                ],
+                "summary": "部分更新配送范围",
+                "parameters": [
+                    {
+                        "description": "要更新的字段",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.upsertDeliveryZoneBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView"
                                         }
                                     }
                                 }
@@ -5519,6 +6158,155 @@
                 }
             }
         },
+        "/merchants/{id}/coupons": {
+            "get": {
+                "description": "返回该商家券及可选平台通用券；登录后返回 claimed/can_claim",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户-商城"
+                ],
+                "summary": "商家可领取优惠券",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "商家 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "是否包含平台通用券，默认 true",
+                        "name": "include_platform",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/yujixinjiang_backend_internal_service.ClaimableCouponView"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                        }
+                    }
+                }
+            }
+        },
+        "/merchants/{id}/delivery-zone": {
+            "get": {
+                "description": "仅返回已启用的配送多边形，供店铺页地图展示",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户-商城"
+                ],
+                "summary": "商家配送范围（用户端）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "商家 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/merchants/{id}/delivery-zone/check": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户-商城"
+                ],
+                "summary": "校验坐标是否在配送范围内",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "商家 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "坐标",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.checkDeliveryZoneBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneCheckResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/merchants/{id}/products": {
             "get": {
                 "description": "某商家已上架商品，支持分类与关键词筛选",
@@ -5644,6 +6432,59 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/yujixinjiang_backend_internal_service.ProductStoreView"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                        }
+                    }
+                }
+            }
+        },
+        "/merchants/{id}/store": {
+            "get": {
+                "description": "一次返回进行中的限时活动、可领优惠券、团购商品",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户-商城"
+                ],
+                "summary": "商家店铺聚合页",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "商家 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "优惠券是否含平台通用券",
+                        "name": "include_platform",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_service.MerchantStoreOverview"
                                         }
                                     }
                                 }
@@ -6264,6 +7105,61 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户-地址"
+                ],
+                "summary": "部分更新收货地址",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "地址 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "要更新的字段",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.AddressPatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/yujixinjiang_backend_internal_response.Body"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/yujixinjiang_backend_internal_model.UserAddress"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -7408,7 +8304,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "返回资料摘要与各项数量统计",
+                "description": "返回资料摘要与各项数量统计（订单/配送/背包/库存使用角标）",
                 "produces": [
                     "application/json"
                 ],
@@ -7595,10 +8491,6 @@
     "definitions": {
         "internal_handler.ActivityProductRequest": {
             "type": "object",
-            "required": [
-                "activity_price",
-                "product_id"
-            ],
             "properties": {
                 "activity_price": {
                     "type": "number"
@@ -7719,6 +8611,41 @@
                 }
             }
         },
+        "internal_handler.AddressPatchRequest": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string"
+                },
+                "contact_name": {
+                    "type": "string"
+                },
+                "contact_phone": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "district": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "integer"
+                },
+                "latitude": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableFloat64"
+                },
+                "location_name": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableString"
+                },
+                "longitude": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableFloat64"
+                },
+                "province": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.AddressRequest": {
             "type": "object",
             "required": [
@@ -7753,6 +8680,15 @@
                 "is_default": {
                     "type": "integer",
                     "example": 0
+                },
+                "latitude": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableFloat64"
+                },
+                "location_name": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableString"
+                },
+                "longitude": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableFloat64"
                 },
                 "province": {
                     "type": "string",
@@ -8015,6 +8951,12 @@
                 "cart_item_id": {
                     "type": "integer"
                 },
+                "delivery_latitude": {
+                    "type": "number"
+                },
+                "delivery_longitude": {
+                    "type": "number"
+                },
                 "delivery_type": {
                     "type": "integer",
                     "example": 1
@@ -8046,6 +8988,47 @@
                 "user_coupon_id": {
                     "type": "integer",
                     "example": 1
+                }
+            }
+        },
+        "internal_handler.FlexNullableFloat64": {
+            "type": "object",
+            "properties": {
+                "null": {
+                    "type": "boolean"
+                },
+                "present": {
+                    "type": "boolean"
+                },
+                "value": {
+                    "type": "number",
+                    "format": "float64"
+                }
+            }
+        },
+        "internal_handler.FlexNullableString": {
+            "type": "object",
+            "properties": {
+                "null": {
+                    "type": "boolean"
+                },
+                "present": {
+                    "type": "boolean"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.FlexUInt8Ptr": {
+            "type": "object",
+            "properties": {
+                "set": {
+                    "type": "boolean"
+                },
+                "value": {
+                    "type": "integer",
+                    "format": "int32"
                 }
             }
         },
@@ -8100,6 +9083,9 @@
                 "address": {
                     "type": "string"
                 },
+                "allow_reservation": {
+                    "type": "integer"
+                },
                 "contact_phone": {
                     "type": "string"
                 },
@@ -8114,6 +9100,12 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
                 },
                 "shop_logo": {
                     "type": "string"
@@ -8136,6 +9128,14 @@
                 "price"
             ],
             "properties": {
+                "allow_delivery": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "allow_pickup": {
+                    "type": "integer",
+                    "example": 1
+                },
                 "category_id": {
                     "type": "integer",
                     "example": 1
@@ -8218,6 +9218,12 @@
         "internal_handler.ProductResp": {
             "type": "object",
             "properties": {
+                "allow_delivery": {
+                    "type": "integer"
+                },
+                "allow_pickup": {
+                    "type": "integer"
+                },
                 "category": {
                     "$ref": "#/definitions/yujixinjiang_backend_internal_model.ProductCategory"
                 },
@@ -8301,6 +9307,12 @@
                 "address_id": {
                     "type": "integer"
                 },
+                "delivery_latitude": {
+                    "type": "number"
+                },
+                "delivery_longitude": {
+                    "type": "number"
+                },
                 "delivery_type": {
                     "type": "integer"
                 },
@@ -8332,6 +9344,58 @@
                 "reject_reason": {
                     "type": "string",
                     "example": "资料不完整"
+                },
+                "status": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "internal_handler.UpdateActivityProductRequest": {
+            "type": "object",
+            "properties": {
+                "activity_price": {
+                    "type": "number",
+                    "example": 9.9
+                },
+                "activity_stock": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "enable_coupon": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "enable_group_buy": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "group_buy_allow_repeat": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "group_buy_max_joins_per_user": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "group_buy_price": {
+                    "type": "number",
+                    "example": 7.9
+                },
+                "group_buy_target_count": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "per_user_max_orders": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "per_user_max_qty": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "sort_order": {
+                    "type": "integer"
                 },
                 "status": {
                     "type": "integer",
@@ -8446,6 +9510,10 @@
                     "type": "string",
                     "example": "河南省郑州市"
                 },
+                "allow_reservation": {
+                    "type": "integer",
+                    "example": 1
+                },
                 "contact_phone": {
                     "type": "string",
                     "example": "13800138000"
@@ -8455,6 +9523,18 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "lat": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableFloat64"
+                },
+                "latitude": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableFloat64"
+                },
+                "lng": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableFloat64"
+                },
+                "longitude": {
+                    "$ref": "#/definitions/internal_handler.FlexNullableFloat64"
                 },
                 "shop_logo": {
                     "type": "string"
@@ -8553,6 +9633,12 @@
         "internal_handler.UpdateProductRequest": {
             "type": "object",
             "properties": {
+                "allow_delivery": {
+                    "type": "integer"
+                },
+                "allow_pickup": {
+                    "type": "integer"
+                },
                 "category_id": {
                     "type": "integer"
                 },
@@ -8683,6 +9769,12 @@
                 "address_id": {
                     "type": "integer"
                 },
+                "delivery_latitude": {
+                    "type": "number"
+                },
+                "delivery_longitude": {
+                    "type": "number"
+                },
                 "delivery_type": {
                     "type": "integer",
                     "example": 1
@@ -8717,6 +9809,54 @@
                 "code": {
                     "type": "string",
                     "example": "phone_code_from_getPhoneNumber"
+                }
+            }
+        },
+        "internal_handler.checkDeliveryZoneBody": {
+            "type": "object",
+            "properties": {
+                "lat": {
+                    "type": "number"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
+                }
+            }
+        },
+        "internal_handler.deliveryZonePointBody": {
+            "type": "object",
+            "properties": {
+                "lat": {
+                    "type": "number"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
+                }
+            }
+        },
+        "internal_handler.upsertDeliveryZoneBody": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "$ref": "#/definitions/internal_handler.FlexUInt8Ptr"
+                },
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.deliveryZonePointBody"
+                    }
                 }
             }
         },
@@ -8899,6 +10039,15 @@
                 },
                 "district": {
                     "type": "string"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "location_name": {
+                    "type": "string"
+                },
+                "longitude": {
+                    "type": "number"
                 },
                 "province": {
                     "type": "string"
@@ -9096,6 +10245,17 @@
                 }
             }
         },
+        "yujixinjiang_backend_internal_model.GeoPoint": {
+            "type": "object",
+            "properties": {
+                "latitude": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
+                }
+            }
+        },
         "yujixinjiang_backend_internal_model.MerchantProfile": {
             "type": "object",
             "properties": {
@@ -9107,6 +10267,9 @@
                 },
                 "address": {
                     "type": "string"
+                },
+                "allow_reservation": {
+                    "type": "integer"
                 },
                 "contact_phone": {
                     "type": "string"
@@ -9122,6 +10285,12 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
                 },
                 "shop_logo": {
                     "type": "string"
@@ -9255,6 +10424,12 @@
         "yujixinjiang_backend_internal_model.Product": {
             "type": "object",
             "properties": {
+                "allow_delivery": {
+                    "type": "integer"
+                },
+                "allow_pickup": {
+                    "type": "integer"
+                },
                 "category": {
                     "$ref": "#/definitions/yujixinjiang_backend_internal_model.ProductCategory"
                 },
@@ -9390,6 +10565,15 @@
                 },
                 "is_default": {
                     "type": "integer"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "location_name": {
+                    "type": "string"
+                },
+                "longitude": {
+                    "type": "number"
                 },
                 "province": {
                     "type": "string"
@@ -9587,6 +10771,154 @@
                 }
             }
         },
+        "yujixinjiang_backend_internal_service.ActivityProductStoreView": {
+            "type": "object",
+            "properties": {
+                "activity_id": {
+                    "type": "integer"
+                },
+                "activity_price": {
+                    "type": "number"
+                },
+                "activity_stock": {
+                    "type": "integer"
+                },
+                "available_stock": {
+                    "type": "integer"
+                },
+                "can_group_buy": {
+                    "type": "boolean"
+                },
+                "can_use_coupon": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "enable_coupon": {
+                    "type": "integer"
+                },
+                "enable_group_buy": {
+                    "type": "integer"
+                },
+                "group_buy_allow_repeat": {
+                    "type": "integer"
+                },
+                "group_buy_max_joins_per_user": {
+                    "type": "integer"
+                },
+                "group_buy_price": {
+                    "type": "number"
+                },
+                "group_buy_target_count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "merchant_id": {
+                    "type": "integer"
+                },
+                "original_price": {
+                    "type": "number"
+                },
+                "per_user_max_orders": {
+                    "type": "integer"
+                },
+                "per_user_max_qty": {
+                    "type": "integer"
+                },
+                "product": {
+                    "$ref": "#/definitions/yujixinjiang_backend_internal_model.Product"
+                },
+                "product_cover": {
+                    "type": "string"
+                },
+                "product_id": {
+                    "type": "integer"
+                },
+                "product_name": {
+                    "type": "string"
+                },
+                "sale_options": {
+                    "$ref": "#/definitions/yujixinjiang_backend_internal_service.ProductSaleOptions"
+                },
+                "sold_count": {
+                    "type": "integer"
+                },
+                "sort_order": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "yujixinjiang_backend_internal_service.ActivityPublicDetailView": {
+            "type": "object",
+            "properties": {
+                "banner_images": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enable_coupon": {
+                    "type": "integer"
+                },
+                "enable_group_buy": {
+                    "type": "integer"
+                },
+                "end_at": {
+                    "type": "string"
+                },
+                "group_buy_product_count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "merchant_id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "products": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/yujixinjiang_backend_internal_service.ActivityProductStoreView"
+                    }
+                },
+                "sort_order": {
+                    "type": "integer"
+                },
+                "start_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "yujixinjiang_backend_internal_service.ActivityStoreView": {
             "type": "object",
             "properties": {
@@ -9608,8 +10940,14 @@
                 "enable_coupon": {
                     "type": "integer"
                 },
+                "enable_group_buy": {
+                    "type": "integer"
+                },
                 "end_at": {
                     "type": "string"
+                },
+                "group_buy_product_count": {
+                    "type": "integer"
                 },
                 "id": {
                     "type": "integer"
@@ -9757,6 +11095,74 @@
                 }
             }
         },
+        "yujixinjiang_backend_internal_service.ClaimableCouponView": {
+            "type": "object",
+            "properties": {
+                "can_claim": {
+                    "type": "boolean"
+                },
+                "claimed": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "discount_amount": {
+                    "type": "number"
+                },
+                "discount_rate": {
+                    "type": "integer"
+                },
+                "end_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "max_discount": {
+                    "type": "number"
+                },
+                "merchant_id": {
+                    "type": "integer"
+                },
+                "min_amount": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "received_count": {
+                    "type": "integer"
+                },
+                "remaining_quota": {
+                    "type": "integer"
+                },
+                "scope_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "scope_type": {
+                    "type": "integer"
+                },
+                "start_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "total_quota": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "yujixinjiang_backend_internal_service.DailyStat": {
             "type": "object",
             "properties": {
@@ -9824,6 +11230,34 @@
                 },
                 "user_confirmed": {
                     "type": "integer"
+                }
+            }
+        },
+        "yujixinjiang_backend_internal_service.DeliveryZoneCheckResult": {
+            "type": "object",
+            "properties": {
+                "in_zone": {
+                    "type": "boolean"
+                },
+                "zone_enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "yujixinjiang_backend_internal_service.DeliveryZoneView": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "integer"
+                },
+                "merchant_id": {
+                    "type": "integer"
+                },
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/yujixinjiang_backend_internal_model.GeoPoint"
+                    }
                 }
             }
         },
@@ -9994,6 +11428,35 @@
                 }
             }
         },
+        "yujixinjiang_backend_internal_service.MerchantStoreOverview": {
+            "type": "object",
+            "properties": {
+                "active_activities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/yujixinjiang_backend_internal_service.ActivityStoreView"
+                    }
+                },
+                "claimable_coupons": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/yujixinjiang_backend_internal_service.ClaimableCouponView"
+                    }
+                },
+                "delivery_zone": {
+                    "$ref": "#/definitions/yujixinjiang_backend_internal_service.DeliveryZoneView"
+                },
+                "group_buy_products": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/yujixinjiang_backend_internal_service.ProductStoreView"
+                    }
+                },
+                "merchant": {
+                    "$ref": "#/definitions/yujixinjiang_backend_internal_model.MerchantProfile"
+                }
+            }
+        },
         "yujixinjiang_backend_internal_service.OrderView": {
             "type": "object",
             "properties": {
@@ -10119,6 +11582,12 @@
         "yujixinjiang_backend_internal_service.ProductStoreView": {
             "type": "object",
             "properties": {
+                "allow_delivery": {
+                    "type": "integer"
+                },
+                "allow_pickup": {
+                    "type": "integer"
+                },
                 "can_group_buy": {
                     "type": "boolean"
                 },
@@ -10309,6 +11778,81 @@
                 }
             }
         },
+        "yujixinjiang_backend_internal_service.UserDeliveryBadges": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "integer"
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "pending_confirm": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "yujixinjiang_backend_internal_service.UserInventoryUsageBadges": {
+            "type": "object",
+            "properties": {
+                "cancel_pending": {
+                    "type": "integer"
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "pending_ship": {
+                    "type": "integer"
+                },
+                "pending_verify": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "yujixinjiang_backend_internal_service.UserOrderBadges": {
+            "type": "object",
+            "properties": {
+                "approved": {
+                    "type": "integer"
+                },
+                "cancelled": {
+                    "type": "integer"
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "delivering": {
+                    "type": "integer"
+                },
+                "group_failed": {
+                    "type": "integer"
+                },
+                "pending_confirm": {
+                    "type": "integer"
+                },
+                "pending_group": {
+                    "type": "integer"
+                },
+                "pending_merchant": {
+                    "type": "integer"
+                },
+                "pending_rider": {
+                    "type": "integer"
+                },
+                "pending_use_merchant": {
+                    "type": "integer"
+                },
+                "ready_pickup": {
+                    "type": "integer"
+                }
+            }
+        },
         "yujixinjiang_backend_internal_service.UserStats": {
             "type": "object",
             "properties": {
@@ -10321,11 +11865,20 @@
                 "coupon_unused_count": {
                     "type": "integer"
                 },
+                "delivery_badges": {
+                    "$ref": "#/definitions/yujixinjiang_backend_internal_service.UserDeliveryBadges"
+                },
                 "inventory_kind_count": {
                     "type": "integer"
                 },
                 "inventory_total_qty": {
                     "type": "integer"
+                },
+                "inventory_usage_badges": {
+                    "$ref": "#/definitions/yujixinjiang_backend_internal_service.UserInventoryUsageBadges"
+                },
+                "order_badges": {
+                    "$ref": "#/definitions/yujixinjiang_backend_internal_service.UserOrderBadges"
                 },
                 "order_count": {
                     "type": "integer"

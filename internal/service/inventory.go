@@ -21,6 +21,7 @@ var (
 	ErrInventoryRollback           = errors.New("inventory rollback failed")
 	ErrInventoryCancelPending      = errors.New("inventory cancel pending review")
 	ErrVirtualNotDeliverable       = errors.New("virtual product not deliverable")
+	ErrDeliveryNotAllowed          = errors.New("product does not allow delivery")
 )
 
 type InventoryService struct {
@@ -154,6 +155,10 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 	// 虚拟商品（如电影票）只能到店核销，不支持骑手配送
 	if inv.Product.ItemType == model.ProductItemTypeVirtual && deliveryType == model.DeliveryTypeDelivery {
 		return nil, ErrVirtualNotDeliverable
+	}
+	// 商品关闭「支持骑手配送」后禁止配送履约（自取/到店核销仍可用）
+	if deliveryType == model.DeliveryTypeDelivery && inv.Product.AllowDelivery != 1 {
+		return nil, ErrDeliveryNotAllowed
 	}
 
 	var addrSnap *model.AddressSnapshot

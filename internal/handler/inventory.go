@@ -170,6 +170,8 @@ func handleInventoryError(c *gin.Context, err error) {
 		response.BadRequest(c, "delivery_type 无效，请传 1=自提 或 2=配送")
 	case errors.Is(err, service.ErrVirtualNotDeliverable):
 		response.BadRequest(c, "该商品为虚拟商品，仅支持到店核销")
+	case errors.Is(err, service.ErrDeliveryNotAllowed):
+		response.BadRequest(c, "该商品不支持骑手配送")
 	case errors.Is(err, service.ErrDeliveryOutOfRange):
 		response.BadRequest(c, "收货地址不在配送范围内")
 	case errors.Is(err, service.ErrDeliveryCoordinatesRequired):
