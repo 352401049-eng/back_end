@@ -90,16 +90,18 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 	}
 
 	var rows []row
+	// 不要求 gb.status=1：团已开出后即使商品拼团配置被关掉，未成团仍应出现在热拼榜
 	err := s.freshDB().Table("group_buy_team AS t").
 		Select(`t.id AS team_id, t.group_buy_id, gb.product_id, p.merchant_id,
-			p.name AS product_name, p.cover_url AS product_cover, gb.group_price,
+			p.name AS product_name, p.cover_url AS product_cover,
+			COALESCE(NULLIF(p.group_buy_price, 0), gb.group_price) AS group_price,
 			p.price AS product_price, p.original_price,
 			t.target_count, t.current_count, t.expire_at`).
-		Joins("JOIN group_buy AS gb ON gb.id = t.group_buy_id AND gb.is_deleted = 0 AND gb.status = 1").
+		Joins("JOIN group_buy AS gb ON gb.id = t.group_buy_id AND gb.is_deleted = 0").
 		Joins("JOIN product AS p ON p.id = gb.product_id AND p.is_deleted = 0 AND p.status = ?", model.ProductStatusOn).
 		Where("t.is_deleted = 0 AND t.status = ? AND t.expire_at > ?", model.GroupBuyTeamPending, now).
 		Where("t.current_count < t.target_count").
-		Order("(t.target_count - t.current_count) ASC, t.current_count DESC, t.id DESC").
+		Order("t.target_count - t.current_count ASC, t.current_count DESC, t.id DESC").
 		Limit(limit).
 		Scan(&rows).Error
 	if err != nil {

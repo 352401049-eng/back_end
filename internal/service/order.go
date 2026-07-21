@@ -199,14 +199,17 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 
 	var gb model.GroupBuy
 	if input.PurchaseType == model.PurchaseTypeGroup {
-		if input.GroupBuyID != nil {
-			if err := query.NotDeleted(s.DB).First(&gb, *input.GroupBuyID).Error; err != nil {
+		ensured, err := s.ensureActiveGroupBuy(product, actGB)
+		if err != nil {
+			return nil, err
+		}
+		gb = *ensured
+		if input.GroupBuyID != nil && *input.GroupBuyID != gb.ID {
+			var byID model.GroupBuy
+			if err := query.NotDeleted(s.DB).First(&byID, *input.GroupBuyID).Error; err != nil {
 				return nil, ErrGroupBuyInvalid
 			}
-		} else {
-			if err := query.NotDeleted(s.DB).Where("product_id = ? AND status = 1", product.ID).First(&gb).Error; err != nil {
-				return nil, ErrGroupBuyInvalid
-			}
+			gb = byID
 		}
 		groupBuyID = &gb.ID
 	}
@@ -287,7 +290,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		}
 
 		if input.PurchaseType == model.PurchaseTypeGroup {
-			teamID, err := s.joinOrCreateTeam(tx, accountID, product, gb, input.GroupBuyTeamID, actGB, activityID)
+			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, product, gb, input.GroupBuyTeamID, actGB, activityID)
 			if err != nil {
 				return err
 			}
@@ -321,7 +324,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 	return s.GetView(accountID, order.ID, nil)
 }
 
-func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID uint64, product model.Product, gb model.GroupBuy, teamID *uint64, actGB *ActivityGroupBuyConfig, activityID *uint64) (uint64, error) {
+func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, product model.Product, gb model.GroupBuy, teamID *uint64, actGB *ActivityGroupBuyConfig, activityID *uint64) (uint64, error) {
 	target := uint32(2)
 	allowRepeat := product.GroupBuyAllowRepeat
 	maxJoins := uint32(1)
@@ -371,6 +374,9 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID uint64, product m
 		if err := tx.Model(&team).Update("current_count", gorm.Expr("current_count + 1")).Error; err != nil {
 			return 0, err
 		}
+		if err := ensureGroupBuyMember(tx, team.ID, orderID, accountID, false); err != nil {
+			return 0, err
+		}
 		return team.ID, nil
 	}
 
@@ -381,7 +387,84 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID uint64, product m
 	if err := tx.Create(&team).Error; err != nil {
 		return 0, err
 	}
+	if err := ensureGroupBuyMember(tx, team.ID, orderID, accountID, true); err != nil {
+		return 0, err
+	}
 	return team.ID, nil
+}
+
+// ensureActiveGroupBuy 保证商品有可用的 group_buy 行（活动拼团也可能未同步商品拼团配置）。
+func (s *OrderService) ensureActiveGroupBuy(product model.Product, actGB *ActivityGroupBuyConfig) (*model.GroupBuy, error) {
+	target := uint32(2)
+	price := 0.0
+	if actGB != nil && actGB.EnableGroupBuy == 1 {
+		if actGB.GroupBuyTargetCount >= 2 {
+			target = actGB.GroupBuyTargetCount
+		}
+		price = actGB.GroupBuyPrice
+	} else if product.EnableGroupBuy == 1 && product.GroupBuyPrice != nil {
+		price = *product.GroupBuyPrice
+		if product.GroupBuyTargetCount != nil && *product.GroupBuyTargetCount >= 2 {
+			target = *product.GroupBuyTargetCount
+		}
+	} else {
+		return nil, ErrGroupBuyInvalid
+	}
+	if price <= 0 {
+		return nil, ErrGroupBuyInvalid
+	}
+
+	now := time.Now()
+	endAt := now.AddDate(10, 0, 0)
+	var gb model.GroupBuy
+	err := query.NotDeleted(s.DB).Where("product_id = ?", product.ID).First(&gb).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		gb = model.GroupBuy{
+			ProductID: product.ID, TargetCount: target, GroupPrice: price,
+			StartAt: now, EndAt: endAt, Status: 1,
+		}
+		if err := s.DB.Create(&gb).Error; err != nil {
+			return nil, err
+		}
+		return &gb, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.DB.Model(&gb).Updates(map[string]interface{}{
+		"target_count": target,
+		"group_price":  price,
+		"status":       1,
+		"end_at":       endAt,
+	}).Error; err != nil {
+		return nil, err
+	}
+	gb.TargetCount = target
+	gb.GroupPrice = price
+	gb.Status = 1
+	return &gb, nil
+}
+
+func ensureGroupBuyMember(tx *gorm.DB, teamID, orderID, accountID uint64, isLeader bool) error {
+	var existing model.GroupBuyMember
+	err := query.NotDeleted(tx).
+		Where("team_id = ? AND account_id = ? AND order_id = ?", teamID, accountID, orderID).
+		First(&existing).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	leader := uint8(0)
+	if isLeader {
+		leader = 1
+	}
+	m := model.GroupBuyMember{
+		TeamID: teamID, OrderID: orderID, AccountID: accountID,
+		IsLeader: leader, JoinedAt: time.Now(),
+	}
+	return tx.Create(&m).Error
 }
 
 func validateTeamJoinLimit(existingJoins int64, allowRepeat uint8, maxJoins uint32) error {
