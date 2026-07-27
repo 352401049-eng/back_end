@@ -89,10 +89,12 @@ func (s *DeliveryService) ListForUser(accountID uint64, scope string, page, page
 		q = q.Where("status = ?", model.DeliveryConfirmed)
 	case "active", "delivering":
 		q = q.Where("status IN ?", []int{
+			int(model.DeliveryPendingAccept),
 			int(model.DeliveryAccepted), int(model.DeliveryPicking), int(model.DeliveryDelivering),
 		})
 	default:
 		q = q.Where("status IN ?", []int{
+			int(model.DeliveryPendingAccept),
 			int(model.DeliveryAccepted), int(model.DeliveryPicking), int(model.DeliveryDelivering), int(model.DeliveryDelivered),
 		})
 	}
