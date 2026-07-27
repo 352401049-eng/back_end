@@ -89,6 +89,8 @@ type Order struct {
 	DiscountAmount      float64          `gorm:"type:decimal(10,2);not null;default:0" json:"discount_amount"`
 	UserCouponID        *uint64          `gorm:"column:user_coupon_id" json:"user_coupon_id,omitempty"`
 	PayAmount           float64          `gorm:"type:decimal(10,2);not null" json:"pay_amount"`
+	DeliveryFee         float64          `gorm:"type:decimal(10,2);not null;default:0" json:"delivery_fee"`
+	RiderEarnings       float64          `gorm:"type:decimal(10,2);not null;default:0" json:"rider_earnings"`
 	PayStatus           uint8            `gorm:"not null;default:0" json:"pay_status"`
 	PaidAt              *time.Time       `json:"paid_at,omitempty"`
 	Remark              *string          `gorm:"size:256" json:"remark,omitempty"`

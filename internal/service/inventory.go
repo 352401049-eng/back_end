@@ -221,9 +221,19 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			}
 			verifyCode = &vc.Code
 		} else {
+			// 从商家配置读取配送费/骑手收益快照写入 delivery_order
+			var merchant model.MerchantProfile
+			var deliveryFee, riderEarnings float64
+			if err := query.NotDeleted(tx).First(&merchant, usage.MerchantID).Error; err != nil {
+				return ErrMerchantNotFound
+			}
+			deliveryFee = merchant.DeliveryFee
+			riderEarnings = merchant.RiderEarnings
 			d := model.DeliveryOrder{
 				InventoryUsageID: &usage.ID,
 				Status:           model.DeliveryPendingAccept,
+				DeliveryFee:      deliveryFee,
+				RiderEarnings:    riderEarnings,
 			}
 			if err := tx.Create(&d).Error; err != nil {
 				return err

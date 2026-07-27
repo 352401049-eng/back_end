@@ -200,6 +200,20 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 	subtotal = roundMoney(subtotal)
 	payAmount := roundMoney(subtotal - discountAmount)
 
+	// 骑手配送：从商家配置读取配送费，加入用户支付金额
+	var deliveryFee, riderEarnings float64
+	if input.DeliveryType == model.DeliveryTypeDelivery {
+		var merchant model.MerchantProfile
+		if err := query.NotDeleted(s.DB).First(&merchant, input.MerchantID).Error; err != nil {
+			return nil, ErrMerchantNotFound
+		}
+		deliveryFee = merchant.DeliveryFee
+		riderEarnings = merchant.RiderEarnings
+		if deliveryFee > 0 {
+			payAmount = roundMoney(payAmount + deliveryFee)
+		}
+	}
+
 	now := time.Now()
 	orderNo := genOrderNo()
 
@@ -263,6 +277,8 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			DiscountAmount:      discountAmount,
 			UserCouponID:        input.UserCouponID,
 			PayAmount:           payAmount,
+			DeliveryFee:         deliveryFee,
+			RiderEarnings:       riderEarnings,
 			PayStatus:           model.PayStatusUnpaid,
 			Remark:              input.Remark,
 		}
@@ -906,7 +922,12 @@ func (s *OrderService) MerchantUseReview(merchantID, orderID uint64, approve boo
 		if deliveryType == model.DeliveryTypeDelivery && product.ItemType == model.ProductItemTypePhysical {
 			nextStatus = model.OrderStatusPendingShip
 			orderID := order.ID
-			d := model.DeliveryOrder{OrderID: &orderID, Status: model.DeliveryPendingAccept}
+			d := model.DeliveryOrder{
+				OrderID:       &orderID,
+				Status:        model.DeliveryPendingAccept,
+				DeliveryFee:   order.DeliveryFee,
+				RiderEarnings: order.RiderEarnings,
+			}
 			if err := tx.Create(&d).Error; err != nil {
 				return err
 			}

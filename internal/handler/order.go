@@ -646,6 +646,7 @@ func (h *MerchantOrderHandler) merchantScope(c *gin.Context) (*uint64, error) {
 
 type RiderHandler struct {
 	DeliverySvc *service.DeliveryService
+	EarningSvc  *service.RiderEarningService
 }
 
 // ListRiderOrders godoc
@@ -732,6 +733,42 @@ func (h *RiderHandler) StartDelivery(c *gin.Context) {
 	response.OK(c, d)
 }
 
+// CancelDelivery godoc
+// @Summary      取消接单
+// @Description  仅已接单未开始配送时可取消，订单回到待接单
+// @Tags         骑手端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "配送单 ID"
+// @Success      200  {object}  response.Body{data=service.DeliveryView}
+// @Router       /rider/orders/{id}/cancel [post]
+func (h *RiderHandler) CancelDelivery(c *gin.Context) {
+	riderID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	d, err := h.DeliverySvc.CancelByRider(riderID, id)
+	if err != nil {
+		if errors.Is(err, service.ErrDeliveryNotFound) {
+			response.Fail(c, 404, 404, "配送单不存在")
+			return
+		}
+		if errors.Is(err, service.ErrDeliveryStatusInvalid) {
+			response.BadRequest(c, "已开始配送，无法取消")
+			return
+		}
+		response.InternalError(c, "取消失败")
+		return
+	}
+	response.OK(c, d)
+}
+
 // CompleteDelivery godoc
 // @Summary      骑手确认送达
 // @Description  可传送达备注与照片；用户确认收货后订单/使用单才完成
@@ -764,6 +801,102 @@ func (h *RiderHandler) CompleteDelivery(c *gin.Context) {
 		return
 	}
 	response.OK(c, d)
+}
+
+// EarningsSummary godoc
+// @Summary      骑手收益汇总
+// @Tags         骑手端
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  response.Body{data=service.EarningsSummary}
+// @Router       /rider/earnings/summary [get]
+func (h *RiderHandler) EarningsSummary(c *gin.Context) {
+	riderID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	sum, err := h.EarningSvc.GetSummary(riderID)
+	if err != nil {
+		response.InternalError(c, "查询失败")
+		return
+	}
+	response.OK(c, sum)
+}
+
+// ListEarnings godoc
+// @Summary      骑手收益记录
+// @Tags         骑手端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page       query  int     false  "页码"
+// @Param        page_size  query  int     false  "每页条数"
+// @Param        status     query  string  false  "pending|settled|cancelled"
+// @Success      200  {object}  response.Body{data=query.PageResult}
+// @Router       /rider/earnings [get]
+func (h *RiderHandler) ListEarnings(c *gin.Context) {
+	riderID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	page, pageSize := parsePage(c)
+	list, total, err := h.EarningSvc.ListEarnings(riderID, c.Query("status"), page, pageSize)
+	if err != nil {
+		response.InternalError(c, "查询失败")
+		return
+	}
+	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
+}
+
+// ListSettlements godoc
+// @Summary      骑手结账记录
+// @Tags         骑手端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page       query  int  false  "页码"
+// @Param        page_size  query  int  false  "每页条数"
+// @Success      200  {object}  response.Body{data=query.PageResult}
+// @Router       /rider/settlements [get]
+func (h *RiderHandler) ListSettlements(c *gin.Context) {
+	riderID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	page, pageSize := parsePage(c)
+	list, total, err := h.EarningSvc.ListSettlements(riderID, page, pageSize)
+	if err != nil {
+		response.InternalError(c, "查询失败")
+		return
+	}
+	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
+}
+
+// RequestSettlement godoc
+// @Summary      骑手申请结账（全额）
+// @Description  申请金额 = 待结账余额 - 待审批申请占用金额
+// @Tags         骑手端
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  response.Body{data=model.RiderSettlement}
+// @Router       /rider/settlements/request [post]
+func (h *RiderHandler) RequestSettlement(c *gin.Context) {
+	riderID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	st, err := h.EarningSvc.RequestSettlement(riderID)
+	if err != nil {
+		if errors.Is(err, service.ErrInsufficientEarnings) {
+			response.BadRequest(c, "无可用待结账金额")
+			return
+		}
+		response.InternalError(c, "申请失败")
+		return
+	}
+	response.OK(c, st)
 }
 
 type AdminDashboardHandler struct {

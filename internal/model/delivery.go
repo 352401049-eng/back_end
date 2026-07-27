@@ -25,6 +25,8 @@ type DeliveryOrder struct {
 	DeliveredAt      *time.Time `json:"delivered_at,omitempty"`
 	DeliverRemark    *string    `gorm:"size:512" json:"deliver_remark,omitempty"`
 	DeliverPhotos    []string   `gorm:"serializer:json" json:"deliver_photos,omitempty"`
+	DeliveryFee      float64    `gorm:"type:decimal(10,2);not null;default:0" json:"delivery_fee"`
+	RiderEarnings    float64    `gorm:"type:decimal(10,2);not null;default:0" json:"rider_earnings"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	SoftDelete

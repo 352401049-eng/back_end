@@ -66,6 +66,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc}
 	paymentHandler := &handler.PaymentHandler{OrderSvc: orderSvc}
 	deliverySvc := &service.DeliveryService{DB: db}
+	riderEarningSvc := &service.RiderEarningService{DB: db}
 	dashboardSvc := &service.DashboardService{DB: db}
 	categorySvc := &service.CategoryService{DB: db}
 	userSvc := &service.UserService{DB: db}
@@ -82,7 +83,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	merchantSvc := &service.MerchantService{DB: db}
 	productSvc := &service.ProductService{DB: db, CategorySvc: categorySvc}
 	riderSvc := &service.RiderApplicationService{DB: db}
-	adminHandler := &handler.AdminHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, RiderSvc: riderSvc}
+	adminHandler := &handler.AdminHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, RiderSvc: riderSvc, EarningSvc: riderEarningSvc}
 	merchantHandler := &handler.MerchantHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, CategorySvc: categorySvc}
 	storeHandler := &handler.StoreHandler{
 		MerchantSvc: merchantSvc, ProductSvc: productSvc, OrderSvc: orderSvc,
@@ -94,7 +95,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		MerchantSvc: merchantSvc, OrderSvc: orderSvc, VerifySvc: verifySvc,
 		InventorySvc: inventorySvc, DashboardSvc: dashboardSvc,
 	}
-	riderHandler := &handler.RiderHandler{DeliverySvc: deliverySvc}
+	riderHandler := &handler.RiderHandler{DeliverySvc: deliverySvc, EarningSvc: riderEarningSvc}
 	adminDashboardHandler := &handler.AdminDashboardHandler{
 		DashboardSvc: dashboardSvc, OrderSvc: orderSvc, VerifySvc: verifySvc,
 	}
@@ -374,6 +375,17 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 	r.GET("/rider/applications/:id", h.GetRiderApplication)
 	r.PATCH("/rider/applications/:id/review", h.ReviewRiderApplication)
 
+	// 骑手管理（收益/结账/撤销）
+	r.GET("/riders", h.ListRiders)
+	r.GET("/riders/:id", h.GetRider)
+	r.PATCH("/riders/:id/revoke", h.RevokeRider)
+	r.GET("/riders/:id/earnings", h.ListRiderEarnings)
+	r.GET("/riders/:id/deliveries", h.ListRiderDeliveries)
+	r.GET("/riders/:id/settlements", h.ListRiderSettlements)
+	r.POST("/riders/:id/settlements", h.CreateSettlement)
+	r.GET("/settlements/pending", h.ListPendingSettlements)
+	r.PATCH("/settlements/:id/review", h.ReviewSettlement)
+
 	r.GET("/coupons", ch.ListAdmin)
 	r.POST("/coupons", ch.CreateAdmin)
 	r.GET("/coupons/:id", ch.GetAdmin)
@@ -390,5 +402,10 @@ func registerRiderRoutes(r *gin.RouterGroup, h *handler.RiderHandler) {
 	r.GET("/orders", h.ListOrders)
 	r.POST("/orders/:id/accept", h.AcceptDelivery)
 	r.POST("/orders/:id/start", h.StartDelivery)
+	r.POST("/orders/:id/cancel", h.CancelDelivery)
 	r.POST("/orders/:id/complete", h.CompleteDelivery)
+	r.GET("/earnings", h.ListEarnings)
+	r.GET("/earnings/summary", h.EarningsSummary)
+	r.GET("/settlements", h.ListSettlements)
+	r.POST("/settlements/request", h.RequestSettlement)
 }

@@ -190,6 +190,19 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		payAmount = roundMoney(payAmount - discountAmount)
 	}
 
+	// 骑手配送：从商家配置读取配送费，加入用户支付金额（对齐 Create 路径）
+	var deliveryFee, riderEarnings float64
+	if deliveryType == model.DeliveryTypeDelivery {
+		var merchant model.MerchantProfile
+		if err := query.NotDeleted(s.DB).First(&merchant, input.MerchantID).Error; err == nil {
+			deliveryFee = merchant.DeliveryFee
+			riderEarnings = merchant.RiderEarnings
+			if deliveryFee > 0 {
+				payAmount = roundMoney(payAmount + deliveryFee)
+			}
+		}
+	}
+
 	now := time.Now()
 	var groupBuyID *uint64
 	var groupBuyTeamID *uint64
@@ -252,6 +265,8 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			DiscountAmount:      discountAmount,
 			UserCouponID:        input.UserCouponID,
 			PayAmount:           payAmount,
+			DeliveryFee:         deliveryFee,
+			RiderEarnings:       riderEarnings,
 			PayStatus:           model.PayStatusUnpaid,
 			Remark:              input.Remark,
 		}

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"yujixinjiang/backend/internal/model"
@@ -65,12 +66,15 @@ type UpdateMerchantInput struct {
 	AllowReservation *uint8
 	OpenTime         *string
 	CloseTime        *string
+	DeliveryFee      *float64
+	RiderEarnings    *float64
 }
 
 func (in UpdateMerchantInput) hasField() bool {
 	return in.ShopName != nil || in.ContactPhone != nil || in.Address != nil ||
 		in.ShopLogo != nil || in.Images != nil || in.Coordinates != nil ||
-		in.AllowReservation != nil || in.OpenTime != nil || in.CloseTime != nil
+		in.AllowReservation != nil || in.OpenTime != nil || in.CloseTime != nil ||
+		in.DeliveryFee != nil || in.RiderEarnings != nil
 }
 
 func (s *MerchantService) Create(input CreateMerchantInput) (*model.MerchantProfile, error) {
@@ -280,6 +284,12 @@ func (s *MerchantService) UpdateProfile(id uint64, input UpdateMerchantInput) (*
 	}
 	if input.CloseTime != nil {
 		updates["close_time"] = normalizeBusinessTime(*input.CloseTime)
+	}
+	if input.DeliveryFee != nil {
+		updates["delivery_fee"] = normalizeFeeAmount(*input.DeliveryFee)
+	}
+	if input.RiderEarnings != nil {
+		updates["rider_earnings"] = normalizeFeeAmount(*input.RiderEarnings)
 	}
 
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
@@ -566,6 +576,15 @@ func normalizeBusinessTime(s string) interface{} {
 		return nil
 	}
 	return v
+}
+
+// normalizeFeeAmount 归一化费用金额：不允许为负，保留两位小数。
+func normalizeFeeAmount(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	// 保留两位小数（四舍五入）
+	return math.Round(v*100) / 100
 }
 
 func validateMerchantCoordinates(lat, lng float64) error {

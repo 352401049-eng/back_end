@@ -17,6 +17,7 @@ type AdminHandler struct {
 	MerchantSvc *service.MerchantService
 	ProductSvc  *service.ProductService
 	RiderSvc    *service.RiderApplicationService
+	EarningSvc  *service.RiderEarningService
 }
 
 type CreateMerchantRequest struct {
@@ -53,12 +54,15 @@ type UpdateMerchantProfileRequest struct {
 	AllowReservation *uint8    `json:"allow_reservation" example:"1"`
 	OpenTime         *string   `json:"open_time" example:"09:00"`
 	CloseTime        *string   `json:"close_time" example:"22:00"`
+	DeliveryFee      *float64  `json:"delivery_fee" example:"5.00"`
+	RiderEarnings    *float64  `json:"rider_earnings" example:"4.00"`
 }
 
 func (r UpdateMerchantProfileRequest) hasField() bool {
 	return r.ShopName != nil || r.ContactPhone != nil || r.Address != nil ||
 		r.ShopLogo != nil || r.Images != nil || r.AllowReservation != nil ||
 		r.OpenTime != nil || r.CloseTime != nil ||
+		r.DeliveryFee != nil || r.RiderEarnings != nil ||
 		r.Latitude.Present || r.Longitude.Present || r.Lat.Present || r.Lng.Present
 }
 
@@ -1579,6 +1583,8 @@ func toUpdateMerchantInput(req UpdateMerchantProfileRequest) (service.UpdateMerc
 		AllowReservation: req.AllowReservation,
 		OpenTime:         req.OpenTime,
 		CloseTime:        req.CloseTime,
+		DeliveryFee:      req.DeliveryFee,
+		RiderEarnings:    req.RiderEarnings,
 	}, nil
 }
 

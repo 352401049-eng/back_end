@@ -8,6 +8,7 @@ import (
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -189,6 +190,44 @@ func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, erro
 	return s.getViewByID(deliveryID)
 }
 
+// CancelByRider 骑手取消接单：仅当 status=Accepted（已接单未开始配送）时可取消。
+// 取消后订单回到待接单状态（status=0，rider_id/accepted_at 清空），订单状态同步回退，
+// 其他骑手可接。
+func (s *DeliveryService) CancelByRider(riderID, deliveryID uint64) (*DeliveryView, error) {
+	var d model.DeliveryOrder
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		// FOR UPDATE 行锁，防并发取消/开始配送竞态
+		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+			Where("id = ? AND rider_id = ?", deliveryID, riderID).First(&d).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrDeliveryNotFound
+			}
+			return err
+		}
+		// 仅已接单（未开始配送）可取消；已开始配送（Picking/Delivering）不允许
+		if d.Status != model.DeliveryAccepted {
+			return ErrDeliveryStatusInvalid
+		}
+		if err := tx.Model(&d).Updates(map[string]interface{}{
+			"status":      model.DeliveryPendingAccept,
+			"rider_id":    nil,
+			"accepted_at": nil,
+		}).Error; err != nil {
+			return err
+		}
+		// 回滚父订单状态：接单时 Accept 推进到 Shipping(4)，取消应回退到 PendingShip(3)
+		if d.OrderID != nil {
+			return tx.Model(&model.Order{}).Where("id = ? AND status = ?", *d.OrderID, model.OrderStatusShipping).
+				Update("status", model.OrderStatusPendingShip).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.getViewByID(deliveryID)
+}
+
 func (s *DeliveryService) Complete(riderID, deliveryID uint64, input CompleteDeliveryInput) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
@@ -229,7 +268,8 @@ func (s *DeliveryService) Complete(riderID, deliveryID uint64, input CompleteDel
 func (s *DeliveryService) ConfirmReceipt(accountID, deliveryID uint64) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		q := query.NotDeleted(tx).Where("id = ? AND status = ?", deliveryID, model.DeliveryDelivered)
+		// FOR UPDATE 行锁，防止并发确认收货导致重复入账
+		q := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).Where("id = ? AND status = ?", deliveryID, model.DeliveryDelivered)
 		if err := q.First(&d).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrDeliveryStatusInvalid
@@ -258,6 +298,23 @@ func (s *DeliveryService) ConfirmReceipt(accountID, deliveryID uint64) (*Deliver
 				return err
 			}
 		}
+		// 骑手收益入账：用户确认收货时，按 delivery_order 快照金额创建收益记录
+		// 仅当有骑手接单且收益金额 > 0 时入账；异常单/取消单不进此分支
+		if d.RiderID != nil && d.RiderEarnings > 0 {
+			merchantID := resolveDeliveryMerchantIDInTx(tx, &d)
+			earning := model.RiderEarning{
+				RiderID:         *d.RiderID,
+				DeliveryOrderID: d.ID,
+				OrderID:         d.OrderID,
+				MerchantID:      merchantID,
+				Amount:          d.RiderEarnings,
+				Status:          model.RiderEarningPending,
+				CreatedAt:       now,
+			}
+			if err := tx.Create(&earning).Error; err != nil {
+				return err
+			}
+		}
 		_ = now
 		return nil
 	})
@@ -278,6 +335,23 @@ func (s *DeliveryService) ConfirmReceiptByOrderID(accountID, orderID uint64) (*D
 		return nil, err
 	}
 	return s.ConfirmReceipt(accountID, d.ID)
+}
+
+// resolveDeliveryMerchantIDInTx 从关联的 order 或 inventory_usage 解析商家 ID（delivery_order 本身无 merchant_id）。
+func resolveDeliveryMerchantIDInTx(tx *gorm.DB, d *model.DeliveryOrder) uint64 {
+	if d.OrderID != nil {
+		var o model.Order
+		if err := tx.Select("merchant_id").First(&o, *d.OrderID).Error; err == nil {
+			return o.MerchantID
+		}
+	}
+	if d.InventoryUsageID != nil {
+		var u model.UserInventoryUsage
+		if err := tx.Select("merchant_id").First(&u, *d.InventoryUsageID).Error; err == nil {
+			return u.MerchantID
+		}
+	}
+	return 0
 }
 
 func (s *DeliveryService) CreateForOrder(orderID uint64) (*model.DeliveryOrder, error) {
