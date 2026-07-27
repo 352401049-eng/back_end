@@ -17,6 +17,7 @@ type Config struct {
 	Payment PaymentConfig
 	Backup  BackupConfig
 	Upload  UploadConfig
+	Map     MapConfig
 }
 
 // PaymentConfig 支付渠道。Provider=mock|wechat；wechat 需另配商户参数。
@@ -51,6 +52,11 @@ type JWTConfig struct {
 type WeChatConfig struct {
 	AppID  string
 	Secret string
+}
+
+// MapConfig 地图服务配置。TencentKey 用于腾讯位置服务 POI 检索（配送范围地标）。
+type MapConfig struct {
+	TencentKey string
 }
 
 func (d DBConfig) DSN() string {
@@ -88,6 +94,9 @@ func Load() (*Config, error) {
 		Backup: loadBackupConfig(),
 	}
 	cfg.Upload = loadUploadConfig(cfg.Port)
+	cfg.Map = MapConfig{
+		TencentKey: getEnv("TENCENT_MAP_KEY", ""),
+	}
 
 	return cfg, nil
 }
