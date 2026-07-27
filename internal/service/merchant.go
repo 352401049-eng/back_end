@@ -63,12 +63,14 @@ type UpdateMerchantInput struct {
 	Images           *[]string
 	Coordinates      *MerchantCoordinateUpdate
 	AllowReservation *uint8
+	OpenTime         *string
+	CloseTime        *string
 }
 
 func (in UpdateMerchantInput) hasField() bool {
 	return in.ShopName != nil || in.ContactPhone != nil || in.Address != nil ||
 		in.ShopLogo != nil || in.Images != nil || in.Coordinates != nil ||
-		in.AllowReservation != nil
+		in.AllowReservation != nil || in.OpenTime != nil || in.CloseTime != nil
 }
 
 func (s *MerchantService) Create(input CreateMerchantInput) (*model.MerchantProfile, error) {
@@ -272,6 +274,12 @@ func (s *MerchantService) UpdateProfile(id uint64, input UpdateMerchantInput) (*
 	}
 	if input.AllowReservation != nil {
 		updates["allow_reservation"] = normalizeAllowReservation(*input.AllowReservation)
+	}
+	if input.OpenTime != nil {
+		updates["open_time"] = normalizeBusinessTime(*input.OpenTime)
+	}
+	if input.CloseTime != nil {
+		updates["close_time"] = normalizeBusinessTime(*input.CloseTime)
 	}
 
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
@@ -543,6 +551,21 @@ func normalizeAllowReservation(v uint8) uint8 {
 		return 0
 	}
 	return 1
+}
+
+// normalizeBusinessTime 校验并归一化营业时间字符串。
+// 接受 "HH:MM" 或 "HH:MM:SS" 格式，空串返回 nil（清空），格式非法返回原值不报错（前端已约束）。
+func normalizeBusinessTime(s string) interface{} {
+	v := strings.TrimSpace(s)
+	if v == "" {
+		return nil
+	}
+	// 兼容 "HH:MM" 与 "HH:MM:SS"
+	parts := strings.Split(v, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return nil
+	}
+	return v
 }
 
 func validateMerchantCoordinates(lat, lng float64) error {

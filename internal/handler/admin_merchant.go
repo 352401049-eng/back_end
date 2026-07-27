@@ -51,11 +51,14 @@ type UpdateMerchantProfileRequest struct {
 	Lat              FlexNullableFloat64 `json:"lat"`
 	Lng              FlexNullableFloat64 `json:"lng"`
 	AllowReservation *uint8    `json:"allow_reservation" example:"1"`
+	OpenTime         *string   `json:"open_time" example:"09:00"`
+	CloseTime        *string   `json:"close_time" example:"22:00"`
 }
 
 func (r UpdateMerchantProfileRequest) hasField() bool {
 	return r.ShopName != nil || r.ContactPhone != nil || r.Address != nil ||
 		r.ShopLogo != nil || r.Images != nil || r.AllowReservation != nil ||
+		r.OpenTime != nil || r.CloseTime != nil ||
 		r.Latitude.Present || r.Longitude.Present || r.Lat.Present || r.Lng.Present
 }
 
@@ -1574,6 +1577,8 @@ func toUpdateMerchantInput(req UpdateMerchantProfileRequest) (service.UpdateMerc
 		Images:           req.Images,
 		Coordinates:      coords,
 		AllowReservation: req.AllowReservation,
+		OpenTime:         req.OpenTime,
+		CloseTime:        req.CloseTime,
 	}, nil
 }
 
