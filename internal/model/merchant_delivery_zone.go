@@ -29,6 +29,14 @@ type DeliverySpot struct {
 	RadiusM   uint32  `json:"radius_m"`
 }
 
+// Landmark 区域内地标（POI 检索结果）。
+type Landmark struct {
+	Name      string  `json:"name"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Category  string  `json:"category"` // residential / office / school / mall / hospital
+}
+
 type MerchantDeliveryZone struct {
 	ID         uint64         `gorm:"primaryKey" json:"id"`
 	MerchantID uint64         `gorm:"not null;uniqueIndex" json:"merchant_id"`
@@ -36,6 +44,7 @@ type MerchantDeliveryZone struct {
 	Mode       string         `gorm:"size:16;not null;default:polygon" json:"mode"`
 	Points     []GeoPoint     `gorm:"serializer:json;not null" json:"points"`
 	Spots      []DeliverySpot `gorm:"serializer:json" json:"spots"`
+	Landmarks  []Landmark     `gorm:"serializer:json" json:"landmarks"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
 	SoftDelete
