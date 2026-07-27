@@ -13,6 +13,7 @@ import (
 type DeliveryZoneHandler struct {
 	ZoneSvc     *service.DeliveryZoneService
 	MerchantSvc *service.MerchantService
+	TencentKey  string
 }
 
 type deliveryZonePointBody struct {
@@ -112,6 +113,40 @@ func parseUpsertDeliveryZoneBody(c *gin.Context) (service.UpsertDeliveryZoneInpu
 		}
 		input.Spots = spots
 		input.HasSpots = true
+	}
+	return input, nil
+}
+
+type searchPOIBody struct {
+	Mode   *string                 `json:"mode"`
+	Points []deliveryZonePointBody `json:"points"`
+	Spots  []deliveryZoneSpotBody  `json:"spots"`
+}
+
+func parseSearchPOIBody(c *gin.Context) (service.SearchLandmarksInput, error) {
+	var raw searchPOIBody
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		return service.SearchLandmarksInput{}, err
+	}
+	input := service.SearchLandmarksInput{}
+	if raw.Mode != nil {
+		input.Mode = model.NormalizeDeliveryZoneMode(*raw.Mode)
+	} else {
+		input.Mode = model.DeliveryZoneModePolygon
+	}
+	if raw.Points != nil {
+		points := make([]model.GeoPoint, 0, len(raw.Points))
+		for _, p := range raw.Points {
+			points = append(points, parseGeoPointBody(p))
+		}
+		input.Points = points
+	}
+	if raw.Spots != nil {
+		spots := make([]model.DeliverySpot, 0, len(raw.Spots))
+		for _, p := range raw.Spots {
+			spots = append(spots, parseSpotBody(p))
+		}
+		input.Spots = spots
 	}
 	return input, nil
 }
@@ -216,6 +251,34 @@ func (h *DeliveryZoneHandler) DeleteMerchant(c *gin.Context) {
 		return
 	}
 	response.OK(c, nil)
+}
+
+// SearchMerchantPOI godoc
+// @Summary      检索配送范围内地标（商家端）
+// @Description  调腾讯位置服务 POI 检索区域内地标，并落库到配送范围
+// @Tags         商家端-配送范围
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body  searchPOIBody  true  "当前配送范围"
+// @Success      200   {object}  response.Body{data=service.SearchLandmarksResult}
+// @Router       /merchant/delivery-zone/poi [post]
+func (h *DeliveryZoneHandler) SearchMerchantPOI(c *gin.Context) {
+	scope, err := resolveMerchantScope(c, h.MerchantSvc)
+	if err != nil {
+		return
+	}
+	input, err := parseSearchPOIBody(c)
+	if err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	result, err := h.ZoneSvc.SearchLandmarks(*scope, h.TencentKey, input)
+	if err != nil {
+		handleDeliveryZoneError(c, err)
+		return
+	}
+	response.OK(c, result)
 }
 
 // GetAdminDeliveryZone godoc
@@ -325,6 +388,36 @@ func (h *DeliveryZoneHandler) DeleteAdmin(c *gin.Context) {
 		return
 	}
 	response.OK(c, nil)
+}
+
+// SearchAdminPOI godoc
+// @Summary      检索商家配送范围内地标（管理端）
+// @Description  调腾讯位置服务 POI 检索区域内地标，并落库到配送范围
+// @Tags         管理端-商家
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int            true  "商家 ID"
+// @Param        body  body  searchPOIBody  true  "当前配送范围"
+// @Success      200   {object}  response.Body{data=service.SearchLandmarksResult}
+// @Router       /admin/merchants/{id}/delivery-zone/poi [post]
+func (h *DeliveryZoneHandler) SearchAdminPOI(c *gin.Context) {
+	merchantID, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	input, err := parseSearchPOIBody(c)
+	if err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	result, err := h.ZoneSvc.SearchLandmarks(merchantID, h.TencentKey, input)
+	if err != nil {
+		handleDeliveryZoneError(c, err)
+		return
+	}
+	response.OK(c, result)
 }
 
 // GetPublicDeliveryZone godoc

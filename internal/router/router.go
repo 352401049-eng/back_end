@@ -116,7 +116,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		RankSvc: &service.RankService{DB: db},
 	}
 	deliveryZoneHandler := &handler.DeliveryZoneHandler{
-		ZoneSvc: deliveryZoneSvc, MerchantSvc: merchantSvc,
+		ZoneSvc: deliveryZoneSvc, MerchantSvc: merchantSvc, TencentKey: cfg.Map.TencentKey,
 	}
 
 	r.GET("/api/health", health.Check)
@@ -248,6 +248,7 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.PUT("/delivery-zone", dz.PutMerchant)
 	r.PATCH("/delivery-zone", dz.PatchMerchant)
 	r.DELETE("/delivery-zone", dz.DeleteMerchant)
+	r.POST("/delivery-zone/poi", dz.SearchMerchantPOI)
 	r.GET("/dashboard", mo.Dashboard)
 	r.GET("/sales", mo.SalesReport)
 
@@ -326,6 +327,7 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 	r.PUT("/merchants/:id/delivery-zone", dz.PutAdmin)
 	r.PATCH("/merchants/:id/delivery-zone", dz.PatchAdmin)
 	r.DELETE("/merchants/:id/delivery-zone", dz.DeleteAdmin)
+	r.POST("/merchants/:id/delivery-zone/poi", dz.SearchAdminPOI)
 
 	r.POST("/products", h.CreateProduct)
 	r.GET("/products", h.ListProducts)
