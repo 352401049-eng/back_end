@@ -200,20 +200,6 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 	subtotal = roundMoney(subtotal)
 	payAmount := roundMoney(subtotal - discountAmount)
 
-	// 骑手配送：从商家配置读取配送费，加入用户支付金额
-	var deliveryFee, riderEarnings float64
-	if input.DeliveryType == model.DeliveryTypeDelivery {
-		var merchant model.MerchantProfile
-		if err := query.NotDeleted(s.DB).First(&merchant, input.MerchantID).Error; err != nil {
-			return nil, ErrMerchantNotFound
-		}
-		deliveryFee = merchant.DeliveryFee
-		riderEarnings = merchant.RiderEarnings
-		if deliveryFee > 0 {
-			payAmount = roundMoney(payAmount + deliveryFee)
-		}
-	}
-
 	now := time.Now()
 	orderNo := genOrderNo()
 
@@ -274,12 +260,10 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			DeliveryType:        input.DeliveryType,
 			AddressSnapshot:     addrSnap,
 			TotalAmount:         subtotal,
-			DiscountAmount:      discountAmount,
-			UserCouponID:        input.UserCouponID,
-			PayAmount:           payAmount,
-			DeliveryFee:         deliveryFee,
-			RiderEarnings:       riderEarnings,
-			PayStatus:           model.PayStatusUnpaid,
+		DiscountAmount:      discountAmount,
+		UserCouponID:        input.UserCouponID,
+		PayAmount:           payAmount,
+		PayStatus:           model.PayStatusUnpaid,
 			Remark:              input.Remark,
 		}
 		if err := tx.Create(&order).Error; err != nil {
