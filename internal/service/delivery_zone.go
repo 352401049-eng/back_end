@@ -380,6 +380,8 @@ func (s *DeliveryZoneService) SearchLandmarks(merchantID uint64, tencentKey stri
 		}
 		return nil, fmt.Errorf("检索地标失败: %w", err)
 	}
+	// 二次过滤：腾讯按检索圆返回 POI，圆边界可能在配送范围外，用实际范围几何剔除
+	landmarks = filterLandmarksInZone(landmarks, input.Points, input.Spots)
 	if landmarks == nil {
 		landmarks = []model.Landmark{}
 	}
@@ -388,6 +390,25 @@ func (s *DeliveryZoneService) SearchLandmarks(merchantID uint64, tencentKey stri
 		return nil, fmt.Errorf("保存地标失败: %w", err)
 	}
 	return &SearchLandmarksResult{Landmarks: landmarks}, nil
+}
+
+// filterLandmarksInZone 用实际配送范围几何（多边形 + 配送点圆并集）过滤地标，
+// 剔除腾讯检索圆边界外、配送范围外的 POI。
+func filterLandmarksInZone(landmarks []model.Landmark, points []model.GeoPoint, spots []model.DeliverySpot) []model.Landmark {
+	hasPolygon := len(points) >= 3
+	hasSpots := len(spots) > 0
+	if !hasPolygon && !hasSpots {
+		return landmarks
+	}
+	out := make([]model.Landmark, 0, len(landmarks))
+	for _, lm := range landmarks {
+		inSpot := hasSpots && geo.PointInAnySpot(lm.Latitude, lm.Longitude, spots)
+		inPoly := hasPolygon && geo.PointInPolygon(lm.Latitude, lm.Longitude, points)
+		if inSpot || inPoly {
+			out = append(out, lm)
+		}
+	}
+	return out
 }
 
 func (s *DeliveryZoneService) CheckPoint(merchantID uint64, lat, lng float64) (*DeliveryZoneCheckResult, error) {
