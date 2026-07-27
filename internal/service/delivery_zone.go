@@ -366,7 +366,7 @@ func (s *DeliveryZoneService) SearchLandmarks(merchantID uint64, tencentKey stri
 			POIUnavailable: true,
 		}, nil
 	}
-	landmarks, err := geo.SearchPOI(context.Background(), nil, "https://apis.map.qq.com/place/v1/explore", tencentKey, geo.POIRequest{
+	landmarks, err := geo.SearchPOI(context.Background(), nil, "https://apis.map.qq.com/ws/place/v1/explore", tencentKey, geo.POIRequest{
 		Mode:   input.Mode,
 		Points: input.Points,
 		Spots:  input.Spots,

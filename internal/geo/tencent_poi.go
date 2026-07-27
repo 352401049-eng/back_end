@@ -99,7 +99,7 @@ func computeSearchCenter(req POIRequest) (lat, lng float64, radiusM int) {
 }
 
 // SearchPOI 调腾讯位置服务 POI 检索接口。
-// endpoint 可被测试用 httptest 替换；生产固定 https://apis.map.qq.com/place/v1/explore。
+// endpoint 可被测试用 httptest 替换；生产固定 https://apis.map.qq.com/ws/place/v1/explore。
 func SearchPOI(ctx context.Context, client *http.Client, endpoint, key string, req POIRequest) ([]model.Landmark, error) {
 	if key == "" {
 		return nil, ErrMapKeyNotConfigured
