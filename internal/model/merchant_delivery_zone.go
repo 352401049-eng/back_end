@@ -44,7 +44,7 @@ type MerchantDeliveryZone struct {
 	Mode       string         `gorm:"size:16;not null;default:polygon" json:"mode"`
 	Points     []GeoPoint     `gorm:"serializer:json;not null" json:"points"`
 	Spots      []DeliverySpot `gorm:"serializer:json" json:"spots"`
-	Landmarks  []Landmark     `gorm:"serializer:json" json:"landmarks"`
+	Landmarks  []Landmark     `gorm:"column:poi_landmarks;serializer:json" json:"landmarks"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
 	SoftDelete
