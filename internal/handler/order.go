@@ -306,7 +306,7 @@ type MerchantOrderHandler struct {
 }
 
 type ReviewOrderRequest struct {
-	Approve      bool    `json:"approve" binding:"required"`
+	Approve      bool    `json:"approve"`
 	RejectReason *string `json:"reject_reason"`
 }
 
