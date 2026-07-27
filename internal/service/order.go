@@ -951,7 +951,9 @@ func (s *OrderService) GetGroupProgress(accountID, productID uint64, teamID *uin
 		q = q.Where("status = ?", model.GroupBuyTeamPending)
 	}
 	if err := q.Order("id DESC").First(&team).Error; err != nil {
-		return nil, ErrGroupBuyInvalid
+		// 商品已启用拼团但暂无待成团 team（全新商品或所有团均已结束）：
+		// 不报错，返回未开团的空进度，让前端可正常展示拼团价/目标人数。
+		return s.buildEmptyGroupBuyProgress(&product, &gb, nil), nil
 	}
 
 	return s.buildGroupBuyProgress(&product, &gb, &team, accountID, nil)
@@ -1022,7 +1024,9 @@ func (s *OrderService) GetActivityGroupProgress(accountID, activityID, activityP
 		q = q.Where("status = ?", model.GroupBuyTeamPending)
 	}
 	if err := q.Order("id DESC").First(&team).Error; err != nil {
-		return nil, ErrGroupBuyInvalid
+		// 同 GetGroupProgress：活动商品已启用拼团但暂无待成团 team，
+		// 返回未开团的空进度而非 400。
+		return s.buildEmptyGroupBuyProgress(&prod, &gb, actGB), nil
 	}
 
 	progress, err := s.buildGroupBuyProgress(&prod, &gb, &team, accountID, actGB)
@@ -1162,6 +1166,40 @@ func (s *OrderService) buildGroupBuyProgress(product *model.Product, gb *model.G
 		progress.IsLeader = team.LeaderID == accountID
 	}
 	return progress, nil
+}
+
+// buildEmptyGroupBuyProgress 构造"未开团"的空进度。
+// 用于商品已启用拼团但暂无任何待成团 team 的场景，避免前端因拿不到进度而展示假数据。
+func (s *OrderService) buildEmptyGroupBuyProgress(product *model.Product, gb *model.GroupBuy, actGB *ActivityGroupBuyConfig) *GroupBuyProgress {
+	allowRepeat := product.GroupBuyAllowRepeat
+	groupPrice := gb.GroupPrice
+	target := gb.TargetCount
+	if actGB != nil {
+		allowRepeat = actGB.GroupBuyAllowRepeat
+		groupPrice = actGB.GroupBuyPrice
+		if target == 0 && actGB.GroupBuyTargetCount >= 2 {
+			target = actGB.GroupBuyTargetCount
+		}
+	}
+	if target == 0 {
+		if product.GroupBuyTargetCount != nil && *product.GroupBuyTargetCount >= 2 {
+			target = *product.GroupBuyTargetCount
+		} else if gb.TargetCount >= 2 {
+			target = gb.TargetCount
+		} else {
+			target = 2
+		}
+	}
+	return &GroupBuyProgress{
+		TeamID:          0,
+		TargetCount:     target,
+		CurrentCount:    0,
+		RemainingCount:  target,
+		Status:          model.GroupBuyTeamPending,
+		StatusText:      "未开团",
+		GroupPrice:      groupPrice,
+		AllowRepeatJoin: allowRepeat,
+	}
 }
 
 func (s *OrderService) findUserPendingTeamID(accountID, productID uint64) (*uint64, error) {
