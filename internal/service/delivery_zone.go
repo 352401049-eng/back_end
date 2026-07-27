@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,6 +30,7 @@ type DeliveryZoneView struct {
 	Mode       string               `json:"mode"`
 	Points     []model.GeoPoint     `json:"points"`
 	Spots      []model.DeliverySpot `json:"spots"`
+	Landmarks  []model.Landmark     `json:"landmarks"`
 }
 
 type DeliveryZoneCheckResult struct {
@@ -70,7 +72,12 @@ func (s *DeliveryZoneService) getByMerchantIDAny(merchantID uint64) (*model.Merc
 
 func (s *DeliveryZoneService) ToView(zone *model.MerchantDeliveryZone) DeliveryZoneView {
 	if zone == nil {
-		return DeliveryZoneView{Mode: model.DeliveryZoneModePolygon, Points: []model.GeoPoint{}, Spots: []model.DeliverySpot{}}
+		return DeliveryZoneView{
+			Mode:      model.DeliveryZoneModePolygon,
+			Points:    []model.GeoPoint{},
+			Spots:     []model.DeliverySpot{},
+			Landmarks: []model.Landmark{},
+		}
 	}
 	points := zone.Points
 	if points == nil {
@@ -80,6 +87,10 @@ func (s *DeliveryZoneService) ToView(zone *model.MerchantDeliveryZone) DeliveryZ
 	if spots == nil {
 		spots = []model.DeliverySpot{}
 	}
+	landmarks := zone.Landmarks
+	if landmarks == nil {
+		landmarks = []model.Landmark{}
+	}
 	mode := model.NormalizeDeliveryZoneMode(zone.Mode)
 	return DeliveryZoneView{
 		MerchantID: zone.MerchantID,
@@ -87,6 +98,7 @@ func (s *DeliveryZoneService) ToView(zone *model.MerchantDeliveryZone) DeliveryZ
 		Mode:       mode,
 		Points:     points,
 		Spots:      spots,
+		Landmarks:  landmarks,
 	}
 }
 
@@ -324,6 +336,58 @@ func (s *DeliveryZoneService) Delete(merchantID uint64) error {
 		return err
 	}
 	return query.SoftDelete(s.DB, zone).Error
+}
+
+// SearchLandmarksInput 检索地标入参。
+type SearchLandmarksInput struct {
+	Mode   string
+	Points []model.GeoPoint
+	Spots  []model.DeliverySpot
+}
+
+// SearchLandmarksResult 检索地标结果。
+type SearchLandmarksResult struct {
+	Landmarks      []model.Landmark `json:"landmarks"`
+	POIUnavailable bool             `json:"poi_unavailable"`
+}
+
+// SearchLandmarks 调腾讯 POI 检索区域地标并落库。
+func (s *DeliveryZoneService) SearchLandmarks(merchantID uint64, tencentKey string, input SearchLandmarksInput) (*SearchLandmarksResult, error) {
+	zone, err := s.GetByMerchantID(merchantID)
+	if err != nil {
+		if errors.Is(err, ErrDeliveryZoneNotFound) {
+			return nil, fmt.Errorf("%w: 请先保存配送范围", ErrDeliveryZoneInvalid)
+		}
+		return nil, err
+	}
+	if tencentKey == "" {
+		return &SearchLandmarksResult{
+			Landmarks:      []model.Landmark{},
+			POIUnavailable: true,
+		}, nil
+	}
+	landmarks, err := geo.SearchPOI(context.Background(), nil, "https://apis.map.qq.com/place/v1/explore", tencentKey, geo.POIRequest{
+		Mode:   input.Mode,
+		Points: input.Points,
+		Spots:  input.Spots,
+	})
+	if err != nil {
+		if errors.Is(err, geo.ErrMapKeyNotConfigured) {
+			return &SearchLandmarksResult{
+				Landmarks:      []model.Landmark{},
+				POIUnavailable: true,
+			}, nil
+		}
+		return nil, fmt.Errorf("检索地标失败: %w", err)
+	}
+	if landmarks == nil {
+		landmarks = []model.Landmark{}
+	}
+	zone.Landmarks = landmarks
+	if err := s.DB.Save(zone).Error; err != nil {
+		return nil, fmt.Errorf("保存地标失败: %w", err)
+	}
+	return &SearchLandmarksResult{Landmarks: landmarks}, nil
 }
 
 func (s *DeliveryZoneService) CheckPoint(merchantID uint64, lat, lng float64) (*DeliveryZoneCheckResult, error) {
