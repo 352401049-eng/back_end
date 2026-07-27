@@ -292,6 +292,19 @@ func (s *MerchantService) UpdateProfile(id uint64, input UpdateMerchantInput) (*
 		updates["rider_earnings"] = normalizeFeeAmount(*input.RiderEarnings)
 	}
 
+	// 校验骑手收益不得高于配送费
+	deliveryFee := profile.DeliveryFee
+	if input.DeliveryFee != nil {
+		deliveryFee = *input.DeliveryFee
+	}
+	riderEarnings := profile.RiderEarnings
+	if input.RiderEarnings != nil {
+		riderEarnings = *input.RiderEarnings
+	}
+	if riderEarnings > deliveryFee {
+		return nil, fmt.Errorf("骑手收益不能高于配送费")
+	}
+
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.MerchantProfile{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return fmt.Errorf("更新商家资料失败: %w", err)
