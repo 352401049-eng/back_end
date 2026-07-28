@@ -99,8 +99,9 @@ type Order struct {
 	CreatedAt           time.Time        `json:"created_at"`
 	UpdatedAt           time.Time        `json:"updated_at"`
 	SoftDelete
-	Items    []OrderItem `gorm:"foreignKey:OrderID" json:"items,omitempty"`
-	Children []Order     `gorm:"foreignKey:ParentOrderID" json:"children,omitempty"`
+	Items            []OrderItem          `gorm:"foreignKey:OrderID" json:"items,omitempty"`
+	Children         []Order              `gorm:"foreignKey:ParentOrderID" json:"children,omitempty"`
+	MerchantProfile  *MerchantProfile     `gorm:"foreignKey:MerchantID" json:"merchant_profile,omitempty"`
 }
 
 func (Order) TableName() string { return "order" }

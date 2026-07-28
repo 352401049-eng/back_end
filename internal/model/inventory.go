@@ -53,9 +53,10 @@ type UserInventoryUsage struct {
 	CreatedAt       time.Time        `json:"created_at"`
 	UpdatedAt       time.Time        `json:"updated_at"`
 	SoftDelete
-	Product       *Product        `gorm:"foreignKey:ProductID" json:"product,omitempty"`
-	Inventory     *UserInventory  `gorm:"foreignKey:InventoryID" json:"inventory,omitempty"`
-	DeliveryOrder *DeliveryOrder  `gorm:"foreignKey:DeliveryOrderID" json:"delivery_order,omitempty"`
+	Product         *Product           `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+	Inventory       *UserInventory     `gorm:"foreignKey:InventoryID" json:"inventory,omitempty"`
+	DeliveryOrder   *DeliveryOrder     `gorm:"foreignKey:DeliveryOrderID" json:"delivery_order,omitempty"`
+	MerchantProfile *MerchantProfile   `gorm:"foreignKey:MerchantID" json:"merchant_profile,omitempty"`
 }
 
 func (UserInventoryUsage) TableName() string { return "user_inventory_usage" }
