@@ -13,14 +13,28 @@ import (
 )
 
 func (s *OrderService) settlePaymentInTx(tx *gorm.DB, orderID uint64, payAmount float64, at time.Time) error {
-	p := s.Payment
-	if p == nil {
-		p = &payment.MockProvider{DB: s.DB}
+	p := s.paymentProvider()
+	if p.ImmediateSettle() {
+		// mock：事务内立即结算 + 推进订单状态（PendingPay -> PendingFulfill，拼团 PendingGroup 不动）
+		if err := p.SettlePaidInTx(tx, orderID, payAmount, at); err != nil {
+			return err
+		}
+		return s.advanceAfterPaidInTx(tx, orderID)
 	}
-	if !p.ImmediateSettle() {
-		return fmt.Errorf("%w: 请使用 PAYMENT_PROVIDER=mock，或完成微信支付接入后再切换", payment.ErrNotConfigured)
-	}
-	return p.SettlePaidInTx(tx, orderID, payAmount, at)
+	// wechat：不结算，订单保留 PendingPay，交由 CreatePrepay + HandleNotify 推进
+	return nil
+}
+
+// advanceAfterPaidInTx 仅把 status=PendingPay 的订单推进到 PendingFulfill + 商家审核待审。
+// 拼团单（PendingGroup）不被推进，由 tryCompleteGroup 成团后推进。
+func (s *OrderService) advanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
+	return tx.Model(&model.Order{}).
+		Where("id = ? AND status = ?", orderID, model.OrderStatusPendingPay).
+		Updates(map[string]interface{}{
+			"status":                model.OrderStatusPendingFulfill,
+			"merchant_review_stage": model.MerchantReviewPending,
+			"pay_expire_at":         nil,
+		}).Error
 }
 
 func (s *OrderService) refundPaymentInTx(tx *gorm.DB, orderID uint64) error {
@@ -152,5 +166,86 @@ func (s *OrderService) expireOneGroupTeam(team *model.GroupBuyTeam) error {
 			}
 		}
 		return nil
+	})
+}
+
+// payTimeoutMinutes 返回待支付订单超时分钟数，未配置时用默认 15 分钟。
+func (s *OrderService) payTimeoutMinutes() int {
+	if s.PayTimeoutMinutes > 0 {
+		return s.PayTimeoutMinutes
+	}
+	return 15
+}
+
+// ExpireStalePendingPayOrders 关闭超时未支付的订单：回滚库存/券/销量 + 退款 + 置 Closed。
+// 单个订单失败只记入 firstErr，不中断同批次其余订单。
+func (s *OrderService) ExpireStalePendingPayOrders(now time.Time) (int, error) {
+	var orders []model.Order
+	if err := query.NotDeleted(s.DB).
+		Where("status = ? AND pay_expire_at IS NOT NULL AND pay_expire_at < ?", model.OrderStatusPendingPay, now).
+		Limit(100).
+		Find(&orders).Error; err != nil {
+		return 0, err
+	}
+	n := 0
+	var firstErr error
+	for i := range orders {
+		if err := s.expireOnePendingPayOrder(orders[i].ID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("expire pending-pay order %d: %w", orders[i].ID, err)
+			}
+			continue
+		}
+		n++
+	}
+	return n, firstErr
+}
+
+// expireOnePendingPayOrder 关闭单个待支付订单。关单前先查 pay_status，
+// 若已支付（回调可能已先到）则不关单，避免已付款被关。
+func (s *OrderService) expireOnePendingPayOrder(orderID uint64) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		var order model.Order
+		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&order, orderID).Error; err != nil {
+			return err
+		}
+		if order.Status != model.OrderStatusPendingPay {
+			return nil
+		}
+		// 已支付则不关单（回调可能已先到，容错）
+		if order.PayStatus == model.PayStatusPaid {
+			return s.advanceAfterPaidInTx(tx, orderID)
+		}
+		isPackageParent := order.PackageProductID != nil && order.ParentOrderID == nil && order.MerchantID == 0
+		if order.ParentOrderID != nil {
+			return nil
+		}
+		if s.CouponSvc != nil {
+			if err := s.CouponSvc.ReleaseByOrderInTx(tx, &order); err != nil {
+				return err
+			}
+		}
+		if s.InventorySvc != nil {
+			if err := s.InventorySvc.RollbackOrderCredit(tx, orderID); err != nil {
+				return err
+			}
+		}
+		if isPackageParent {
+			if err := cancelPackageChildrenInTx(tx, orderID, s.InventorySvc, s.CouponSvc); err != nil {
+				return err
+			}
+		} else if err := restoreProductStockForOrder(tx, orderID); err != nil {
+			return err
+		}
+		if s.ActivitySvc != nil {
+			if err := s.ActivitySvc.RollbackSoldInTx(tx, orderID); err != nil {
+				return err
+			}
+		}
+		return tx.Model(&order).Updates(map[string]interface{}{
+			"status":        model.OrderStatusClosed,
+			"pay_expire_at": nil,
+		}).Error
 	})
 }

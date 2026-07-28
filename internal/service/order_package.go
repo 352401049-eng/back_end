@@ -221,7 +221,7 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			}
 		}
 
-		status := model.OrderStatusPendingFulfill
+		status := model.OrderStatusPendingPay
 		reviewStage := model.MerchantReviewPending
 		if input.PurchaseType == model.PurchaseTypeGroup {
 			status = model.OrderStatusPendingGroup
@@ -235,6 +235,13 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 				return ErrAddressRequired
 			}
 			addrSnap = AddressSnapshotFromUserAddress(&addr)
+		}
+
+		// 直购单需等待支付，记录支付超时时间；拼团单不依赖支付前置
+		var payExpireAt *time.Time
+		if status == model.OrderStatusPendingPay {
+			expireAt := now.Add(time.Duration(s.payTimeoutMinutes()) * time.Minute)
+			payExpireAt = &expireAt
 		}
 
 		pkgID := pkg.ID
@@ -253,6 +260,7 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		UserCouponID:        input.UserCouponID,
 		PayAmount:           payAmount,
 		PayStatus:           model.PayStatusUnpaid,
+		PayExpireAt:         payExpireAt,
 			Remark:              input.Remark,
 		}
 		if err := tx.Create(&order).Error; err != nil {

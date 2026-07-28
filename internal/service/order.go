@@ -27,12 +27,13 @@ var (
 )
 
 type OrderService struct {
-	DB           *gorm.DB
-	InventorySvc *InventoryService
-	CouponSvc    *CouponService
-	ActivitySvc  *ActivityService
-	ZoneSvc      *DeliveryZoneService
-	Payment      payment.Provider
+	DB                *gorm.DB
+	InventorySvc      *InventoryService
+	CouponSvc         *CouponService
+	ActivitySvc       *ActivityService
+	ZoneSvc           *DeliveryZoneService
+	Payment           payment.Provider
+	PayTimeoutMinutes int // 待支付订单超时分钟数，0 时由 worker 用默认值
 }
 
 type CreateOrderInput struct {
@@ -234,7 +235,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			}
 		}
 
-		status := model.OrderStatusPendingFulfill
+		status := model.OrderStatusPendingPay
 		reviewStage := model.MerchantReviewPending
 		if input.PurchaseType == model.PurchaseTypeGroup {
 			status = model.OrderStatusPendingGroup
@@ -248,6 +249,13 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 				return ErrAddressRequired
 			}
 			addrSnap = AddressSnapshotFromUserAddress(&addr)
+		}
+
+		// 直购单需等待支付，记录支付超时时间；拼团单不依赖支付前置（沿用历史语义）
+		var payExpireAt *time.Time
+		if status == model.OrderStatusPendingPay {
+			expireAt := now.Add(time.Duration(s.payTimeoutMinutes()) * time.Minute)
+			payExpireAt = &expireAt
 		}
 
 		order = model.Order{
@@ -264,6 +272,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		UserCouponID:        input.UserCouponID,
 		PayAmount:           payAmount,
 		PayStatus:           model.PayStatusUnpaid,
+		PayExpireAt:         payExpireAt,
 			Remark:              input.Remark,
 		}
 		if err := tx.Create(&order).Error; err != nil {
@@ -367,7 +376,10 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, 
 
 	if resolveTeamID != nil {
 		var team model.GroupBuyTeam
-		if err := query.NotDeleted(tx).Where("id = ? AND group_buy_id = ? AND status = ?", *resolveTeamID, gb.ID, model.GroupBuyTeamPending).First(&team).Error; err != nil {
+		// FOR UPDATE 行锁，串行化并发 join，避免 current_count 自增与成团判断竞态
+		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND group_buy_id = ? AND status = ?", *resolveTeamID, gb.ID, model.GroupBuyTeamPending).
+			First(&team).Error; err != nil {
 			return 0, ErrGroupBuyInvalid
 		}
 		joinCount, err := countUserTeamJoins(tx, accountID, team.ID, activityID)
@@ -506,8 +518,14 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 		return nil
 	}
 	var team model.GroupBuyTeam
-	if err := query.NotDeleted(tx).First(&team, *teamID).Error; err != nil {
+	// FOR UPDATE 行锁，让成团判断与状态更新串行化，避免并发重复成团
+	if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&team, *teamID).Error; err != nil {
 		return err
+	}
+	if team.Status != model.GroupBuyTeamPending {
+		// 已被并发置为 Success/Failed，直接返回
+		return nil
 	}
 	if team.CurrentCount < team.TargetCount {
 		return nil
@@ -528,10 +546,18 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 	}
 
 	now := time.Now()
-	if err := tx.Model(&team).Updates(map[string]interface{}{
-		"status": model.GroupBuyTeamSuccess, "success_at": now,
-	}).Error; err != nil {
-		return err
+	// 加 status=Pending 守卫，幂等兜底防重复成团
+	res := tx.Model(&team).Where("status = ?", model.GroupBuyTeamPending).
+		Updates(map[string]interface{}{
+			"status":     model.GroupBuyTeamSuccess,
+			"success_at": now,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		// 已被并发成团，无需重复推进订单
+		return nil
 	}
 	if err := tx.Model(&model.Order{}).
 		Where("status = ? AND id IN (SELECT order_id FROM order_item WHERE group_buy_team_id = ? AND is_deleted = 0)", model.OrderStatusPendingGroup, team.ID).
@@ -777,6 +803,8 @@ func (s *OrderService) enrichBuyers(views []OrderView) {
 
 func applyStatusCodeFilter(q *gorm.DB, code string) {
 	switch code {
+	case "pending_pay":
+		q.Where("status = ?", model.OrderStatusPendingPay)
 	case "pending_group":
 		q.Where("status = ?", model.OrderStatusPendingGroup)
 	case "pending_merchant":
@@ -793,6 +821,10 @@ func applyStatusCodeFilter(q *gorm.DB, code string) {
 		q.Where("status = ?", model.OrderStatusShipping)
 	case "completed":
 		q.Where("status = ?", model.OrderStatusCompleted)
+	case "cancelled":
+		q.Where("status = ?", model.OrderStatusCancelled)
+	case "closed":
+		q.Where("status = ?", model.OrderStatusClosed)
 	}
 }
 
@@ -905,12 +937,18 @@ func (s *OrderService) MerchantUseReview(merchantID, orderID uint64, approve boo
 		nextStatus := model.OrderStatusCompleted
 		if deliveryType == model.DeliveryTypeDelivery && product.ItemType == model.ProductItemTypePhysical {
 			nextStatus = model.OrderStatusPendingShip
+			// 配送费/骑手收益从商家配置读取快照（与背包使用链路 inventory.go 一致），
+			// 不能取 order.DeliveryFee/RiderEarnings——下单时未写入，恒为 0
+			var merchant model.MerchantProfile
+			if err := query.NotDeleted(tx).First(&merchant, order.MerchantID).Error; err != nil {
+				return ErrMerchantNotFound
+			}
 			orderID := order.ID
 			d := model.DeliveryOrder{
 				OrderID:       &orderID,
 				Status:        model.DeliveryPendingAccept,
-				DeliveryFee:   order.DeliveryFee,
-				RiderEarnings: order.RiderEarnings,
+				DeliveryFee:   merchant.DeliveryFee,
+				RiderEarnings: merchant.RiderEarnings,
 			}
 			if err := tx.Create(&d).Error; err != nil {
 				return err

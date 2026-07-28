@@ -140,13 +140,9 @@ func OptionalAuth(jwtSecret string, db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// RequireRider 限制仅已通过骑手审核的账号可访问；管理员可 bypass 用于联调测试。
+// RequireRider 限制仅已通过骑手审核的账号可访问。
 func RequireRider() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if auth.IsAdmin(c) {
-			c.Next()
-			return
-		}
 		if !auth.IsRider(c) {
 			response.Fail(c, 403, 403, "您还不是骑手或未通过审核")
 			c.Abort()
@@ -156,7 +152,8 @@ func RequireRider() gin.HandlerFunc {
 	}
 }
 
-// RequireAccountTypes 限制仅指定角色可访问（需在 RequireAuth 之后使用）；管理员可 bypass。
+// RequireAccountTypes 限制仅指定角色可访问（需在 RequireAuth 之后使用）。
+// admin 代管商家应通过 /merchant 组白名单显式包含 AccountTypeAdmin。
 func RequireAccountTypes(types ...uint8) gin.HandlerFunc {
 	allowed := make(map[uint8]struct{}, len(types))
 	for _, t := range types {
@@ -164,11 +161,6 @@ func RequireAccountTypes(types ...uint8) gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
-		if auth.IsAdmin(c) {
-			c.Next()
-			return
-		}
-
 		accountType, ok := auth.AccountType(c)
 		if !ok {
 			response.Fail(c, 401, 401, "请先登录")

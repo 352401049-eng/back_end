@@ -61,8 +61,10 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	orderSvc := &service.OrderService{
 		DB: db, InventorySvc: inventorySvc, CouponSvc: couponSvc,
 		ActivitySvc: activitySvc, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
+		PayTimeoutMinutes: cfg.Payment.PayTimeoutMinutes,
 	}
 	startGroupExpireWorker(orderSvc)
+	startPendingPayExpireWorker(orderSvc)
 	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc}
 	paymentHandler := &handler.PaymentHandler{OrderSvc: orderSvc}
 	deliverySvc := &service.DeliveryService{DB: db}
@@ -236,6 +238,22 @@ func startGroupExpireWorker(orderSvc *service.OrderService) {
 				log.Printf("拼团超时部分失败: %v (本批成功 %d)", err, n)
 			} else if n > 0 {
 				log.Printf("拼团超时已处理 %d 个团", n)
+			}
+		}
+	}()
+}
+
+// startPendingPayExpireWorker 定时关闭超时未支付的订单并回滚库存/券/销量。
+func startPendingPayExpireWorker(orderSvc *service.OrderService) {
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			n, err := orderSvc.ExpireStalePendingPayOrders(time.Now())
+			if err != nil {
+				log.Printf("待支付超时关单部分失败: %v (本批成功 %d)", err, n)
+			} else if n > 0 {
+				log.Printf("待支付超时已关闭 %d 个订单", n)
 			}
 		}
 	}()

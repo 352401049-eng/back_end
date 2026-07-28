@@ -93,6 +93,7 @@ type Order struct {
 	RiderEarnings       float64          `gorm:"type:decimal(10,2);not null;default:0" json:"rider_earnings"`
 	PayStatus           uint8            `gorm:"not null;default:0" json:"pay_status"`
 	PaidAt              *time.Time       `json:"paid_at,omitempty"`
+	PayExpireAt         *time.Time       `gorm:"column:pay_expire_at" json:"pay_expire_at,omitempty"`
 	Remark              *string          `gorm:"size:256" json:"remark,omitempty"`
 	CreatedAt           time.Time        `json:"created_at"`
 	UpdatedAt           time.Time        `json:"updated_at"`
@@ -159,6 +160,9 @@ func OrderStatusText(status uint8) string {
 
 // OrderStatusCode 供小程序映射的复合状态码
 func OrderStatusCode(status, reviewStage uint8) string {
+	if status == OrderStatusPendingPay {
+		return "pending_pay"
+	}
 	if status == OrderStatusPendingGroup {
 		return "pending_group"
 	}
@@ -196,6 +200,9 @@ func OrderStatusCode(status, reviewStage uint8) string {
 	}
 	if status == OrderStatusGroupFailed {
 		return "group_failed"
+	}
+	if status == OrderStatusClosed {
+		return "closed"
 	}
 	return "unknown"
 }
