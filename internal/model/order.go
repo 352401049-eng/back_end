@@ -21,6 +21,7 @@ const (
 	OrderStatusRefunding      uint8 = 10
 	OrderStatusRefunded       uint8 = 11
 	OrderStatusClosed         uint8 = 12
+	OrderStatusPreparing      uint8 = 13 // 备餐中（商家库存确认通过后，待商家确认出餐）
 )
 
 const (
@@ -153,6 +154,8 @@ func OrderStatusText(status uint8) string {
 		return "已退款"
 	case OrderStatusClosed:
 		return "已关闭"
+	case OrderStatusPreparing:
+		return "备餐中"
 	default:
 		return "未知"
 	}
@@ -165,6 +168,9 @@ func OrderStatusCode(status, reviewStage uint8) string {
 	}
 	if status == OrderStatusPendingGroup {
 		return "pending_group"
+	}
+	if status == OrderStatusPreparing {
+		return "preparing"
 	}
 	if status == OrderStatusPendingFulfill {
 		switch reviewStage {

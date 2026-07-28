@@ -1,7 +1,9 @@
 package service
 
 import (
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
@@ -12,11 +14,28 @@ import (
 )
 
 var (
-	ErrDeliveryNotFound       = errors.New("delivery order not found")
-	ErrDeliveryTaken          = errors.New("delivery order already taken")
-	ErrDeliveryForbidden      = errors.New("delivery order forbidden")
-	ErrDeliveryStatusInvalid  = errors.New("delivery status invalid")
+	ErrDeliveryNotFound      = errors.New("delivery order not found")
+	ErrDeliveryTaken         = errors.New("delivery order already taken")
+	ErrDeliveryForbidden     = errors.New("delivery order forbidden")
+	ErrDeliveryStatusInvalid = errors.New("delivery status invalid")
 )
+
+// genPickupCode 生成 4 位数字出餐号，防全 0。
+func genPickupCode() string {
+	for i := 0; i < 8; i++ {
+		var b [2]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			continue
+		}
+		n := uint16(b[0])<<8 | uint16(b[1])
+		code := n % 10000
+		if code == 0 {
+			continue
+		}
+		return fmt.Sprintf("%04d", code)
+	}
+	return "1000"
+}
 
 type CompleteDeliveryInput struct {
 	Remark *string
@@ -44,7 +63,8 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{}))
 	switch scope {
 	case "pending":
-		q = q.Where("status = ? AND rider_id IS NULL", model.DeliveryPendingAccept)
+		// 仅展示商家已确认出餐的订单，备餐中(merchant_prepared=0)骑手不可见
+		q = q.Where("status = ? AND rider_id IS NULL AND merchant_prepared = 1", model.DeliveryPendingAccept)
 	case "active":
 		q = q.Where("rider_id = ? AND status IN ?", riderID, []int{
 			int(model.DeliveryAccepted), int(model.DeliveryPicking), int(model.DeliveryDelivering),
@@ -54,7 +74,7 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 			int(model.DeliveryDelivered), int(model.DeliveryConfirmed),
 		})
 	default:
-		q = q.Where("status = ?", model.DeliveryPendingAccept)
+		q = q.Where("status = ? AND merchant_prepared = 1", model.DeliveryPendingAccept)
 	}
 
 	var total int64
@@ -64,8 +84,10 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 	var list []model.DeliveryOrder
 	if err := q.Preload("Order", "is_deleted = ?", model.NotDeleted).
 		Preload("Order.Items", "is_deleted = ?", model.NotDeleted).
+		Preload("Order.MerchantProfile", "is_deleted = ?", model.NotDeleted).
 		Preload("InventoryUsage", "is_deleted = ?", model.NotDeleted).
 		Preload("InventoryUsage.Product", "is_deleted = ?", model.NotDeleted).
+		Preload("InventoryUsage.MerchantProfile", "is_deleted = ?", model.NotDeleted).
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
@@ -174,7 +196,8 @@ func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, erro
 		}
 		return nil, err
 	}
-	if d.Status != model.DeliveryAccepted && d.Status != model.DeliveryPicking {
+	if d.Status != model.DeliveryAccepted || d.MerchantPrepared != 1 {
+		// 商家未出餐不可开始配送（保险校验，pending 列表已过滤）
 		return nil, ErrDeliveryStatusInvalid
 	}
 	now := time.Now()
@@ -190,34 +213,39 @@ func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, erro
 	return s.getViewByID(deliveryID)
 }
 
-// CancelByRider 骑手取消接单：仅当 status=Accepted（已接单未开始配送）时可取消。
-// 取消后订单回到待接单状态（status=0，rider_id/accepted_at 清空），订单状态同步回退，
-// 其他骑手可接。
-func (s *DeliveryService) CancelByRider(riderID, deliveryID uint64) (*DeliveryView, error) {
+// MarkPrepared 商家确认出餐：备餐中(merchant_prepared=0) -> 已出餐(1)，
+// 并把关联订单从 Preparing 推进到 PendingShip(待骑手接单)。
+func (s *DeliveryService) MarkPrepared(merchantID, deliveryID uint64) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		// FOR UPDATE 行锁，防并发取消/开始配送竞态
 		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
-			Where("id = ? AND rider_id = ?", deliveryID, riderID).First(&d).Error; err != nil {
+			First(&d, deliveryID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrDeliveryNotFound
 			}
 			return err
 		}
-		// 仅已接单（未开始配送）可取消；已开始配送（Picking/Delivering）不允许
-		if d.Status != model.DeliveryAccepted {
-			return ErrDeliveryStatusInvalid
+		if d.Status != model.DeliveryPendingAccept || d.MerchantPrepared != 1 {
+			// 已被接单或已出餐不可重复操作；备餐中(merchant_prepared=0)才允许
+			if d.MerchantPrepared != 0 {
+				return ErrDeliveryStatusInvalid
+			}
 		}
+		// 校验商家归属
+		if !deliveryBelongsToMerchant(tx, &d, merchantID) {
+			return ErrDeliveryForbidden
+		}
+		now := time.Now()
 		if err := tx.Model(&d).Updates(map[string]interface{}{
-			"status":      model.DeliveryPendingAccept,
-			"rider_id":    nil,
-			"accepted_at": nil,
+			"merchant_prepared": 1,
+			"prepared_at":        now,
 		}).Error; err != nil {
 			return err
 		}
-		// 回滚父订单状态：接单时 Accept 推进到 Shipping(4)，取消应回退到 PendingShip(3)
+		// 关联订单从备餐中推进到待骑手接单
 		if d.OrderID != nil {
-			return tx.Model(&model.Order{}).Where("id = ? AND status = ?", *d.OrderID, model.OrderStatusShipping).
+			return tx.Model(&model.Order{}).
+				Where("id = ? AND status = ?", *d.OrderID, model.OrderStatusPreparing).
 				Update("status", model.OrderStatusPendingShip).Error
 		}
 		return nil
@@ -226,6 +254,50 @@ func (s *DeliveryService) CancelByRider(riderID, deliveryID uint64) (*DeliveryVi
 		return nil, err
 	}
 	return s.getViewByID(deliveryID)
+}
+
+// ReportException 骑手上报异常：已接单/配送中可上报，置为异常状态等管理员处理。
+// 订单状态保持不变（停在 Shipping），不回滚库存/券。
+func (s *DeliveryService) ReportException(riderID, deliveryID uint64, reason string) (*DeliveryView, error) {
+	var d model.DeliveryOrder
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+			Where("id = ? AND rider_id = ?", deliveryID, riderID).First(&d).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrDeliveryNotFound
+			}
+			return err
+		}
+		if d.Status != model.DeliveryAccepted && d.Status != model.DeliveryDelivering {
+			return ErrDeliveryStatusInvalid
+		}
+		reasonPtr := reason
+		return tx.Model(&d).Updates(map[string]interface{}{
+			"status":           model.DeliveryException,
+			"exception_reason": reasonPtr,
+		}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.getViewByID(deliveryID)
+}
+
+// deliveryBelongsToMerchant 校验配送单归属某商家（经 Order.MerchantID 或 InventoryUsage.MerchantID）。
+func deliveryBelongsToMerchant(tx *gorm.DB, d *model.DeliveryOrder, merchantID uint64) bool {
+	if d.OrderID != nil {
+		var o model.Order
+		if err := tx.Select("merchant_id").First(&o, *d.OrderID).Error; err == nil {
+			return o.MerchantID == merchantID
+		}
+	}
+	if d.InventoryUsageID != nil {
+		var u model.UserInventoryUsage
+		if err := tx.Select("merchant_id").First(&u, *d.InventoryUsageID).Error; err == nil {
+			return u.MerchantID == merchantID
+		}
+	}
+	return false
 }
 
 func (s *DeliveryService) Complete(riderID, deliveryID uint64, input CompleteDeliveryInput) (*DeliveryView, error) {
@@ -397,13 +469,32 @@ func (s *DeliveryService) getViewByID(id uint64) (*DeliveryView, error) {
 	return &view, nil
 }
 
+// GetForRider 骑手查单条配送详情（含商家信息），校验骑手归属或待接单可查。
+func (s *DeliveryService) GetForRider(riderID, deliveryID uint64) (*DeliveryView, error) {
+	d, err := s.getByID(deliveryID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrDeliveryNotFound
+		}
+		return nil, err
+	}
+	// 待接单(无 rider_id)任何骑手可查；已接单仅本人可查
+	if d.RiderID != nil && *d.RiderID != riderID {
+		return nil, ErrDeliveryForbidden
+	}
+	view := toDeliveryView(*d)
+	return &view, nil
+}
+
 func (s *DeliveryService) getByID(id uint64) (*model.DeliveryOrder, error) {
 	var d model.DeliveryOrder
 	if err := query.NotDeleted(s.DB).
 		Preload("Order", "is_deleted = ?", model.NotDeleted).
 		Preload("Order.Items", "is_deleted = ?", model.NotDeleted).
+		Preload("Order.MerchantProfile", "is_deleted = ?", model.NotDeleted).
 		Preload("InventoryUsage", "is_deleted = ?", model.NotDeleted).
 		Preload("InventoryUsage.Product", "is_deleted = ?", model.NotDeleted).
+		Preload("InventoryUsage.MerchantProfile", "is_deleted = ?", model.NotDeleted).
 		First(&d, id).Error; err != nil {
 		return nil, err
 	}

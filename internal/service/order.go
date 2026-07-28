@@ -72,6 +72,8 @@ type OrderView struct {
 	StatusText       string            `json:"status_text"`
 	StatusCode       string            `json:"status_code"`
 	VerifyCode       *string           `json:"verify_code,omitempty"`
+	PickupCode       string            `json:"pickup_code,omitempty"`
+	DeliveryOrderID  *uint64           `json:"delivery_order_id,omitempty"`
 	Buyer            *BuyerBrief       `json:"buyer,omitempty"`
 	GroupBuyProgress *GroupBuyProgress `json:"group_buy_progress,omitempty"`
 }
@@ -705,6 +707,7 @@ func (s *OrderService) GetView(accountID, orderID uint64, merchantID *uint64) (*
 	}
 	view := toOrderView(order)
 	s.attachVerifyCode(&view)
+	s.attachPickupCode(&view)
 	s.attachGroupBuyProgress(&view, accountID)
 	if merchantID != nil || accountID == 0 {
 		s.enrichBuyer(&view)
@@ -752,6 +755,7 @@ func (s *OrderService) List(accountID uint64, merchantID *uint64, page, pageSize
 	for i := range orders {
 		view := toOrderView(&orders[i])
 		s.attachVerifyCode(&view)
+		s.attachPickupCode(&view)
 		s.attachGroupBuyProgress(&view, accountID)
 		views = append(views, view)
 	}
@@ -825,6 +829,8 @@ func applyStatusCodeFilter(q *gorm.DB, code string) {
 		q.Where("status = ?", model.OrderStatusCancelled)
 	case "closed":
 		q.Where("status = ?", model.OrderStatusClosed)
+	case "preparing":
+		q.Where("status = ?", model.OrderStatusPreparing)
 	}
 }
 
@@ -936,19 +942,21 @@ func (s *OrderService) MerchantUseReview(merchantID, orderID uint64, approve boo
 		// 购买时已入背包，此处仅扣减商家库存并完结购买订单；自提/配送核销走背包使用单
 		nextStatus := model.OrderStatusCompleted
 		if deliveryType == model.DeliveryTypeDelivery && product.ItemType == model.ProductItemTypePhysical {
-			nextStatus = model.OrderStatusPendingShip
+			nextStatus = model.OrderStatusPreparing // 备餐中，商家确认出餐后推进到 PendingShip
 			// 配送费/骑手收益从商家配置读取快照（与背包使用链路 inventory.go 一致），
-			// 不能取 order.DeliveryFee/RiderEarnings——下单时未写入，恒为 0
+			// 不能取 order.DeliveryFee/RiderEarnings--下单时未写入，恒为 0
 			var merchant model.MerchantProfile
 			if err := query.NotDeleted(tx).First(&merchant, order.MerchantID).Error; err != nil {
 				return ErrMerchantNotFound
 			}
 			orderID := order.ID
 			d := model.DeliveryOrder{
-				OrderID:       &orderID,
-				Status:        model.DeliveryPendingAccept,
-				DeliveryFee:   merchant.DeliveryFee,
-				RiderEarnings: merchant.RiderEarnings,
+				OrderID:          &orderID,
+				Status:           model.DeliveryPendingAccept,
+				MerchantPrepared: 0, // 备餐中，商家确认出餐后置 1，骑手才可见
+				PickupCode:       genPickupCode(),
+				DeliveryFee:      merchant.DeliveryFee,
+				RiderEarnings:    merchant.RiderEarnings,
 			}
 			if err := tx.Create(&d).Error; err != nil {
 				return err
@@ -1424,6 +1432,21 @@ func (s *OrderService) attachVerifyCode(view *OrderView) {
 		return
 	}
 	view.VerifyCode = &code
+}
+
+// attachPickupCode 填充配送单出餐号与配送单 ID（备餐中/待骑手接单/配送中等有关联 DeliveryOrder 的订单）。
+func (s *OrderService) attachPickupCode(view *OrderView) {
+	var d model.DeliveryOrder
+	err := query.NotDeleted(s.DB).Select("id", "pickup_code").
+		Where("order_id = ?", view.ID).
+		Order("id DESC").First(&d).Error
+	if err == nil {
+		if d.PickupCode != "" {
+			view.PickupCode = d.PickupCode
+		}
+		did := d.ID
+		view.DeliveryOrderID = &did
+	}
 }
 
 func (s *OrderService) ensureVerifyCode(order *model.Order) (string, error) {

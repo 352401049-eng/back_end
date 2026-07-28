@@ -303,6 +303,7 @@ type MerchantOrderHandler struct {
 	VerifySvc    *service.VerificationService
 	InventorySvc *service.InventoryService
 	DashboardSvc *service.DashboardService
+	DeliverySvc  *service.DeliveryService
 }
 
 type ReviewOrderRequest struct {
@@ -637,7 +638,39 @@ func (h *MerchantOrderHandler) ReviewCancelInventoryUsage(c *gin.Context) {
 		handleInventoryError(c, err)
 		return
 	}
-	response.OK(c, view)
+		response.OK(c, view)
+}
+
+// MarkDeliveryPrepared godoc
+// @Summary      商家确认出餐
+// @Description  备餐中订单确认出餐后，配送单对骑手可见可接单，订单进入待骑手接单
+// @Tags         商家端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "配送单 ID"
+// @Success      200  {object}  response.Body{data=service.DeliveryView}
+// @Router       /merchant/deliveries/{id}/prepare [post]
+func (h *MerchantOrderHandler) MarkDeliveryPrepared(c *gin.Context) {
+	scope, err := h.merchantScope(c)
+	if err != nil {
+		response.Fail(c, 403, 403, "无商家权限")
+		return
+	}
+	if h.DeliverySvc == nil {
+		response.InternalError(c, "配送服务未配置")
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	d, err := h.DeliverySvc.MarkPrepared(*scope, id)
+	if err != nil {
+		handleDeliveryError(c, err)
+		return
+	}
+	response.OK(c, d)
 }
 
 func (h *MerchantOrderHandler) merchantScope(c *gin.Context) (*uint64, error) {
@@ -733,16 +766,18 @@ func (h *RiderHandler) StartDelivery(c *gin.Context) {
 	response.OK(c, d)
 }
 
-// CancelDelivery godoc
-// @Summary      取消接单
-// @Description  仅已接单未开始配送时可取消，订单回到待接单
+// ReportException godoc
+// @Summary      骑手上报异常
+// @Description  已接单/配送中可上报，进入异常状态等管理员处理。接单后不可取消，遇异常走此接口。
 // @Tags         骑手端
+// @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        id   path  int  true  "配送单 ID"
-// @Success      200  {object}  response.Body{data=service.DeliveryView}
-// @Router       /rider/orders/{id}/cancel [post]
-func (h *RiderHandler) CancelDelivery(c *gin.Context) {
+// @Param        id    path  int                      true  "配送单 ID"
+// @Param        body  body  ReportExceptionRequest   true  "异常原因"
+// @Success      200   {object}  response.Body{data=service.DeliveryView}
+// @Router       /rider/orders/{id}/exception [post]
+func (h *RiderHandler) ReportException(c *gin.Context) {
 	riderID, ok := auth.AccountID(c)
 	if !ok {
 		response.Fail(c, 401, 401, "未登录")
@@ -753,17 +788,42 @@ func (h *RiderHandler) CancelDelivery(c *gin.Context) {
 		response.BadRequest(c, "ID 无效")
 		return
 	}
-	d, err := h.DeliverySvc.CancelByRider(riderID, id)
+	var req ReportExceptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+		response.BadRequest(c, "请填写异常原因")
+		return
+	}
+	d, err := h.DeliverySvc.ReportException(riderID, id, req.Reason)
 	if err != nil {
-		if errors.Is(err, service.ErrDeliveryNotFound) {
-			response.Fail(c, 404, 404, "配送单不存在")
-			return
-		}
-		if errors.Is(err, service.ErrDeliveryStatusInvalid) {
-			response.BadRequest(c, "已开始配送，无法取消")
-			return
-		}
-		response.InternalError(c, "取消失败")
+		handleDeliveryError(c, err)
+		return
+	}
+	response.OK(c, d)
+}
+
+// GetDelivery godoc
+// @Summary      骑手查单条配送详情
+// @Description  含商家门店信息/出餐号/用户地址，接单后查看
+// @Tags         骑手端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "配送单 ID"
+// @Success      200  {object}  response.Body{data=service.DeliveryView}
+// @Router       /rider/orders/{id} [get]
+func (h *RiderHandler) GetDelivery(c *gin.Context) {
+	riderID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	d, err := h.DeliverySvc.GetForRider(riderID, id)
+	if err != nil {
+		handleDeliveryError(c, err)
 		return
 	}
 	response.OK(c, d)

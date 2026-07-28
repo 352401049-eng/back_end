@@ -17,6 +17,10 @@ type CompleteDeliveryRequest struct {
 	Photos []string `json:"photos" example:"/uploads/2026/07/01/proof.jpg"`
 }
 
+type ReportExceptionRequest struct {
+	Reason string `json:"reason" example:"商家未出餐"`
+}
+
 // ListUserDeliveries godoc
 // @Summary      我的配送单列表
 // @Description  scope=active|delivering 配送中；pending_confirm 待确认收货；history 已完成

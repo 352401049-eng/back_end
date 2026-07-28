@@ -95,7 +95,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	categoryHandler := &handler.CategoryHandler{CategorySvc: categorySvc}
 	merchantOrderHandler := &handler.MerchantOrderHandler{
 		MerchantSvc: merchantSvc, OrderSvc: orderSvc, VerifySvc: verifySvc,
-		InventorySvc: inventorySvc, DashboardSvc: dashboardSvc,
+		InventorySvc: inventorySvc, DashboardSvc: dashboardSvc, DeliverySvc: deliverySvc,
 	}
 	riderHandler := &handler.RiderHandler{DeliverySvc: deliverySvc, EarningSvc: riderEarningSvc}
 	adminDashboardHandler := &handler.AdminDashboardHandler{
@@ -269,6 +269,7 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.PATCH("/delivery-zone", dz.PatchMerchant)
 	r.DELETE("/delivery-zone", dz.DeleteMerchant)
 	r.POST("/delivery-zone/poi", dz.SearchMerchantPOI)
+	r.POST("/deliveries/:id/prepare", mo.MarkDeliveryPrepared)
 	r.GET("/dashboard", mo.Dashboard)
 	r.GET("/sales", mo.SalesReport)
 
@@ -421,9 +422,10 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 
 func registerRiderRoutes(r *gin.RouterGroup, h *handler.RiderHandler) {
 	r.GET("/orders", h.ListOrders)
+	r.GET("/orders/:id", h.GetDelivery)
 	r.POST("/orders/:id/accept", h.AcceptDelivery)
 	r.POST("/orders/:id/start", h.StartDelivery)
-	r.POST("/orders/:id/cancel", h.CancelDelivery)
+	r.POST("/orders/:id/exception", h.ReportException)
 	r.POST("/orders/:id/complete", h.CompleteDelivery)
 	r.GET("/earnings", h.ListEarnings)
 	r.GET("/earnings/summary", h.EarningsSummary)
