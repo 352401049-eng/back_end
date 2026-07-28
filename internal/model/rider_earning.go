@@ -11,11 +11,11 @@ const (
 type RiderEarning struct {
 	ID              uint64     `gorm:"primaryKey" json:"id"`
 	RiderID         uint64     `gorm:"not null;index:idx_rider_status,priority:1" json:"rider_id"`
-	DeliveryOrderID uint64     `gorm:"not null;uniqueIndex:uk_delivery_status,priority:1" json:"delivery_order_id"`
+	DeliveryOrderID uint64     `gorm:"not null;index:idx_delivery" json:"delivery_order_id"`
 	OrderID         *uint64    `json:"order_id,omitempty"`
 	MerchantID      uint64     `gorm:"not null" json:"merchant_id"`
 	Amount          float64    `gorm:"type:decimal(10,2);not null" json:"amount"`
-	Status          uint8      `gorm:"not null;default:0;index:idx_rider_status,priority:2;uniqueIndex:uk_delivery_status,priority:2" json:"status"`
+	Status          uint8      `gorm:"not null;default:0;index:idx_rider_status,priority:2" json:"status"`
 	SettlementID    *uint64    `gorm:"index:idx_settlement" json:"settlement_id,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	SettledAt       *time.Time `json:"settled_at,omitempty"`

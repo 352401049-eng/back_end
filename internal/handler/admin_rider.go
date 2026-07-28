@@ -2,7 +2,6 @@ package handler
 
 import (
 	"errors"
-	"log"
 
 	"yujixinjiang/backend/internal/auth"
 	"yujixinjiang/backend/internal/query"
@@ -283,7 +282,6 @@ func (h *AdminHandler) ReviewSettlement(c *gin.Context) {
 	}
 	st, err := h.EarningSvc.AdminReviewSettlement(id, req.Approve, operatorID, req.RejectReason)
 	if err != nil {
-		log.Printf("[AdminReviewSettlement] id=%d approve=%v operator=%d err=%v", id, req.Approve, operatorID, err)
 		if errors.Is(err, service.ErrSettlementNotFound) {
 			response.Fail(c, 404, 404, "结账单不存在")
 			return
@@ -296,7 +294,7 @@ func (h *AdminHandler) ReviewSettlement(c *gin.Context) {
 			response.BadRequest(c, "待结账收益不足，无法通过审批")
 			return
 		}
-		response.InternalError(c, "审批失败: "+err.Error())
+		response.InternalError(c, "审批失败")
 		return
 	}
 	response.OK(c, st)

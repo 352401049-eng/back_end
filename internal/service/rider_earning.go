@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
@@ -378,10 +377,8 @@ func (s *RiderEarningService) AdminReviewSettlement(settlementID uint64, approve
 		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
 			Where("rider_id = ? AND status = ?", cur.RiderID, model.RiderEarningPending).
 			Order("id ASC").Find(&earnings).Error; err != nil {
-			log.Printf("[AdminReviewSettlement] 查询Pending收益失败 rider=%d err=%v", cur.RiderID, err)
 			return err
 		}
-		log.Printf("[AdminReviewSettlement] settlement=%d amount=%.2f earnings=%d条", cur.ID, cur.Amount, len(earnings))
 
 		// 按金额匹配收益：累加直到达到结账金额，最后一条若超出则拆分
 		remaining := cur.Amount
@@ -425,7 +422,6 @@ func (s *RiderEarningService) AdminReviewSettlement(settlementID uint64, approve
 					"settlement_id": cur.ID,
 					"settled_at":    now,
 				}).Error; err != nil {
-				log.Printf("[AdminReviewSettlement] 标记整条匹配失败 ids=%v err=%v", fullyMatchedIDs, err)
 				return err
 			}
 		}
@@ -439,7 +435,6 @@ func (s *RiderEarningService) AdminReviewSettlement(settlementID uint64, approve
 				"settlement_id": cur.ID,
 				"settled_at":    now,
 			}).Error; err != nil {
-				log.Printf("[AdminReviewSettlement] 拆分更新原收益失败 earningID=%d err=%v", splitEarning.ID, err)
 				return err
 			}
 			keep := model.RiderEarning{
@@ -452,7 +447,6 @@ func (s *RiderEarningService) AdminReviewSettlement(settlementID uint64, approve
 				CreatedAt:       splitEarning.CreatedAt,
 			}
 			if err := tx.Create(&keep).Error; err != nil {
-				log.Printf("[AdminReviewSettlement] 拆分创建keep收益失败 deliveryOrderID=%d err=%v", splitEarning.DeliveryOrderID, err)
 				return err
 			}
 		}
@@ -464,7 +458,6 @@ func (s *RiderEarningService) AdminReviewSettlement(settlementID uint64, approve
 			"reviewed_at": now,
 			"updated_at":  now,
 		}).Error; err != nil {
-			log.Printf("[AdminReviewSettlement] 更新结账单状态失败 settlementID=%d err=%v", cur.ID, err)
 			return err
 		}
 		cur.Status = model.RiderSettlementApproved
