@@ -676,7 +676,8 @@ func (s *OrderService) RequestUse(accountID, orderID uint64, input RequestUseInp
 	if err := s.DB.Model(order).Updates(updates).Error; err != nil {
 		return nil, err
 	}
-	return s.GetView(accountID, orderID, nil)
+	// 自取/外卖均自动通过审核：自取直接生成核销码，外卖进备餐出餐流程
+	return s.MerchantUseReview(order.MerchantID, orderID, true)
 }
 
 func (s *OrderService) ConfirmPickup(accountID, orderID uint64) (*OrderView, error) {
