@@ -1087,7 +1087,12 @@ func (h *MerchantHandler) GetProduct(c *gin.Context) {
 		h.handleProductError(c, err)
 		return
 	}
-	response.OK(c, product)
+	view, err := h.ProductSvc.GetDetailView(product.ID, scope)
+	if err != nil {
+		h.handleProductError(c, err)
+		return
+	}
+	response.OK(c, view)
 }
 
 // UpdateProduct godoc

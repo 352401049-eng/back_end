@@ -557,7 +557,8 @@ func (s *CategoryService) FindOrCreateByName(merchantID uint64, name string) (*m
 
 	var cat model.ProductCategory
 	err := query.NotDeleted(s.DB).
-		Where("merchant_id = ? AND parent_id = 0 AND name = ?", merchantID, name).
+		Where("merchant_id = ? AND name = ?", merchantID, name).
+		Order("parent_id ASC, id ASC").
 		First(&cat).Error
 	if err == nil {
 		return &cat, nil
