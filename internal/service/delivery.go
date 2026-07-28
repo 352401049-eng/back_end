@@ -157,7 +157,7 @@ func (s *DeliveryService) GetForUser(accountID, deliveryID uint64) (*DeliveryVie
 func (s *DeliveryService) Accept(riderID, deliveryID uint64) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := query.NotDeleted(tx).Where("id = ? AND status = ?", deliveryID, model.DeliveryPendingAccept).First(&d).Error; err != nil {
+		if err := query.NotDeleted(tx).Where("id = ? AND status = ? AND merchant_prepared = 1", deliveryID, model.DeliveryPendingAccept).First(&d).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrDeliveryNotFound
 			}
@@ -225,11 +225,9 @@ func (s *DeliveryService) MarkPrepared(merchantID, deliveryID uint64) (*Delivery
 			}
 			return err
 		}
-		if d.Status != model.DeliveryPendingAccept || d.MerchantPrepared != 1 {
-			// 已被接单或已出餐不可重复操作；备餐中(merchant_prepared=0)才允许
-			if d.MerchantPrepared != 0 {
-				return ErrDeliveryStatusInvalid
-			}
+		if d.Status != model.DeliveryPendingAccept || d.MerchantPrepared != 0 {
+			// 仅备餐中(merchant_prepared=0)且未被接单的配送单可确认出餐
+			return ErrDeliveryStatusInvalid
 		}
 		// 校验商家归属
 		if !deliveryBelongsToMerchant(tx, &d, merchantID) {
