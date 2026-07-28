@@ -61,6 +61,7 @@ type MerchantDashboard struct {
 	ProductCount           int64              `json:"product_count"`
 	PendingOrderReview     int64              `json:"pending_order_review"`
 	PendingUseReview       int64              `json:"pending_use_review"`
+	PendingPreparingCount  int64              `json:"pending_preparing_count"`
 	TodayVerificationCount int64              `json:"today_verification_count"`
 	LowStockCount          int64              `json:"low_stock_count"`
 	OrderTrend             []DailyStat        `json:"order_trend"`
@@ -130,6 +131,19 @@ func (s *DashboardService) Merchant(merchantID uint64) (*MerchantDashboard, erro
 		"is_deleted = ? AND merchant_id = ? AND status = ? AND merchant_review_stage = ?",
 		model.NotDeleted, merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPendingUse,
 	).Count(&d.PendingUseReview)
+
+	// 备餐中：订单路径（Order.status=Preparing）+ 背包路径（delivery_order.merchant_prepared=0）
+	s.freshDB().Model(&model.Order{}).Where(
+		"is_deleted = ? AND merchant_id = ? AND status = ?",
+		model.NotDeleted, merchantID, model.OrderStatusPreparing,
+	).Count(&d.PendingPreparingCount)
+	var deliveryPreparing int64
+	s.freshDB().Model(&model.DeliveryOrder{}).Where(
+		"delivery_order.is_deleted = ? AND delivery_order.status = ? AND delivery_order.merchant_prepared = 0 AND "+
+			"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?)",
+		model.NotDeleted, model.DeliveryPendingAccept, merchantID,
+	).Count(&deliveryPreparing)
+	d.PendingPreparingCount += deliveryPreparing
 
 	start, end := todayRange()
 	s.freshDB().Model(&model.VerificationRecord{}).Where(
