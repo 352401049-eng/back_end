@@ -383,7 +383,9 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 	r.GET("/riders/:id/deliveries", h.ListRiderDeliveries)
 	r.GET("/riders/:id/settlements", h.ListRiderSettlements)
 	r.POST("/riders/:id/settlements", h.CreateSettlement)
+	r.GET("/settlements", h.ListAllSettlements)
 	r.GET("/settlements/pending", h.ListPendingSettlements)
+	r.GET("/settlements/pending/count", h.CountPendingSettlements)
 	r.PATCH("/settlements/:id/review", h.ReviewSettlement)
 
 	r.GET("/coupons", ch.ListAdmin)

@@ -218,6 +218,42 @@ func (h *AdminHandler) ListPendingSettlements(c *gin.Context) {
 	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
 }
 
+// ListAllSettlements godoc
+// @Summary      全部结账列表（支持 status 筛选）
+// @Tags         管理端-骑手
+// @Produce      json
+// @Security     BearerAuth
+// @Param        status     query  string  false  "pending/approved/rejected，空=全部"
+// @Param        page       query  int     false  "页码"
+// @Param        page_size  query  int     false  "每页条数"
+// @Success      200  {object}  response.Body{data=query.PageResult}
+// @Router       /admin/settlements [get]
+func (h *AdminHandler) ListAllSettlements(c *gin.Context) {
+	page, pageSize := parsePage(c)
+	list, total, err := h.EarningSvc.AdminListSettlements(c.Query("status"), page, pageSize)
+	if err != nil {
+		response.InternalError(c, "查询失败")
+		return
+	}
+	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
+}
+
+// CountPendingSettlements godoc
+// @Summary      待审批结账总数（角标用）
+// @Tags         管理端-骑手
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  response.Body{data=object}
+// @Router       /admin/settlements/pending/count [get]
+func (h *AdminHandler) CountPendingSettlements(c *gin.Context) {
+	n, err := h.EarningSvc.AdminCountPendingSettlements()
+	if err != nil {
+		response.InternalError(c, "查询失败")
+		return
+	}
+	response.OK(c, gin.H{"count": n})
+}
+
 // ReviewSettlement godoc
 // @Summary      审批结账申请
 // @Tags         管理端-骑手
@@ -251,7 +287,11 @@ func (h *AdminHandler) ReviewSettlement(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, service.ErrSettlementInvalid) {
-			response.BadRequest(c, "结账金额无法精确匹配，请调整金额重试")
+			response.BadRequest(c, "结账单状态已变更")
+			return
+		}
+		if errors.Is(err, service.ErrInsufficientEarnings) {
+			response.BadRequest(c, "待结账收益不足，无法通过审批")
 			return
 		}
 		response.InternalError(c, "审批失败")

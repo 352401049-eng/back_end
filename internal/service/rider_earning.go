@@ -33,6 +33,7 @@ type EarningsSummary struct {
 	PendingCount   int64   `json:"pending_count"`    // 待结账笔数
 	SettledCount   int64   `json:"settled_count"`    // 已结账笔数
 	WithdrawingAmount float64 `json:"withdrawing_amount"` // 待审批结账申请占用金额（不可重复申请）
+	WithdrawingCount  int64   `json:"withdrawing_count"`  // 待审批结账单数
 }
 
 // EarningView 骑手收益记录视图。
@@ -63,6 +64,7 @@ type RiderOverview struct {
 	PendingAmount float64 `json:"pending_amount"`
 	SettledAmount float64 `json:"settled_amount"`
 	WithdrawingAmount float64 `json:"withdrawing_amount"`
+	WithdrawingCount  int64   `json:"withdrawing_count"` // 待审批结账单数（>0 表示有提现申请待处理）
 	TotalDeliveries int64 `json:"total_deliveries"`
 	CompletedDeliveries int64 `json:"completed_deliveries"`
 }
@@ -92,7 +94,7 @@ func (s *RiderEarningService) GetSummary(riderID uint64) (*EarningsSummary, erro
 	out.PendingAmount = roundMoney(pendingSum)
 	out.SettledAmount = roundMoney(settledSum)
 
-	// 待审批结账申请占用金额
+	// 待审批结账申请占用金额 + 笔数
 	var withdrawingSum float64
 	if err := query.NotDeleted(s.DB.Model(&model.RiderSettlement{})).
 		Where("rider_id = ? AND status = ?", riderID, model.RiderSettlementPending).
@@ -100,6 +102,11 @@ func (s *RiderEarningService) GetSummary(riderID uint64) (*EarningsSummary, erro
 		return nil, err
 	}
 	out.WithdrawingAmount = roundMoney(withdrawingSum)
+	if err := query.NotDeleted(s.DB.Model(&model.RiderSettlement{})).
+		Where("rider_id = ? AND status = ?", riderID, model.RiderSettlementPending).
+		Count(&out.WithdrawingCount).Error; err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -400,7 +407,11 @@ func (s *RiderEarningService) AdminReviewSettlement(settlementID uint64, approve
 		}
 		if remaining > 0.01 {
 			// 待结账收益总额不足以支付结账金额（可能被其他结账单占用或已取消）
-			return fmt.Errorf("%w: 待结账收益不足，无法完成结账", ErrInsufficientEarnings)
+			var available float64
+			for i := range earnings {
+				available += earnings[i].Amount
+			}
+			return fmt.Errorf("%w: 待结账收益 ¥%.2f 不足结账金额 ¥%.2f", ErrInsufficientEarnings, available, cur.Amount)
 		}
 
 		// 标记整条匹配的收益为已结账
@@ -508,6 +519,7 @@ func (s *RiderEarningService) AdminListRiders(keyword string, page, pageSize int
 			ov.PendingAmount = sum.PendingAmount
 			ov.SettledAmount = sum.SettledAmount
 			ov.WithdrawingAmount = sum.WithdrawingAmount
+			ov.WithdrawingCount = sum.WithdrawingCount
 		}
 	// 送餐统计
 	query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).Where("rider_id = ?", acc.ID).Count(&ov.TotalDeliveries)
@@ -545,6 +557,7 @@ func (s *RiderEarningService) AdminGetRider(riderID uint64) (*RiderOverview, err
 		ov.PendingAmount = sum.PendingAmount
 		ov.SettledAmount = sum.SettledAmount
 		ov.WithdrawingAmount = sum.WithdrawingAmount
+		ov.WithdrawingCount = sum.WithdrawingCount
 	}
 	query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).Where("rider_id = ?", acc.ID).Count(&ov.TotalDeliveries)
 	query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).Where("rider_id = ? AND status = ?", acc.ID, model.DeliveryConfirmed).Count(&ov.CompletedDeliveries)
@@ -641,8 +654,9 @@ func formatTimeGo(t time.Time) string {
 	return t.Format("2006-01-02 15:04")
 }
 
-// AdminListPendingSettlements 管理端查待审批结账列表。
-func (s *RiderEarningService) AdminListPendingSettlements(page, pageSize int) ([]SettlementView, int64, error) {
+// AdminListSettlements 管理端查结账列表，支持按 status 筛选。
+// status: ""=全部, "pending"=待审批, "approved"=已通过, "rejected"=已拒绝
+func (s *RiderEarningService) AdminListSettlements(status string, page, pageSize int) ([]SettlementView, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -650,7 +664,15 @@ func (s *RiderEarningService) AdminListPendingSettlements(page, pageSize int) ([
 		pageSize = 10
 	}
 	offset := (page - 1) * pageSize
-	q := query.NotDeleted(s.DB.Model(&model.RiderSettlement{})).Where("status = ?", model.RiderSettlementPending)
+	q := query.NotDeleted(s.DB.Model(&model.RiderSettlement{}))
+	switch status {
+	case "pending":
+		q = q.Where("status = ?", model.RiderSettlementPending)
+	case "approved":
+		q = q.Where("status = ?", model.RiderSettlementApproved)
+	case "rejected":
+		q = q.Where("status = ?", model.RiderSettlementRejected)
+	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -674,4 +696,19 @@ func (s *RiderEarningService) AdminListPendingSettlements(page, pageSize int) ([
 		views = append(views, v)
 	}
 	return views, total, nil
+}
+
+// AdminListPendingSettlements 管理端查待审批结账列表。
+func (s *RiderEarningService) AdminListPendingSettlements(page, pageSize int) ([]SettlementView, int64, error) {
+	return s.AdminListSettlements("pending", page, pageSize)
+}
+
+// AdminCountPendingSettlements 管理端待审批结账总数（用于角标）。
+func (s *RiderEarningService) AdminCountPendingSettlements() (int64, error) {
+	var n int64
+	if err := query.NotDeleted(s.DB.Model(&model.RiderSettlement{})).
+		Where("status = ?", model.RiderSettlementPending).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
 }
