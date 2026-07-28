@@ -233,7 +233,7 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 				InventoryUsageID: &usage.ID,
 				Status:           model.DeliveryPendingAccept,
 				MerchantPrepared: 0, // 备餐中，商家确认出餐后置 1，骑手才可见
-				PickupCode:       genPickupCode(),
+				PickupCode:       genPickupCode(tx, usage.MerchantID),
 				DeliveryFee:      deliveryFee,
 				RiderEarnings:    riderEarnings,
 			}

@@ -954,7 +954,7 @@ func (s *OrderService) MerchantUseReview(merchantID, orderID uint64, approve boo
 				OrderID:          &orderID,
 				Status:           model.DeliveryPendingAccept,
 				MerchantPrepared: 0, // 备餐中，商家确认出餐后置 1，骑手才可见
-				PickupCode:       genPickupCode(),
+				PickupCode:       genPickupCode(tx, order.MerchantID),
 				DeliveryFee:      merchant.DeliveryFee,
 				RiderEarnings:    merchant.RiderEarnings,
 			}

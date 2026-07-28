@@ -20,8 +20,8 @@ var (
 	ErrDeliveryStatusInvalid = errors.New("delivery status invalid")
 )
 
-// genPickupCode 生成 4 位数字出餐号，防全 0。
-func genPickupCode() string {
+// genPickupCode 生成 4 位数字出餐号，同一商家未完成配送单内不重复。
+func genPickupCode(tx *gorm.DB, merchantID uint64) string {
 	for i := 0; i < 8; i++ {
 		var b [2]byte
 		if _, err := rand.Read(b[:]); err != nil {
@@ -32,7 +32,18 @@ func genPickupCode() string {
 		if code == 0 {
 			continue
 		}
-		return fmt.Sprintf("%04d", code)
+		candidate := fmt.Sprintf("%04d", code)
+		// 校验同一商家已有配送单中不重复
+		var existing int64
+		tx.Model(&model.DeliveryOrder{}).
+			Where("pickup_code = ? AND is_deleted = ? AND "+
+				"(EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.merchant_id = ?) OR "+
+				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?))",
+				candidate, model.NotDeleted, merchantID, merchantID).
+			Count(&existing)
+		if existing == 0 {
+			return candidate
+		}
 	}
 	return "1000"
 }
@@ -461,6 +472,15 @@ func (s *DeliveryService) assertDeliveryOwner(tx *gorm.DB, accountID uint64, d *
 // ListPreparingForMerchant 商家端查备餐中的配送单（merchant_prepared=0），
 // 含购买订单路径（order_id）和背包使用路径（inventory_usage_id）。
 func (s *DeliveryService) ListPreparingForMerchant(merchantID uint64, page, pageSize int) ([]DeliveryView, int64, error) {
+	return s.listDeliveriesForMerchant(merchantID, page, pageSize, 0)
+}
+
+// ListPreparedForMerchant 商家端查已出餐待接单的配送单（merchant_prepared=1, status=PendingAccept）。
+func (s *DeliveryService) ListPreparedForMerchant(merchantID uint64, page, pageSize int) ([]DeliveryView, int64, error) {
+	return s.listDeliveriesForMerchant(merchantID, page, pageSize, 1)
+}
+
+func (s *DeliveryService) listDeliveriesForMerchant(merchantID uint64, page, pageSize int, merchantPrepared uint8) ([]DeliveryView, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -470,7 +490,7 @@ func (s *DeliveryService) ListPreparingForMerchant(merchantID uint64, page, page
 	offset := (page - 1) * pageSize
 
 	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).
-		Where("status = ? AND merchant_prepared = 0", model.DeliveryPendingAccept).
+		Where("status = ? AND merchant_prepared = ?", model.DeliveryPendingAccept, merchantPrepared).
 		Where(
 			"EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.merchant_id = ?) OR "+
 				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?)",
