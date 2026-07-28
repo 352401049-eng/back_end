@@ -673,6 +673,35 @@ func (h *MerchantOrderHandler) MarkDeliveryPrepared(c *gin.Context) {
 	response.OK(c, d)
 }
 
+// ListPreparingDeliveries godoc
+// @Summary      商家端备餐中的配送单列表
+// @Description  含购买订单路径和背包使用路径的备餐中配送单（merchant_prepared=0）
+// @Tags         商家端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page       query  int  false  "页码"
+// @Param        page_size  query  int  false  "每页条数"
+// @Success      200  {object}  response.Body{data=query.PageResult}
+// @Router       /merchant/deliveries/preparing [get]
+func (h *MerchantOrderHandler) ListPreparingDeliveries(c *gin.Context) {
+	scope, err := h.merchantScope(c)
+	if err != nil {
+		response.Fail(c, 403, 403, "无商家权限")
+		return
+	}
+	if h.DeliverySvc == nil {
+		response.InternalError(c, "配送服务未配置")
+		return
+	}
+	page, pageSize := parsePage(c)
+	list, total, err := h.DeliverySvc.ListPreparingForMerchant(*scope, page, pageSize)
+	if err != nil {
+		response.InternalError(c, "获取备餐配送单失败")
+		return
+	}
+	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
+}
+
 func (h *MerchantOrderHandler) merchantScope(c *gin.Context) (*uint64, error) {
 	return resolveMerchantScope(c, h.MerchantSvc)
 }

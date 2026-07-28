@@ -270,6 +270,7 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.DELETE("/delivery-zone", dz.DeleteMerchant)
 	r.POST("/delivery-zone/poi", dz.SearchMerchantPOI)
 	r.POST("/deliveries/:id/prepare", mo.MarkDeliveryPrepared)
+	r.GET("/deliveries/preparing", mo.ListPreparingDeliveries)
 	r.GET("/dashboard", mo.Dashboard)
 	r.GET("/sales", mo.SalesReport)
 

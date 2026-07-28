@@ -458,6 +458,40 @@ func (s *DeliveryService) assertDeliveryOwner(tx *gorm.DB, accountID uint64, d *
 	return ErrDeliveryForbidden
 }
 
+// ListPreparingForMerchant 商家端查备餐中的配送单（merchant_prepared=0），
+// 含购买订单路径（order_id）和背包使用路径（inventory_usage_id）。
+func (s *DeliveryService) ListPreparingForMerchant(merchantID uint64, page, pageSize int) ([]DeliveryView, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	offset := (page - 1) * pageSize
+
+	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).
+		Where("status = ? AND merchant_prepared = 0", model.DeliveryPendingAccept).
+		Where(
+			"EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.merchant_id = ?) OR "+
+				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?)",
+			merchantID, merchantID,
+		)
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.DeliveryOrder
+	if err := q.Preload("Order", "is_deleted = ?", model.NotDeleted).
+		Preload("Order.Items", "is_deleted = ?", model.NotDeleted).
+		Preload("InventoryUsage", "is_deleted = ?", model.NotDeleted).
+		Preload("InventoryUsage.Product", "is_deleted = ?", model.NotDeleted).
+		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+		return nil, 0, err
+	}
+	return toDeliveryViews(list), total, nil
+}
+
 func (s *DeliveryService) getViewByID(id uint64) (*DeliveryView, error) {
 	d, err := s.getByID(id)
 	if err != nil {
