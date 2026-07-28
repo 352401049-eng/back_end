@@ -121,6 +121,7 @@ type ActivityProductStoreView struct {
 	ProductName    string             `json:"product_name"`
 	ProductCover   string             `json:"product_cover"`
 	OriginalPrice  float64            `json:"original_price"`
+	ItemType       uint8              `json:"item_type"`
 	AvailableStock uint32             `json:"available_stock"`
 	CanGroupBuy    bool               `json:"can_group_buy"`
 	CanUseCoupon   bool               `json:"can_use_coupon"`
@@ -880,6 +881,7 @@ func buildActivityProductStoreView(act *model.Activity, ap *model.ActivityProduc
 		ProductName:     p.Name,
 		ProductCover:    cover,
 		OriginalPrice:   p.Price,
+		ItemType:        p.ItemType,
 		AvailableStock:  avail,
 		CanGroupBuy:     canGroup,
 		CanUseCoupon:    canCoupon,

@@ -809,6 +809,17 @@ func (s *ProductService) GetOnShelf(id, merchantID uint64) (*model.Product, erro
 	return &product, nil
 }
 
+// GetOnShelfView 商家店内上架商品详情，套餐商品附带 package_groups。
+// 与 GetOnShelfPublic 对齐：列表接口的 ProductStoreView 不含 package_groups，
+// 详情必须走 ProductDetailView，否则套餐内容选不出来。
+func (s *ProductService) GetOnShelfView(id, merchantID uint64) (*ProductDetailView, error) {
+	product, err := s.GetOnShelf(id, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	return s.toDetailView(product)
+}
+
 func (s *ProductService) ensureMerchantOpen(merchantID uint64) error {
 	var count int64
 	if err := query.NotDeleted(s.DB.Model(&model.MerchantProfile{})).

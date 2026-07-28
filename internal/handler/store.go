@@ -196,12 +196,12 @@ func (h *StoreHandler) listMerchantProducts(c *gin.Context, merchantID uint64) {
 
 // GetMerchantProduct godoc
 // @Summary      商品详情
-// @Description  某商家下的上架商品详情
+// @Description  某商家下的上架商品详情；套餐返回 package_groups
 // @Tags         用户-商城
 // @Produce      json
 // @Param        id          path  int  true  "商家 ID"
 // @Param        product_id  path  int  true  "商品 ID"
-// @Success      200  {object}  response.Body{data=service.ProductStoreView}
+// @Success      200  {object}  response.Body{data=service.ProductDetailView}
 // @Failure      404  {object}  response.Body
 // @Router       /merchants/{id}/products/{product_id} [get]
 func (h *StoreHandler) GetMerchantProduct(c *gin.Context) {
@@ -215,7 +215,7 @@ func (h *StoreHandler) GetMerchantProduct(c *gin.Context) {
 		response.BadRequest(c, "商品 ID 无效")
 		return
 	}
-	product, err := h.ProductSvc.GetOnShelf(productID, merchantID)
+	product, err := h.ProductSvc.GetOnShelfView(productID, merchantID)
 	if err != nil {
 		if errors.Is(err, service.ErrProductNotFound) || errors.Is(err, service.ErrMerchantNotFound) {
 			response.Fail(c, 404, 404, "商品不存在或已下架")
@@ -224,7 +224,7 @@ func (h *StoreHandler) GetMerchantProduct(c *gin.Context) {
 		response.InternalError(c, "获取商品失败")
 		return
 	}
-	response.OK(c, h.ProductSvc.ToStoreView(product))
+	response.OK(c, product)
 }
 
 // GetProduct godoc
