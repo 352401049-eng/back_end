@@ -171,7 +171,8 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		authorized.GET("/user/rider/application", userHandler.GetRiderApplication)
 
 		user := authorized.Group("")
-		user.Use(middleware.RequireAccountTypes(model.AccountTypeUser))
+		// admin 可代客下单测试（OrderService 仍按 accountID 隔离数据，无越权风险）
+		user.Use(middleware.RequireAccountTypes(model.AccountTypeUser, model.AccountTypeAdmin))
 		registerUserRoutes(user, userHandler, couponHandler, paymentHandler)
 
 		merchant := authorized.Group("/merchant")
