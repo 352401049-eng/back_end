@@ -95,6 +95,7 @@ type Order struct {
 	PayStatus           uint8            `gorm:"not null;default:0" json:"pay_status"`
 	PaidAt              *time.Time       `json:"paid_at,omitempty"`
 	PayExpireAt         *time.Time       `gorm:"column:pay_expire_at" json:"pay_expire_at,omitempty"`
+	PrepayID            *string          `gorm:"column:prepay_id;size:64" json:"prepay_id,omitempty"`
 	Remark              *string          `gorm:"size:256" json:"remark,omitempty"`
 	CreatedAt           time.Time        `json:"created_at"`
 	UpdatedAt           time.Time        `json:"updated_at"`

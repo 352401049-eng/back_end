@@ -20,13 +20,16 @@ type Config struct {
 	Map     MapConfig
 }
 
-// PaymentConfig 支付渠道。Provider=mock|wechat；wechat 需另配商户参数。
+// PaymentConfig 支付渠道。Provider=mock|wechat；wechat 需另配商户参数与证书。
 type PaymentConfig struct {
-	Provider         string
-	WeChatEnabled    bool
-	WeChatMchID      string
-	WeChatAPIKey     string
-	WeChatNotifyURL  string
+	Provider          string
+	WeChatEnabled     bool
+	WeChatMchID       string
+	WeChatAPIKey      string // APIv3 密钥，32 位
+	WeChatSerialNo    string // 商户证书序列号
+	WeChatCertPath    string // 商户证书路径（apiclient_cert.pem）
+	WeChatKeyPath     string // 商户私钥路径（apiclient_key.pem）
+	WeChatNotifyURL   string
 	PayTimeoutMinutes int // 待支付订单超时分钟数，超时未支付则关单回滚
 }
 
@@ -86,11 +89,14 @@ func Load() (*Config, error) {
 			Secret: getEnv("WECHAT_SECRET", ""),
 		},
 		Payment: PaymentConfig{
-			Provider:         getEnv("PAYMENT_PROVIDER", "mock"),
-			WeChatEnabled:    getEnv("WECHAT_PAY_ENABLED", "false") == "true",
-			WeChatMchID:      getEnv("WECHAT_MCH_ID", ""),
-			WeChatAPIKey:     getEnv("WECHAT_PAY_API_KEY", ""),
-			WeChatNotifyURL:  getEnv("WECHAT_PAY_NOTIFY_URL", ""),
+			Provider:          getEnv("PAYMENT_PROVIDER", "mock"),
+			WeChatEnabled:     getEnv("WECHAT_PAY_ENABLED", "false") == "true",
+			WeChatMchID:       getEnv("WECHAT_MCH_ID", ""),
+			WeChatAPIKey:      getEnv("WECHAT_PAY_API_KEY", ""),
+			WeChatSerialNo:    getEnv("WECHAT_PAY_SERIAL_NO", ""),
+			WeChatCertPath:    getEnv("WECHAT_PAY_CERT_PATH", ""),
+			WeChatKeyPath:     getEnv("WECHAT_PAY_KEY_PATH", ""),
+			WeChatNotifyURL:   getEnv("WECHAT_PAY_NOTIFY_URL", ""),
 			PayTimeoutMinutes: loadPayTimeoutMinutes(),
 		},
 		Backup: loadBackupConfig(),

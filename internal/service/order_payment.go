@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
@@ -216,6 +217,12 @@ func (s *OrderService) expireOnePendingPayOrder(orderID uint64) error {
 		// 已支付则不关单（回调可能已先到，容错）
 		if order.PayStatus == model.PayStatusPaid {
 			return s.advanceAfterPaidInTx(tx, orderID)
+		}
+		// 微信支付：尝试关闭微信侧订单（忽略失败，非关键路径）
+		if wp, ok := s.Payment.(*payment.WeChatProvider); ok && wp.Client != nil {
+			if err := wp.Client.CloseOrder(wp.MchID, order.OrderNo); err != nil {
+				log.Printf("[pay-expire] close wechat order %s failed: %v", order.OrderNo, err)
+			}
 		}
 		isPackageParent := order.PackageProductID != nil && order.ParentOrderID == nil && order.MerchantID == 0
 		if order.ParentOrderID != nil {

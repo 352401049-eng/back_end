@@ -56,8 +56,14 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	couponSvc := &service.CouponService{DB: db}
 	activitySvc := &service.ActivityService{DB: db}
 	announcementSvc := &service.AnnouncementService{DB: db}
-	payProvider := payment.NewProvider(cfg, db)
-	log.Printf("支付渠道: %s (immediate_settle=%v)", payProvider.Name(), payProvider.ImmediateSettle())
+		payProvider := payment.NewProvider(cfg, db)
+		log.Printf("支付渠道: %s (immediate_settle=%v)", payProvider.Name(), payProvider.ImmediateSettle())
+		// 微信支付：启动时下载平台证书（回调验签用）
+		if wp, ok := payProvider.(*payment.WeChatProvider); ok && wp.Client != nil {
+			if err := wp.Client.FetchPlatformCerts(); err != nil {
+				log.Printf("[wechat] 平台证书下载失败: %v", err)
+			}
+		}
 	orderSvc := &service.OrderService{
 		DB: db, InventorySvc: inventorySvc, CouponSvc: couponSvc,
 		ActivitySvc: activitySvc, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
