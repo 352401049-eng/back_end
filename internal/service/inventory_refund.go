@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
@@ -145,7 +146,17 @@ func (s *OrderService) RefundInventory(accountID, inventoryID uint64, quantity u
 			}
 			if err := s.refundAmountInTx(tx, a.OrderID, a.Amount, "背包未使用退款"); err != nil {
 				if errors.Is(err, payment.ErrInvalidState) {
-					return fmt.Errorf("%w: 退款冲突或余额不足，请稍后重试", ErrInventoryRefundInvalid)
+					detail := err.Error()
+					switch {
+					case strings.Contains(detail, "collector"):
+						return fmt.Errorf("%w: 退款服务未就绪，请稍后重试", ErrInventoryRefundInvalid)
+					case strings.Contains(detail, "no refundable balance"):
+						return fmt.Errorf("%w: 订单可退余额不足", ErrInventoryRefundInvalid)
+					case strings.Contains(detail, "conflict"):
+						return fmt.Errorf("%w: 退款冲突，请稍后重试", ErrInventoryRefundInvalid)
+					default:
+						return fmt.Errorf("%w: 退款冲突或余额不足，请稍后重试", ErrInventoryRefundInvalid)
+					}
 				}
 				return err
 			}

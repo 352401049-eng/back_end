@@ -85,20 +85,21 @@ func (p *MockProvider) RefundAmountInTx(tx *gorm.DB, orderID uint64, amount floa
 			}
 			return nil
 		}
-		newRefunded := o.RefundedAmount + refund
+		refund = roundMoney(refund)
+		newRefunded := roundMoney(o.RefundedAmount + refund)
 		status := model.PayStatusPartialRefunded
 		if newRefunded+0.0001 >= o.PayAmount {
 			status = model.PayStatusRefunded
-			newRefunded = o.PayAmount
+			newRefunded = roundMoney(o.PayAmount)
 		}
-		res := query.NotDeleted(tx.Model(&model.Order{})).
-			Where("id = ? AND pay_status = ? AND refunded_amount = ? AND refund_pending_amount = ?",
-				orderID, o.PayStatus, o.RefundedAmount, o.RefundPendingAmount).
-			Updates(map[string]interface{}{
-				"pay_status":            status,
-				"refunded_amount":       newRefunded,
-				"refund_pending_amount": 0,
-			})
+		res := optimisticRefundWhere(
+			query.NotDeleted(tx.Model(&model.Order{})),
+			orderID, o.PayStatus, o.RefundedAmount, o.RefundPendingAmount,
+		).Updates(map[string]interface{}{
+			"pay_status":            status,
+			"refunded_amount":       newRefunded,
+			"refund_pending_amount": 0,
+		})
 		if res.Error != nil {
 			return res.Error
 		}

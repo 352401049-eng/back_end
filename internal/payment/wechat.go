@@ -393,14 +393,15 @@ func (p *WeChatProvider) RefundAmountInTx(tx *gorm.DB, orderID uint64, amount fl
 			}
 			return nil
 		}
-		newPending := order.RefundPendingAmount + refund
-		res := query.NotDeleted(tx.Model(&model.Order{})).
-			Where("id = ? AND pay_status = ? AND refunded_amount = ? AND refund_pending_amount = ?",
-				orderID, order.PayStatus, order.RefundedAmount, order.RefundPendingAmount).
-			Updates(map[string]interface{}{
-				"pay_status":            model.PayStatusRefunding,
-				"refund_pending_amount": newPending,
-			})
+		refund = roundMoney(refund)
+		newPending := roundMoney(order.RefundPendingAmount + refund)
+		res := optimisticRefundWhere(
+			query.NotDeleted(tx.Model(&model.Order{})),
+			orderID, order.PayStatus, order.RefundedAmount, order.RefundPendingAmount,
+		).Updates(map[string]interface{}{
+			"pay_status":            model.PayStatusRefunding,
+			"refund_pending_amount": newPending,
+		})
 		if res.Error != nil {
 			return res.Error
 		}

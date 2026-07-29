@@ -1,8 +1,10 @@
 package payment
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"math"
 
 	"yujixinjiang/backend/internal/model"
 	"yujixinjiang/backend/internal/payment/wechatv3"
@@ -12,6 +14,8 @@ import (
 )
 
 const wechatRefundCollectorKey = "wechat_refund_collector"
+
+type refundJobsCtxKey struct{}
 
 // RefundJob 事务提交后待派发的微信退款任务。
 type RefundJob struct {
@@ -25,21 +29,44 @@ type RefundJob struct {
 }
 
 // AttachRefundCollector 在事务开始时绑定退款任务收集器；Commit 成功后由 DispatchRefundJobs 派发。
+// 同时写入 Context（克隆 session 可继承）与 InstanceSet（原 tx 指针可取）。
 func AttachRefundCollector(tx *gorm.DB, jobs *[]RefundJob) {
 	if tx == nil || jobs == nil {
 		return
 	}
+	if tx.Statement != nil {
+		ctx := tx.Statement.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		tx.Statement.Context = context.WithValue(ctx, refundJobsCtxKey{}, jobs)
+	}
 	tx.InstanceSet(wechatRefundCollectorKey, jobs)
 }
 
-func enqueueWeChatRefund(tx *gorm.DB, job RefundJob) error {
-	val, ok := tx.InstanceGet(wechatRefundCollectorKey)
-	if !ok {
-		return fmt.Errorf("%w: refund collector missing (call AttachRefundCollector)", ErrInvalidState)
+func refundJobsFromTx(tx *gorm.DB) *[]RefundJob {
+	if tx == nil {
+		return nil
 	}
-	ptr, ok := val.(*[]RefundJob)
-	if !ok || ptr == nil {
-		return fmt.Errorf("%w: refund collector invalid", ErrInvalidState)
+	if tx.Statement != nil && tx.Statement.Context != nil {
+		if v := tx.Statement.Context.Value(refundJobsCtxKey{}); v != nil {
+			if ptr, ok := v.(*[]RefundJob); ok && ptr != nil {
+				return ptr
+			}
+		}
+	}
+	if val, ok := tx.InstanceGet(wechatRefundCollectorKey); ok {
+		if ptr, ok := val.(*[]RefundJob); ok && ptr != nil {
+			return ptr
+		}
+	}
+	return nil
+}
+
+func enqueueWeChatRefund(tx *gorm.DB, job RefundJob) error {
+	ptr := refundJobsFromTx(tx)
+	if ptr == nil {
+		return fmt.Errorf("%w: refund collector missing (call AttachRefundCollector)", ErrInvalidState)
 	}
 	*ptr = append(*ptr, job)
 	return nil
@@ -92,7 +119,7 @@ func releaseRefundPending(p *WeChatProvider, orderID uint64, amount float64) {
 			First(&order, orderID).Error; err != nil {
 			return err
 		}
-		pending := order.RefundPendingAmount - amount
+		pending := roundMoney(order.RefundPendingAmount - amount)
 		if pending < 0 {
 			pending = 0
 		}
@@ -118,11 +145,26 @@ func releaseRefundPending(p *WeChatProvider, orderID uint64, amount float64) {
 }
 
 func refundableRemain(o model.Order) float64 {
-	remain := o.PayAmount - o.RefundedAmount - o.RefundPendingAmount
+	remain := roundMoney(o.PayAmount - o.RefundedAmount - o.RefundPendingAmount)
 	if remain < 0 {
 		return 0
 	}
 	return remain
+}
+
+func roundMoney(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
+func moneyFen(v float64) int64 {
+	return int64(math.Round(v * 100))
+}
+
+// optimisticRefundWhere 用「分」比较金额，避免 DECIMAL 与 float64 直接相等导致 RowsAffected=0。
+func optimisticRefundWhere(db *gorm.DB, orderID uint64, payStatus uint8, refunded, pending float64) *gorm.DB {
+	return db.Where("id = ? AND pay_status = ?", orderID, payStatus).
+		Where("ROUND(refunded_amount * 100) = ? AND ROUND(refund_pending_amount * 100) = ?",
+			moneyFen(refunded), moneyFen(pending))
 }
 
 func fmtRefundConflict(orderID uint64) error {
