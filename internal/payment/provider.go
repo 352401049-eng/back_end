@@ -22,6 +22,8 @@ type Provider interface {
 	SettlePaidInTx(tx *gorm.DB, orderID uint64, payAmount float64, at time.Time) error
 	// RefundInTx 在事务内将已支付订单标记为已退款（Mock 立即成功；微信后续接真实退款）。
 	RefundInTx(tx *gorm.DB, orderID uint64) error
+	// RefundAmountInTx 按金额部分/全额退款（元）。amount<=0 或 >=剩余应付则走全额逻辑。
+	RefundAmountInTx(tx *gorm.DB, orderID uint64, amount float64, reason string) error
 	// CreatePrepay 为未支付订单创建预支付参数。Mock 若已付则返回已结算；微信桩返回 ErrNotConfigured。
 	CreatePrepay(orderID uint64, accountID uint64) (*PrepayResult, error)
 	// HandleNotify 处理支付渠道异步回调。微信桩返回 ErrNotConfigured。

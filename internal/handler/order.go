@@ -734,6 +734,49 @@ func (h *MerchantOrderHandler) MarkDeliveryPrepared(c *gin.Context) {
 	response.OK(c, d)
 }
 
+type RejectDeliveryPrepareRequest struct {
+	Reason string `json:"reason" binding:"required" example:"今日已打烊"`
+}
+
+// RejectDeliveryPrepare godoc
+// @Summary      商家拒绝备餐中的外卖订单
+// @Description  备餐中可拒绝出餐；商品回退用户背包，拒绝原因写入订单备注供用户在全部订单查看
+// @Tags         商家端
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int  true  "配送单 ID"
+// @Param        body  body  RejectDeliveryPrepareRequest  true  "拒绝原因"
+// @Success      200  {object}  response.Body{data=service.DeliveryView}
+// @Router       /merchant/deliveries/{id}/reject [post]
+func (h *MerchantOrderHandler) RejectDeliveryPrepare(c *gin.Context) {
+	scope, err := h.merchantScope(c)
+	if err != nil {
+		response.Fail(c, 403, 403, "无商家权限")
+		return
+	}
+	if h.DeliverySvc == nil {
+		response.InternalError(c, "配送服务未配置")
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	var req RejectDeliveryPrepareRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请填写拒绝原因")
+		return
+	}
+	d, err := h.DeliverySvc.RejectPrepare(*scope, id, req.Reason)
+	if err != nil {
+		handleDeliveryError(c, err)
+		return
+	}
+	response.OK(c, d)
+}
+
 // ListPreparingDeliveries godoc
 // @Summary      商家端备餐中的配送单列表
 // @Description  含购买订单路径和背包使用路径的备餐中配送单（merchant_prepared=0）

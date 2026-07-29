@@ -26,16 +26,52 @@ func (s *OrderService) settlePaymentInTx(tx *gorm.DB, orderID uint64, payAmount 
 	return nil
 }
 
-// advanceAfterPaidInTx 仅把 status=PendingPay 的订单推进到 PendingFulfill + 商家审核待审。
+// advanceAfterPaidInTx 仅把 status=PendingPay 的订单推进到 PendingFulfill。
+// 若商家开启自动审核，则直接入背包；否则进入待商家审核。
 // 拼团单（PendingGroup）不被推进，由 tryCompleteGroup 成团后推进。
 func (s *OrderService) advanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
-	return tx.Model(&model.Order{}).
+	res := tx.Model(&model.Order{}).
 		Where("id = ? AND status = ?", orderID, model.OrderStatusPendingPay).
 		Updates(map[string]interface{}{
 			"status":                model.OrderStatusPendingFulfill,
 			"merchant_review_stage": model.MerchantReviewPending,
 			"pay_expire_at":         nil,
-		}).Error
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil
+	}
+	return s.maybeAutoApproveInTx(tx, orderID)
+}
+
+func (s *OrderService) maybeAutoApproveInTx(tx *gorm.DB, orderID uint64) error {
+	var order model.Order
+	if err := query.NotDeleted(tx).First(&order, orderID).Error; err != nil {
+		return err
+	}
+	if order.Status != model.OrderStatusPendingFulfill || order.MerchantReviewStage != model.MerchantReviewPending {
+		return nil
+	}
+	if order.MerchantID == 0 {
+		return nil
+	}
+	var mp model.MerchantProfile
+	if err := query.NotDeleted(tx).Select("id", "auto_approve").First(&mp, order.MerchantID).Error; err != nil {
+		return nil // 商家缺失时保持待审，不阻断支付
+	}
+	if mp.AutoApprove != 1 {
+		return nil
+	}
+	var items []model.OrderItem
+	if err := query.NotDeleted(tx).Where("order_id = ?", orderID).Find(&items).Error; err != nil {
+		return err
+	}
+	if err := s.creditOrderInventory(tx, order.AccountID, orderID, items); err != nil {
+		return err
+	}
+	return tx.Model(&order).Update("merchant_review_stage", model.MerchantReviewApproved).Error
 }
 
 func (s *OrderService) refundPaymentInTx(tx *gorm.DB, orderID uint64) error {
@@ -44,6 +80,24 @@ func (s *OrderService) refundPaymentInTx(tx *gorm.DB, orderID uint64) error {
 		p = &payment.MockProvider{DB: s.DB}
 	}
 	return p.RefundInTx(tx, orderID)
+}
+
+func (s *OrderService) refundAmountInTx(tx *gorm.DB, orderID uint64, amount float64, reason string) error {
+	return s.paymentProvider().RefundAmountInTx(tx, orderID, amount, reason)
+}
+
+// runTx 包装事务：绑定微信退款收集器，提交成功后再异步发起退款。
+func (s *OrderService) runTx(fn func(tx *gorm.DB) error) error {
+	var jobs []payment.RefundJob
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
+		return fn(tx)
+	})
+	if err != nil {
+		return err
+	}
+	payment.DispatchRefundJobs(jobs)
+	return nil
 }
 
 func (s *OrderService) paymentProvider() payment.Provider {
@@ -108,7 +162,7 @@ func (s *OrderService) ExpireStaleGroupTeams(now time.Time) (int, error) {
 }
 
 func (s *OrderService) expireOneGroupTeam(team *model.GroupBuyTeam) error {
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+	return s.runTx(func(tx *gorm.DB) error {
 		var locked model.GroupBuyTeam
 		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
 			First(&locked, team.ID).Error; err != nil {

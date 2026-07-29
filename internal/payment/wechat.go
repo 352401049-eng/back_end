@@ -12,6 +12,7 @@ import (
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // WeChatProvider 微信支付 V3 实现。
@@ -288,7 +289,7 @@ func (p *WeChatProvider) handlePaySuccess(data []byte) (*NotifyResult, error) {
 	}, nil
 }
 
-// handleRefundSuccess 处理退款成功回调。
+// handleRefundSuccess 处理退款成功回调：确认入账 refunded_amount，释放 pending。
 func (p *WeChatProvider) handleRefundSuccess(data []byte) (*NotifyResult, error) {
 	notify, err := wechatv3.UnmarshalRefundSuccess(data)
 	if err != nil {
@@ -298,20 +299,51 @@ func (p *WeChatProvider) handleRefundSuccess(data []byte) (*NotifyResult, error)
 		return &NotifyResult{RawAck: `{"code":"SUCCESS"}`}, nil
 	}
 
+	refundYuan := wechatv3.FenToYuan(notify.Amount.Refund)
+	if refundYuan < 0 {
+		refundYuan = 0
+	}
+
 	err = p.DB.Transaction(func(tx *gorm.DB) error {
 		var pt model.PaymentTransaction
 		if err := tx.Where("order_no = ?", notify.OutTradeNo).First(&pt).Error; err != nil {
 			return err
 		}
-		if pt.Status == model.PayTxStatusRefunded {
-			return nil
-		}
-		if err := tx.Model(&pt).Update("status", model.PayTxStatusRefunded).Error; err != nil {
+		var order model.Order
+		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+			Select("id", "pay_status", "pay_amount", "refunded_amount", "refund_pending_amount").
+			First(&order, pt.OrderID).Error; err != nil {
 			return err
 		}
-		return query.NotDeleted(tx.Model(&model.Order{})).
-			Where("id = ? AND pay_status = ?", pt.OrderID, model.PayStatusRefunding).
-			Update("pay_status", model.PayStatusRefunded).Error
+
+		newRefunded := order.RefundedAmount + refundYuan
+		if newRefunded > order.PayAmount {
+			newRefunded = order.PayAmount
+		}
+		newPending := order.RefundPendingAmount - refundYuan
+		if newPending < 0 {
+			newPending = 0
+		}
+		status := model.PayStatusPartialRefunded
+		switch {
+		case newRefunded+0.0001 >= order.PayAmount:
+			status = model.PayStatusRefunded
+			newPending = 0
+		case newPending > 0:
+			status = model.PayStatusRefunding
+		}
+
+		if err := query.NotDeleted(tx.Model(&model.Order{})).Where("id = ?", order.ID).Updates(map[string]interface{}{
+			"refunded_amount":       newRefunded,
+			"refund_pending_amount": newPending,
+			"pay_status":            status,
+		}).Error; err != nil {
+			return err
+		}
+		if pt.Status != model.PayTxStatusRefunded && status == model.PayStatusRefunded {
+			_ = tx.Model(&pt).Update("status", model.PayTxStatusRefunded).Error
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -323,60 +355,71 @@ func (p *WeChatProvider) handleRefundSuccess(data []byte) (*NotifyResult, error)
 	}, nil
 }
 
-// RefundInTx 在事务内将订单标记为退款中，事务外异步发起微信退款。
+// RefundInTx 在事务内预留全额退款，事务提交后再异步发起微信退款。
 func (p *WeChatProvider) RefundInTx(tx *gorm.DB, orderID uint64) error {
+	return p.RefundAmountInTx(tx, orderID, 0, "用户取消")
+}
+
+// RefundAmountInTx 按金额预留退款（不提前记入 refunded_amount）。amount<=0 表示退剩余全部。
+// 真正的微信 CreateRefund 在事务 Commit 之后执行；失败会释放 pending。
+func (p *WeChatProvider) RefundAmountInTx(tx *gorm.DB, orderID uint64, amount float64, reason string) error {
 	if !p.Enabled || p.Client == nil {
 		return ErrNotConfigured
 	}
 
 	var order model.Order
-	if err := query.NotDeleted(tx).Select("id", "order_no", "pay_status", "pay_amount").
+	if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+		Select("id", "order_no", "pay_status", "pay_amount", "refunded_amount", "refund_pending_amount").
 		First(&order, orderID).Error; err != nil {
 		return err
 	}
 
 	switch order.PayStatus {
 	case model.PayStatusUnpaid:
-		return nil // 无需退款
-	case model.PayStatusRefunded, model.PayStatusPartialRefunded:
 		return nil
-	case model.PayStatusPaid, model.PayStatusRefunding:
-			// 标记退款中，防并发重复退款
-			res := query.NotDeleted(tx.Model(&model.Order{})).
-				Where("id = ? AND pay_status = ?", orderID, order.PayStatus).
-				Update("pay_status", model.PayStatusRefunding)
-			if res.Error != nil {
-				return res.Error
+	case model.PayStatusRefunded:
+		return nil
+	case model.PayStatusPaid, model.PayStatusRefunding, model.PayStatusPartialRefunded:
+		remain := refundableRemain(order)
+		refund := amount
+		if refund <= 0 || refund >= remain {
+			refund = remain
+		}
+		if refund <= 0 {
+			if amount > 0 {
+				return fmt.Errorf("%w: no refundable balance", ErrInvalidState)
 			}
-			if res.RowsAffected == 0 {
-				return nil // 并发已处理
-			}
-			// 异步发起微信退款（事务提交后执行）
-			client := p.Client
-			notifyURL := p.NotifyURL
-			orderNo := order.OrderNo
-			payAmount := order.PayAmount
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[wechat refund] panic recovered: %v", r)
-					}
-				}()
-			_, err := client.CreateRefund(&wechatv3.CreateRefundRequest{
-				OutTradeNo: orderNo,
-				OutRefundNo: "RF" + orderNo,
-				Reason:      "用户取消",
-				NotifyURL:   notifyURL,
-				Amount: wechatv3.RefundAmount{
-					Refund:   wechatv3.YuanToFen(payAmount),
-					Total:    wechatv3.YuanToFen(payAmount),
-					Currency: "CNY",
-				},
+			return nil
+		}
+		newPending := order.RefundPendingAmount + refund
+		res := query.NotDeleted(tx.Model(&model.Order{})).
+			Where("id = ? AND pay_status = ? AND refunded_amount = ? AND refund_pending_amount = ?",
+				orderID, order.PayStatus, order.RefundedAmount, order.RefundPendingAmount).
+			Updates(map[string]interface{}{
+				"pay_status":            model.PayStatusRefunding,
+				"refund_pending_amount": newPending,
 			})
-			if err != nil {
-				log.Printf("[wechat refund] order %s refund failed: %v", orderNo, err)
-			}
-		}()
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return fmtRefundConflict(orderID)
+		}
+		refundReason := reason
+		if refundReason == "" {
+			refundReason = "用户退款"
+		}
+		if err := enqueueWeChatRefund(tx, RefundJob{
+			Provider:    p,
+			OrderID:     order.ID,
+			OrderNo:     order.OrderNo,
+			OutRefundNo: fmt.Sprintf("RF%s%d", order.OrderNo, time.Now().UnixNano()%1e12),
+			PayAmount:   order.PayAmount,
+			RefundAmt:   refund,
+			Reason:      refundReason,
+		}); err != nil {
+			return err
+		}
 		return nil
 	default:
 		return ErrInvalidState

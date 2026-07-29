@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"yujixinjiang/backend/internal/auth"
 	"yujixinjiang/backend/internal/query"
@@ -11,6 +12,59 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type RefundInventoryRequest struct {
+	Quantity uint32 `json:"quantity" example:"1"`
+}
+
+// RefundInventory godoc
+// @Summary      背包未使用商品退款
+// @Description  扣减可使用库存并按来源订单退款；仅未使用数量可退
+// @Tags         用户-背包
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int                       true  "背包记录 ID"
+// @Param        body  body  RefundInventoryRequest    false "退款数量，默认全部剩余"
+// @Success      200   {object}  response.Body{data=service.InventoryRefundView}
+// @Router       /user/inventory/{id}/refund [post]
+func (h *UserHandler) RefundInventory(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	inventoryID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "背包 ID 无效")
+		return
+	}
+	if h.OrderSvc == nil || h.InventorySvc == nil {
+		response.InternalError(c, "服务未配置")
+		return
+	}
+	var req RefundInventoryRequest
+	_ = c.ShouldBindJSON(&req)
+	qty := req.Quantity
+	if qty == 0 {
+		inv, err := h.InventorySvc.GetOwned(accountID, inventoryID)
+		if err != nil {
+			handleInventoryError(c, err)
+			return
+		}
+		qty = inv.Quantity
+		if qty == 0 {
+			response.BadRequest(c, "无可退数量")
+			return
+		}
+	}
+	view, err := h.OrderSvc.RefundInventory(accountID, inventoryID, qty)
+	if err != nil {
+		handleInventoryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
 
 type CancelInventoryUsageRequest struct {
 	Reason *string `json:"reason" example:"临时有事"`
@@ -206,6 +260,13 @@ func handleInventoryError(c *gin.Context, err error) {
 		response.Fail(c, 404, 404, "背包记录不存在")
 	case errors.Is(err, service.ErrInventoryInsufficient):
 		response.BadRequest(c, "背包数量不足")
+	case errors.Is(err, service.ErrInventoryRefundInvalid):
+		msg := err.Error()
+		if i := strings.Index(msg, ": "); i >= 0 && i+2 < len(msg) {
+			response.BadRequest(c, msg[i+2:])
+			return
+		}
+		response.BadRequest(c, "当前不可退款")
 	case errors.Is(err, service.ErrInventoryUsageNotFound):
 		response.Fail(c, 404, 404, "使用记录不存在")
 	case errors.Is(err, service.ErrInventoryUsageInvalid):

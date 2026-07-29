@@ -42,7 +42,7 @@ func NewProvider(cfg *config.Config, db *gorm.DB) Provider {
 				log.Printf("[wechat] APIv3 密钥验证通过")
 			}
 		}
-		return &WeChatProvider{
+		wp := &WeChatProvider{
 			DB:        db,
 			AppID:     cfg.WeChat.AppID,
 			MchID:     cfg.Payment.WeChatMchID,
@@ -51,6 +51,7 @@ func NewProvider(cfg *config.Config, db *gorm.DB) Provider {
 			Enabled:   cfg.Payment.WeChatEnabled,
 			Client:    client,
 		}
+		return wp
 	default:
 		return &MockProvider{DB: db}
 	}

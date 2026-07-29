@@ -73,7 +73,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	startPendingPayExpireWorker(orderSvc)
 	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc}
 	paymentHandler := &handler.PaymentHandler{OrderSvc: orderSvc}
-	deliverySvc := &service.DeliveryService{DB: db}
+	deliverySvc := &service.DeliveryService{DB: db, InventorySvc: inventorySvc}
 	riderEarningSvc := &service.RiderEarningService{DB: db}
 	dashboardSvc := &service.DashboardService{DB: db}
 	categorySvc := &service.CategoryService{DB: db}
@@ -222,6 +222,7 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.GET("/user/inventory", h.Inventory)
 	r.POST("/user/inventory/use-batch", h.UseInventoryBatch)
 	r.POST("/user/inventory/:id/use", h.UseInventory)
+	r.POST("/user/inventory/:id/refund", h.RefundInventory)
 	r.GET("/user/inventory/usages", h.ListInventoryUsages)
 	r.GET("/user/inventory/usages/:id", h.GetInventoryUsage)
 	r.POST("/user/inventory/usages/:id/cancel", h.CancelInventoryUsage)
@@ -277,6 +278,7 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.DELETE("/delivery-zone", dz.DeleteMerchant)
 	r.POST("/delivery-zone/poi", dz.SearchMerchantPOI)
 	r.POST("/deliveries/:id/prepare", mo.MarkDeliveryPrepared)
+	r.POST("/deliveries/:id/reject", mo.RejectDeliveryPrepare)
 	r.GET("/deliveries/preparing", mo.ListPreparingDeliveries)
 	r.GET("/deliveries/prepared", mo.ListPreparedDeliveries)
 	r.GET("/dashboard", mo.Dashboard)

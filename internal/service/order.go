@@ -569,6 +569,18 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 		}).Error; err != nil {
 		return err
 	}
+	// 成团后对开启自动审核的商家逐单入背包
+	var orderIDs []uint64
+	if err := tx.Table("order_item").
+		Where("group_buy_team_id = ? AND is_deleted = 0", team.ID).
+		Distinct("order_id").Pluck("order_id", &orderIDs).Error; err != nil {
+		return err
+	}
+	for _, oid := range orderIDs {
+		if err := s.maybeAutoApproveInTx(tx, oid); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -591,7 +603,7 @@ func (s *OrderService) Cancel(accountID, orderID uint64) error {
 	if order.ParentOrderID != nil {
 		return fmt.Errorf("%w: 请取消套餐父订单", ErrOrderStatusInvalid)
 	}
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+	return s.runTx(func(tx *gorm.DB) error {
 		// 成团成功后禁止用户取消（只能商家拒单），避免团状态被打回
 		okGroup, err := orderHasSuccessfulGroup(tx, orderID)
 		if err != nil {
@@ -844,7 +856,7 @@ func (s *OrderService) MerchantReview(merchantID, orderID uint64, approve bool, 
 		return nil, ErrOrderStatusInvalid
 	}
 	if !approve {
-		err := s.DB.Transaction(func(tx *gorm.DB) error {
+		err := s.runTx(func(tx *gorm.DB) error {
 			if s.CouponSvc != nil {
 				if err := s.CouponSvc.ReleaseByOrderInTx(tx, order); err != nil {
 					return err

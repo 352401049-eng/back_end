@@ -29,6 +29,19 @@ type InventoryService struct {
 	ZoneSvc *DeliveryZoneService
 }
 
+func (s *InventoryService) GetOwned(accountID, inventoryID uint64) (*model.UserInventory, error) {
+	var inv model.UserInventory
+	if err := query.NotDeleted(s.DB).
+		Where("id = ? AND account_id = ?", inventoryID, accountID).
+		First(&inv).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInventoryNotFound
+		}
+		return nil, err
+	}
+	return &inv, nil
+}
+
 type UseInventoryInput struct {
 	Quantity          uint32
 	DeliveryType      uint8
@@ -77,7 +90,11 @@ func (s *InventoryService) CreditFromOrder(tx *gorm.DB, accountID, orderID uint6
 func (s *InventoryService) RollbackOrderCredit(tx *gorm.DB, orderID uint64) error {
 	var logs []model.UserInventoryLog
 	if err := query.NotDeleted(tx).
-		Where("order_id = ? AND event_type IN ?", orderID, []string{model.InventoryEventOrderCredit, model.InventoryEventOrderRollback}).
+		Where("order_id = ? AND event_type IN ?", orderID, []string{
+			model.InventoryEventOrderCredit,
+			model.InventoryEventOrderRollback,
+			model.InventoryEventRefund,
+		}).
 		Find(&logs).Error; err != nil {
 		return err
 	}
@@ -86,17 +103,23 @@ func (s *InventoryService) RollbackOrderCredit(tx *gorm.DB, orderID uint64) erro
 	}
 
 	credited := int32(0)
-	rolledBack := int32(0)
+	alreadyOut := int32(0)
 	var accountID uint64
 	for _, lg := range logs {
 		accountID = lg.AccountID
-		if lg.EventType == model.InventoryEventOrderCredit {
+		switch lg.EventType {
+		case model.InventoryEventOrderCredit:
 			credited += lg.DeltaQty
-		} else {
-			rolledBack += -lg.DeltaQty
+		case model.InventoryEventOrderRollback, model.InventoryEventRefund:
+			// delta 为负，取绝对值计入已扣减
+			if lg.DeltaQty < 0 {
+				alreadyOut += -lg.DeltaQty
+			} else {
+				alreadyOut += lg.DeltaQty
+			}
 		}
 	}
-	remaining := credited - rolledBack
+	remaining := credited - alreadyOut
 	if remaining <= 0 {
 		return nil
 	}

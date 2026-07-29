@@ -10,6 +10,7 @@ const (
 	InventoryEventOrderRollback = "order_rollback"
 	InventoryEventUse           = "use"
 	InventoryEventUseCancel     = "use_cancel"
+	InventoryEventRefund        = "inventory_refund"
 )
 
 const (

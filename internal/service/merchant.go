@@ -64,6 +64,7 @@ type UpdateMerchantInput struct {
 	Images           *[]string
 	Coordinates      *MerchantCoordinateUpdate
 	AllowReservation *uint8
+	AutoApprove      *uint8
 	OpenTime         *string
 	CloseTime        *string
 	DeliveryFee      *float64
@@ -73,7 +74,7 @@ type UpdateMerchantInput struct {
 func (in UpdateMerchantInput) hasField() bool {
 	return in.ShopName != nil || in.ContactPhone != nil || in.Address != nil ||
 		in.ShopLogo != nil || in.Images != nil || in.Coordinates != nil ||
-		in.AllowReservation != nil || in.OpenTime != nil || in.CloseTime != nil ||
+		in.AllowReservation != nil || in.AutoApprove != nil || in.OpenTime != nil || in.CloseTime != nil ||
 		in.DeliveryFee != nil || in.RiderEarnings != nil
 }
 
@@ -278,6 +279,9 @@ func (s *MerchantService) UpdateProfile(id uint64, input UpdateMerchantInput) (*
 	}
 	if input.AllowReservation != nil {
 		updates["allow_reservation"] = normalizeAllowReservation(*input.AllowReservation)
+	}
+	if input.AutoApprove != nil {
+		updates["auto_approve"] = normalizeAllowReservation(*input.AutoApprove)
 	}
 	if input.OpenTime != nil {
 		updates["open_time"] = normalizeBusinessTime(*input.OpenTime)

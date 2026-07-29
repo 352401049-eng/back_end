@@ -8,6 +8,7 @@ import (
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MockProvider 模拟支付：下单事务内立即结算；取消/拒单事务内立即退款记账。
@@ -50,22 +51,61 @@ func (p *MockProvider) SettlePaidInTx(tx *gorm.DB, orderID uint64, payAmount flo
 }
 
 func (p *MockProvider) RefundInTx(tx *gorm.DB, orderID uint64) error {
+	return p.RefundAmountInTx(tx, orderID, 0, "全额退款")
+}
+
+func (p *MockProvider) RefundAmountInTx(tx *gorm.DB, orderID uint64, amount float64, reason string) error {
 	if orderID == 0 {
 		return ErrInvalidState
 	}
+	_ = reason
 	var o model.Order
-	if err := query.NotDeleted(tx).Select("id", "pay_status").First(&o, orderID).Error; err != nil {
+	if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+		Select("id", "pay_status", "pay_amount", "refunded_amount", "refund_pending_amount").
+		First(&o, orderID).Error; err != nil {
 		return err
 	}
 	switch o.PayStatus {
 	case model.PayStatusUnpaid:
 		return nil
-	case model.PayStatusRefunded, model.PayStatusPartialRefunded:
+	case model.PayStatusRefunded:
 		return nil
-	case model.PayStatusPaid, model.PayStatusRefunding:
-		return query.NotDeleted(tx.Model(&model.Order{})).
-			Where("id = ?", orderID).
-			Update("pay_status", model.PayStatusRefunded).Error
+	case model.PayStatusPaid, model.PayStatusRefunding, model.PayStatusPartialRefunded:
+		remain := o.PayAmount - o.RefundedAmount - o.RefundPendingAmount
+		if remain < 0 {
+			remain = 0
+		}
+		refund := amount
+		if refund <= 0 || refund >= remain {
+			refund = remain
+		}
+		if refund <= 0 {
+			if amount > 0 {
+				return fmt.Errorf("%w: no refundable balance", ErrInvalidState)
+			}
+			return nil
+		}
+		newRefunded := o.RefundedAmount + refund
+		status := model.PayStatusPartialRefunded
+		if newRefunded+0.0001 >= o.PayAmount {
+			status = model.PayStatusRefunded
+			newRefunded = o.PayAmount
+		}
+		res := query.NotDeleted(tx.Model(&model.Order{})).
+			Where("id = ? AND pay_status = ? AND refunded_amount = ? AND refund_pending_amount = ?",
+				orderID, o.PayStatus, o.RefundedAmount, o.RefundPendingAmount).
+			Updates(map[string]interface{}{
+				"pay_status":            status,
+				"refunded_amount":       newRefunded,
+				"refund_pending_amount": 0,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("%w: order %d refund conflict", ErrInvalidState, orderID)
+		}
+		return nil
 	default:
 		return ErrInvalidState
 	}

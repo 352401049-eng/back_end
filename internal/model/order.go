@@ -90,6 +90,8 @@ type Order struct {
 	DiscountAmount      float64          `gorm:"type:decimal(10,2);not null;default:0" json:"discount_amount"`
 	UserCouponID        *uint64          `gorm:"column:user_coupon_id" json:"user_coupon_id,omitempty"`
 	PayAmount           float64          `gorm:"type:decimal(10,2);not null" json:"pay_amount"`
+	RefundedAmount      float64          `gorm:"type:decimal(10,2);not null;default:0" json:"refunded_amount"`
+	RefundPendingAmount float64          `gorm:"type:decimal(10,2);not null;default:0" json:"refund_pending_amount"`
 	DeliveryFee         float64          `gorm:"type:decimal(10,2);not null;default:0" json:"delivery_fee"`
 	RiderEarnings       float64          `gorm:"type:decimal(10,2);not null;default:0" json:"rider_earnings"`
 	PayStatus           uint8            `gorm:"not null;default:0" json:"pay_status"`

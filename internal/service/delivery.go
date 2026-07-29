@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
@@ -69,7 +70,8 @@ type DeliveryView struct {
 }
 
 type DeliveryService struct {
-	DB *gorm.DB
+	DB           *gorm.DB
+	InventorySvc *InventoryService
 }
 
 func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageSize int) ([]DeliveryView, int64, error) {
@@ -130,7 +132,11 @@ func (s *DeliveryService) ListForUser(accountID uint64, scope string, page, page
 	case "pending_confirm":
 		q = q.Where("status = ? AND user_confirmed = ?", model.DeliveryDelivered, 0)
 	case "history":
-		q = q.Where("status = ?", model.DeliveryConfirmed)
+		q = q.Where("status IN ?", []int{
+			int(model.DeliveryConfirmed),
+			int(model.DeliveryCancelled),
+			int(model.DeliveryException),
+		})
 	case "active", "delivering":
 		q = q.Where("status IN ?", []int{
 			int(model.DeliveryPendingAccept),
@@ -288,8 +294,108 @@ func (s *DeliveryService) MarkPrepared(merchantID, deliveryID uint64) (*Delivery
 	return s.getViewByID(deliveryID)
 }
 
-// ReportException ??????????/?????????????????????
-// ??????????? Shipping???????????
+// RejectPrepare 商家在备餐中拒绝出餐：取消配送、商品回退用户背包，并记录拒绝原因。
+func (s *DeliveryService) RejectPrepare(merchantID, deliveryID uint64, reason string) (*DeliveryView, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, fmt.Errorf("%w: 请填写拒绝原因", ErrDeliveryStatusInvalid)
+	}
+	reasonText := "商家拒单：" + reason
+
+	var d model.DeliveryOrder
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+			First(&d, deliveryID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrDeliveryNotFound
+			}
+			return err
+		}
+		// 仅备餐中（待接单且未出餐、未指派骑手）可拒
+		if d.Status != model.DeliveryPendingAccept || d.MerchantPrepared != 0 || d.RiderID != nil {
+			return ErrDeliveryStatusInvalid
+		}
+		if !deliveryBelongsToMerchant(tx, &d, merchantID) {
+			return ErrDeliveryForbidden
+		}
+
+		var usages []model.UserInventoryUsage
+		if err := query.NotDeleted(tx).
+			Where("delivery_order_id = ? AND status IN ?", deliveryID,
+				[]uint8{model.InventoryUsagePendingShip, model.InventoryUsageCancelPending}).
+			Find(&usages).Error; err != nil {
+			return err
+		}
+		if len(usages) == 0 && d.InventoryUsageID != nil {
+			var u model.UserInventoryUsage
+			if err := query.NotDeleted(tx).First(&u, *d.InventoryUsageID).Error; err == nil {
+				// 仅允许备餐中的 usage 回退，避免已取消/已完成重复入账
+				if u.Status == model.InventoryUsagePendingShip || u.Status == model.InventoryUsageCancelPending {
+					usages = append(usages, u)
+				}
+			}
+		}
+
+		for i := range usages {
+			u := usages[i]
+			if u.Status != model.InventoryUsagePendingShip && u.Status != model.InventoryUsageCancelPending {
+				continue
+			}
+			if s.InventorySvc == nil {
+				return fmt.Errorf("inventory service unavailable")
+			}
+			var inv model.UserInventory
+			if err := query.NotDeleted(tx).First(&inv, u.InventoryID).Error; err != nil {
+				return err
+			}
+			if err := s.InventorySvc.adjustQuantity(tx, u.AccountID, u.ProductID, inv.Spec,
+				int32(u.Quantity), u.SourceOrderID, &u.ID, model.InventoryEventUseCancel, &reasonText); err != nil {
+				return err
+			}
+			if err := restorePackageComponentStock(tx, &u); err != nil {
+				return err
+			}
+			if err := tx.Model(&u).Updates(map[string]interface{}{
+				"status":        model.InventoryUsageCancelled,
+				"cancel_reason": reasonText,
+				"remark":        reasonText,
+			}).Error; err != nil {
+				return err
+			}
+			// 来源购买单备注拒因，便于用户在「全部订单」查看
+			if u.SourceOrderID != nil {
+				_ = tx.Model(&model.Order{}).Where("id = ?", *u.SourceOrderID).
+					Update("remark", reasonText).Error
+			}
+		}
+
+		if err := tx.Model(&d).Updates(map[string]interface{}{
+			"status":           model.DeliveryCancelled,
+			"exception_reason": reasonText,
+		}).Error; err != nil {
+			return err
+		}
+
+		// 购买订单路径：回到待履约（已入背包），备注中保留拒单原因
+		if d.OrderID != nil {
+			_ = tx.Model(&model.Order{}).
+				Where("id = ? AND status IN ?", *d.OrderID,
+					[]uint8{model.OrderStatusPreparing, model.OrderStatusPendingShip}).
+				Updates(map[string]interface{}{
+					"status":                model.OrderStatusPendingFulfill,
+					"merchant_review_stage": model.MerchantReviewApproved,
+					"remark":                reasonText,
+				}).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.getViewByID(deliveryID)
+}
+
+// ReportException ?????????
 func (s *DeliveryService) ReportException(riderID, deliveryID uint64, reason string) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
