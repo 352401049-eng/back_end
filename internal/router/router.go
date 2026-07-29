@@ -225,6 +225,7 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.GET("/user/inventory", h.Inventory)
 	r.POST("/user/inventory/use-batch", h.UseInventoryBatch)
 	r.POST("/user/inventory/:id/use", h.UseInventory)
+	r.GET("/user/inventory/:id/refund-sources", h.ListInventoryRefundSources)
 	r.POST("/user/inventory/:id/refund", h.RefundInventory)
 	r.GET("/user/inventory/usages", h.ListInventoryUsages)
 	r.GET("/user/inventory/usages/:id", h.GetInventoryUsage)

@@ -14,18 +14,52 @@ import (
 )
 
 type RefundInventoryRequest struct {
-	Quantity uint32 `json:"quantity" example:"1"`
+	Quantity uint32                             `json:"quantity" example:"1"`
+	OrderID  *uint64                            `json:"order_id" example:"12"` // 单来源；不传则 FIFO
+	Items    []service.InventoryRefundItemInput `json:"items"`                 // 多来源精确退，优先于 quantity/order_id
+}
+
+// ListInventoryRefundSources godoc
+// @Summary      背包退款来源批次
+// @Description  同一商品不同成交价/渠道分批列出，供用户多选退款
+// @Tags         用户-背包
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "背包记录 ID"
+// @Success      200  {object}  response.Body{data=service.InventoryRefundSourcesView}
+// @Router       /user/inventory/{id}/refund-sources [get]
+func (h *UserHandler) ListInventoryRefundSources(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	inventoryID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "背包 ID 无效")
+		return
+	}
+	if h.OrderSvc == nil {
+		response.InternalError(c, "服务未配置")
+		return
+	}
+	view, err := h.OrderSvc.ListInventoryRefundSources(accountID, inventoryID)
+	if err != nil {
+		handleInventoryError(c, err)
+		return
+	}
+	response.OK(c, view)
 }
 
 // RefundInventory godoc
 // @Summary      背包未使用商品退款
-// @Description  扣减可使用库存并按来源订单退款；仅未使用数量可退
+// @Description  支持 items 多来源精确退，或 order_id/quantity 单来源，或 FIFO
 // @Tags         用户-背包
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
 // @Param        id    path  int                       true  "背包记录 ID"
-// @Param        body  body  RefundInventoryRequest    false "退款数量，默认全部剩余"
+// @Param        body  body  RefundInventoryRequest    false "退款数量与来源"
 // @Success      200   {object}  response.Body{data=service.InventoryRefundView}
 // @Router       /user/inventory/{id}/refund [post]
 func (h *UserHandler) RefundInventory(c *gin.Context) {
@@ -45,8 +79,17 @@ func (h *UserHandler) RefundInventory(c *gin.Context) {
 	}
 	var req RefundInventoryRequest
 	_ = c.ShouldBindJSON(&req)
+
+	items := make([]service.InventoryRefundItemInput, 0, len(req.Items))
+	for _, it := range req.Items {
+		if it.OrderID == 0 || it.Quantity == 0 {
+			continue
+		}
+		items = append(items, it)
+	}
+
 	qty := req.Quantity
-	if qty == 0 {
+	if len(items) == 0 && qty == 0 {
 		inv, err := h.InventorySvc.GetOwned(accountID, inventoryID)
 		if err != nil {
 			handleInventoryError(c, err)
@@ -58,7 +101,7 @@ func (h *UserHandler) RefundInventory(c *gin.Context) {
 			return
 		}
 	}
-	view, err := h.OrderSvc.RefundInventory(accountID, inventoryID, qty)
+	view, err := h.OrderSvc.RefundInventory(accountID, inventoryID, qty, req.OrderID, items)
 	if err != nil {
 		handleInventoryError(c, err)
 		return
