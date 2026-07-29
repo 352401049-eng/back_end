@@ -163,6 +163,44 @@ func OrderStatusText(status uint8) string {
 	}
 }
 
+// OrderStatusDisplayText 与 OrderStatusCode 对齐的用户可见文案。
+func OrderStatusDisplayText(status, reviewStage uint8) string {
+	switch OrderStatusCode(status, reviewStage) {
+	case "pending_pay":
+		return "待支付"
+	case "pending_group":
+		return "待成团"
+	case "pending_merchant":
+		return "待审核"
+	case "rejected":
+		return "订单已拒绝"
+	case "approved":
+		return "已入背包"
+	case "pending_use_merchant":
+		return "待库存确认"
+	case "pending_fulfill":
+		return "待履约"
+	case "preparing":
+		return "备餐中"
+	case "ready_pickup":
+		return "待自取"
+	case "pending_rider":
+		return "待骑手接单"
+	case "delivering":
+		return "配送中"
+	case "completed":
+		return "已完成"
+	case "cancelled":
+		return "已取消"
+	case "group_failed":
+		return "拼团失败"
+	case "closed":
+		return "已关闭"
+	default:
+		return OrderStatusText(status)
+	}
+}
+
 // OrderStatusCode 供小程序映射的复合状态码
 func OrderStatusCode(status, reviewStage uint8) string {
 	if status == OrderStatusPendingPay {

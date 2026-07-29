@@ -163,7 +163,7 @@ func (s *UserService) ListOrders(accountID uint64, page query.Page, status *uint
 	views := make([]OrderView, 0, len(orders))
 	for _, o := range orders {
 		views = append(views, OrderView{
-			Order: o, StatusText: model.OrderStatusText(o.Status),
+			Order: o, StatusText: model.OrderStatusDisplayText(o.Status, o.MerchantReviewStage),
 			StatusCode: model.OrderStatusCode(o.Status, o.MerchantReviewStage),
 		})
 	}
@@ -180,7 +180,7 @@ func (s *UserService) GetOrder(accountID, orderID uint64) (*OrderView, error) {
 		return nil, err
 	}
 	return &OrderView{
-		Order: order, StatusText: model.OrderStatusText(order.Status),
+		Order: order, StatusText: model.OrderStatusDisplayText(order.Status, order.MerchantReviewStage),
 		StatusCode: model.OrderStatusCode(order.Status, order.MerchantReviewStage),
 	}, nil
 }

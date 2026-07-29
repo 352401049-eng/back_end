@@ -1409,7 +1409,7 @@ func (s *OrderService) getOrderScoped(accountID, orderID uint64, merchantID *uin
 
 func toOrderView(o *model.Order) OrderView {
 	return OrderView{
-		Order: *o, StatusText: model.OrderStatusText(o.Status),
+		Order: *o, StatusText: model.OrderStatusDisplayText(o.Status, o.MerchantReviewStage),
 		StatusCode: model.OrderStatusCode(o.Status, o.MerchantReviewStage),
 	}
 }
