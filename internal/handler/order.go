@@ -78,7 +78,7 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 	var err error
 	if usePackage {
 		view, err = h.OrderSvc.CreatePackage(accountID, service.CreatePackageOrderInput{
-			ProductID: req.ProductID, MerchantID: req.MerchantID,
+			ProductID: req.ProductID, MerchantID: req.MerchantID, Quantity: req.Quantity,
 			PackageSelections: req.PackageSelections,
 			PurchaseType:      req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
 			ActivityProductID: req.ActivityProductID,

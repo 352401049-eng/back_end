@@ -24,6 +24,7 @@ type PackageSelectionInput struct {
 type CreatePackageOrderInput struct {
 	ProductID         uint64
 	MerchantID        uint64
+	Quantity          uint32
 	PackageSelections []PackageSelectionInput
 	PurchaseType      uint8
 	GroupBuyID        *uint64
@@ -65,6 +66,9 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 	if input.ProductID == 0 && (input.ActivityProductID == nil || *input.ActivityProductID == 0) {
 		return nil, fmt.Errorf("%w: 请指定套餐商品", ErrInvalidProductArg)
 	}
+	if input.Quantity == 0 {
+		input.Quantity = 1
+	}
 	if input.PurchaseType == 0 {
 		input.PurchaseType = model.PurchaseTypeSolo
 	}
@@ -100,7 +104,7 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			}
 			merchantHint = p.MerchantID
 		}
-		ctx, err := s.ActivitySvc.ResolveForOrder(accountID, *input.ActivityProductID, merchantHint, 1, input.PurchaseType)
+		ctx, err := s.ActivitySvc.ResolveForOrder(accountID, *input.ActivityProductID, merchantHint, input.Quantity, input.PurchaseType)
 		if err != nil {
 			return nil, err
 		}
@@ -168,15 +172,17 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 	if len(groups) == 0 {
 		return nil, fmt.Errorf("%w: 套餐未配置分组", ErrInvalidProductArg)
 	}
-	if pkg.Stock < 1 {
+	if actCtx == nil && pkg.Stock < input.Quantity {
 		return nil, ErrInsufficientStock
 	}
 
-	payAmount := roundMoney(unitPrice)
+	qty := input.Quantity
+	subtotal := roundMoney(unitPrice * float64(qty))
+	payAmount := subtotal
 	discountAmount := 0.0
 	couponCtx := OrderCouponContext{
 		AccountID: accountID, MerchantID: pkg.MerchantID, Product: pkg,
-		Subtotal: payAmount, PurchaseType: input.PurchaseType,
+		Subtotal: subtotal, PurchaseType: input.PurchaseType,
 	}
 	if input.UserCouponID != nil {
 		if s.CouponSvc == nil {
@@ -216,7 +222,7 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 				First(&apLock, *activityProductID).Error; err != nil {
 				return err
 			}
-			if err := s.ActivitySvc.checkUserLimits(tx, accountID, actCtx.ActivityProduct, 1); err != nil {
+			if err := s.ActivitySvc.checkUserLimits(tx, accountID, actCtx.ActivityProduct, qty); err != nil {
 				return err
 			}
 		}
@@ -255,12 +261,12 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			MerchantReviewStage: reviewStage,
 			DeliveryType:        deliveryType,
 			AddressSnapshot:     addrSnap,
-			TotalAmount:         roundMoney(unitPrice),
+			TotalAmount:         subtotal,
 			DiscountAmount:      discountAmount,
-		UserCouponID:        input.UserCouponID,
-		PayAmount:           payAmount,
-		PayStatus:           model.PayStatusUnpaid,
-		PayExpireAt:         payExpireAt,
+			UserCouponID:        input.UserCouponID,
+			PayAmount:           payAmount,
+			PayStatus:           model.PayStatusUnpaid,
+			PayExpireAt:         payExpireAt,
 			Remark:              input.Remark,
 		}
 		if err := tx.Create(&order).Error; err != nil {
@@ -284,7 +290,7 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			groupBuyTeamID = &teamID
 		}
 
-		// 套餐头行：qty=1、挂活动/拼团；组件行不含 activity_product_id，避免限购/回滚按组件份数放大
+		// 套餐头行：挂活动/拼团；组件在使用/商家确认时再扣，不占订单明细
 		pkgCover := pkg.CoverURL
 		pkgItem := model.OrderItem{
 			OrderID: order.ID, ProductID: pkg.ID,
@@ -292,17 +298,17 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			PurchaseType: input.PurchaseType,
 			GroupBuyID: groupBuyID, GroupBuyTeamID: groupBuyTeamID,
 			ProductName: pkg.Name, ProductImage: &pkgCover,
-			UnitPrice: unitPrice, Quantity: 1, Subtotal: roundMoney(unitPrice),
+			UnitPrice: unitPrice, Quantity: qty, Subtotal: subtotal,
 		}
 		if err := tx.Create(&pkgItem).Error; err != nil {
 			return err
 		}
-		if err := deductProductStockInTx(tx, pkg.ID, 1); err != nil {
+		if err := deductProductStockInTx(tx, pkg.ID, qty); err != nil {
 			return err
 		}
 
 		if s.ActivitySvc != nil && activityProductID != nil {
-			if err := s.ActivitySvc.CreditSoldInTx(tx, *activityProductID, 1); err != nil {
+			if err := s.ActivitySvc.CreditSoldInTx(tx, *activityProductID, qty); err != nil {
 				return err
 			}
 		}
