@@ -69,6 +69,9 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		ActivitySvc: activitySvc, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
 		PayTimeoutMinutes: cfg.Payment.PayTimeoutMinutes,
 	}
+	if wp, ok := payProvider.(*payment.WeChatProvider); ok {
+		wp.OnPaidInTx = orderSvc.AdvanceAfterPaidInTx
+	}
 	startGroupExpireWorker(orderSvc)
 	startPendingPayExpireWorker(orderSvc)
 	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc}
@@ -92,7 +95,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	productSvc := &service.ProductService{DB: db, CategorySvc: categorySvc}
 	riderSvc := &service.RiderApplicationService{DB: db}
 	adminHandler := &handler.AdminHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, RiderSvc: riderSvc, EarningSvc: riderEarningSvc}
-	merchantHandler := &handler.MerchantHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, CategorySvc: categorySvc}
+	merchantHandler := &handler.MerchantHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, CategorySvc: categorySvc, OrderSvc: orderSvc}
 	storeHandler := &handler.StoreHandler{
 		MerchantSvc: merchantSvc, ProductSvc: productSvc, OrderSvc: orderSvc,
 		CategorySvc: categorySvc, CouponSvc: couponSvc, ActivitySvc: activitySvc,

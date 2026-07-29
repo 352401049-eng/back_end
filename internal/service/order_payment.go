@@ -30,6 +30,11 @@ func (s *OrderService) settlePaymentInTx(tx *gorm.DB, orderID uint64, payAmount 
 // 若商家开启自动审核，则直接入背包；否则进入待商家审核。
 // 拼团单（PendingGroup）不被推进，由 tryCompleteGroup 成团后推进。
 func (s *OrderService) advanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
+	return s.AdvanceAfterPaidInTx(tx, orderID)
+}
+
+// AdvanceAfterPaidInTx 供支付渠道（微信回调）注入调用。
+func (s *OrderService) AdvanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
 	res := tx.Model(&model.Order{}).
 		Where("id = ? AND status = ?", orderID, model.OrderStatusPendingPay).
 		Updates(map[string]interface{}{
@@ -41,7 +46,8 @@ func (s *OrderService) advanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return nil
+		// 可能已是 PendingFulfill（幂等回调），仍尝试自动审核
+		return s.maybeAutoApproveInTx(tx, orderID)
 	}
 	return s.maybeAutoApproveInTx(tx, orderID)
 }
@@ -72,6 +78,32 @@ func (s *OrderService) maybeAutoApproveInTx(tx *gorm.DB, orderID uint64) error {
 		return err
 	}
 	return tx.Model(&order).Update("merchant_review_stage", model.MerchantReviewApproved).Error
+}
+
+// AutoApprovePendingForMerchant 商家开启自动审核后，将已有待审订单批量入背包。
+func (s *OrderService) AutoApprovePendingForMerchant(merchantID uint64) (int, error) {
+	if merchantID == 0 {
+		return 0, nil
+	}
+	var ids []uint64
+	if err := query.NotDeleted(s.DB.Model(&model.Order{})).
+		Where("merchant_id = ? AND status = ? AND merchant_review_stage = ?",
+			merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPending).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		err := s.DB.Transaction(func(tx *gorm.DB) error {
+			return s.maybeAutoApproveInTx(tx, id)
+		})
+		if err != nil {
+			log.Printf("[auto-approve] merchant %d order %d failed: %v", merchantID, id, err)
+			continue
+		}
+		n++
+	}
+	return n, nil
 }
 
 func (s *OrderService) refundPaymentInTx(tx *gorm.DB, orderID uint64) error {

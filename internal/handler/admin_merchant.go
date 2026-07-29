@@ -913,6 +913,7 @@ type MerchantHandler struct {
 	MerchantSvc *service.MerchantService
 	ProductSvc  *service.ProductService
 	CategorySvc *service.CategoryService
+	OrderSvc    *service.OrderService
 }
 
 // GetProfile godoc
@@ -967,6 +968,10 @@ func (h *MerchantHandler) UpdateProfile(c *gin.Context) {
 		admin := &AdminHandler{MerchantSvc: h.MerchantSvc}
 		admin.handleMerchantError(c, err)
 		return
+	}
+	// 开启自动审核时，把已有待审订单一并入背包
+	if h.OrderSvc != nil && req.AutoApprove != nil && *req.AutoApprove == 1 {
+		_, _ = h.OrderSvc.AutoApprovePendingForMerchant(profile.ID)
 	}
 	response.OK(c, updated)
 }

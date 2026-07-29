@@ -864,6 +864,9 @@ func (s *OrderService) MerchantReview(merchantID, orderID uint64, approve bool, 
 			}
 			if s.InventorySvc != nil {
 				if err := s.InventorySvc.RollbackOrderCredit(tx, orderID); err != nil {
+					if errors.Is(err, ErrInventoryRollback) {
+						return fmt.Errorf("%w: 商品已入背包或已使用，无法拒绝，请改点「通过」", ErrInventoryRollback)
+					}
 					return err
 				}
 			}

@@ -279,7 +279,13 @@ func handleOrderError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrDeliveryZoneInvalid):
 		response.BadRequest(c, err.Error())
 	case errors.Is(err, service.ErrInventoryRollback):
-		response.BadRequest(c, "库存已使用，无法取消订单")
+		msg := "库存已使用，无法取消/拒绝"
+		if raw := err.Error(); len(raw) > len(service.ErrInventoryRollback.Error()) {
+			if i := len(service.ErrInventoryRollback.Error()); i+2 < len(raw) && raw[i:i+2] == ": " {
+				msg = raw[i+2:]
+			}
+		}
+		response.BadRequest(c, msg)
 	case errors.Is(err, service.ErrProductNotFound):
 		response.Fail(c, 404, 404, "商品不存在")
 	case errors.Is(err, service.ErrUserCouponNotFound):

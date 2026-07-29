@@ -24,6 +24,8 @@ type WeChatProvider struct {
 	NotifyURL string
 	Enabled   bool
 	Client    *wechatv3.Client // V3 API 客户端
+	// OnPaidInTx 支付成功后推进订单状态（含自动审核入背包）。由 OrderService 注入。
+	OnPaidInTx func(tx *gorm.DB, orderID uint64) error
 }
 
 func (p *WeChatProvider) Name() string          { return "wechat" }
@@ -192,6 +194,7 @@ func (p *WeChatProvider) handlePaySuccess(data []byte) (*NotifyResult, error) {
 		return nil, fmt.Errorf("回调缺少 transaction_id")
 	}
 
+	var paidOrderID uint64
 	err = p.DB.Transaction(func(tx *gorm.DB) error {
 		// 1. 更新/创建支付流水
 		var pt model.PaymentTransaction
@@ -217,11 +220,8 @@ func (p *WeChatProvider) handlePaySuccess(data []byte) (*NotifyResult, error) {
 			}
 		} else if dbErr != nil {
 			return dbErr
-		} else {
+		} else if pt.Status != model.PayTxStatusPaid {
 			// 已有流水，更新状态
-			if pt.Status == model.PayTxStatusPaid {
-				return nil // 已处理
-			}
 			rawJSON := string(data)
 			if err := tx.Model(&pt).Updates(map[string]interface{}{
 				"transaction_id": txID,
@@ -241,6 +241,7 @@ func (p *WeChatProvider) handlePaySuccess(data []byte) (*NotifyResult, error) {
 			}
 			orderID = o.ID
 		}
+		paidOrderID = orderID
 		now := time.Now()
 		res := query.NotDeleted(tx.Model(&model.Order{})).
 			Where("id = ? AND pay_status = ?", orderID, model.PayStatusUnpaid).
@@ -263,17 +264,17 @@ func (p *WeChatProvider) handlePaySuccess(data []byte) (*NotifyResult, error) {
 			}
 		}
 
-		// 3. 推进订单状态：PendingPay → PendingFulfill（拼团单 PendingGroup 不动）
-		if err := tx.Model(&model.Order{}).
+		// 3. 推进订单状态 + 自动审核（由业务层注入，含 PendingPay→PendingFulfill）
+		if p.OnPaidInTx != nil {
+			return p.OnPaidInTx(tx, orderID)
+		}
+		return tx.Model(&model.Order{}).
 			Where("id = ? AND status = ?", orderID, model.OrderStatusPendingPay).
 			Updates(map[string]interface{}{
 				"status":                model.OrderStatusPendingFulfill,
 				"merchant_review_stage": model.MerchantReviewPending,
 				"pay_expire_at":         nil,
-			}).Error; err != nil {
-			return err
-		}
-		return nil
+			}).Error
 	})
 	if err != nil {
 		if isDuplicateKey(err) {
@@ -283,6 +284,7 @@ func (p *WeChatProvider) handlePaySuccess(data []byte) (*NotifyResult, error) {
 	}
 
 	return &NotifyResult{
+		OrderID: paidOrderID,
 		OrderNo: notify.OutTradeNo,
 		Paid:    true,
 		RawAck:  `{"code":"SUCCESS"}`,
@@ -487,14 +489,17 @@ func (p *WeChatProvider) retrieveAndSettlePayments() (*NotifyResult, error) {
 				if res.RowsAffected == 0 {
 					return nil
 				}
+				// 推进订单 + 自动审核
+				if p.OnPaidInTx != nil {
+					return p.OnPaidInTx(tx, o.ID)
+				}
 				// 仅直购待支付推进；拼团单保持 PendingGroup，等成团逻辑处理
-				tx.Model(&model.Order{}).Where("id = ? AND status = ?", o.ID, model.OrderStatusPendingPay).
+				return tx.Model(&model.Order{}).Where("id = ? AND status = ?", o.ID, model.OrderStatusPendingPay).
 					Updates(map[string]interface{}{
 						"status":                model.OrderStatusPendingFulfill,
 						"merchant_review_stage": model.MerchantReviewPending,
 						"pay_expire_at":         nil,
-					})
-				return nil
+					}).Error
 			})
 			log.Printf("[wechat retrieve] 订单 %s 支付成功，已处理", o.OrderNo)
 		}
