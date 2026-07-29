@@ -71,13 +71,31 @@ type MerchantDashboard struct {
 
 // SalesReport 销售额报表（含核销次数）。
 type SalesReport struct {
-	MerchantID        *uint64 `json:"merchant_id,omitempty"`
-	MerchantName      string  `json:"merchant_name,omitempty"`
-	ValidOrderCount   int64   `json:"valid_order_count"`
-	TotalSalesAmount  float64 `json:"total_sales_amount"`
-	VerificationCount int64   `json:"verification_count"`
-	StartDate         string  `json:"start_date,omitempty"`
-	EndDate           string  `json:"end_date,omitempty"`
+	MerchantID           *uint64              `json:"merchant_id,omitempty"`
+	MerchantName         string               `json:"merchant_name,omitempty"`
+	ValidOrderCount      int64                `json:"valid_order_count"`
+	TotalSalesAmount     float64              `json:"total_sales_amount"`
+	VerificationCount    int64                `json:"verification_count"`
+	CompletedItemCount   int64                `json:"completed_item_count"`
+	CompletedSalesAmount float64              `json:"completed_sales_amount"`
+	CompletedItems       []SalesCompletedItem `json:"completed_items"`
+	StartDate            string               `json:"start_date,omitempty"`
+	EndDate              string               `json:"end_date,omitempty"`
+}
+
+// SalesCompletedItem 日期范围内已确定收益的履约明细（自提核销完成 / 外卖确认收货）。
+type SalesCompletedItem struct {
+	UsageID      uint64  `json:"usage_id"`
+	ProductID    uint64  `json:"product_id"`
+	ProductName  string  `json:"product_name"`
+	Quantity     uint32  `json:"quantity"`
+	UnitPrice    float64 `json:"unit_price"`
+	Amount       float64 `json:"amount"`
+	FulfillType  string  `json:"fulfill_type"`
+	FulfillText  string  `json:"fulfill_text"`
+	CompletedAt  string  `json:"completed_at"`
+	PackageText  string  `json:"package_text,omitempty"`
+	IsPackage    bool    `json:"is_package"`
 }
 
 type SalesReportFilter struct {
@@ -212,8 +230,76 @@ func (s *DashboardService) SalesReport(filter SalesReportFilter) (*SalesReport, 
 		return nil, err
 	}
 
+	items, completedCount, completedAmount, err := s.listCompletedSalesItems(filter)
+	if err != nil {
+		return nil, err
+	}
+	report.CompletedItems = items
+	report.CompletedItemCount = completedCount
+	report.CompletedSalesAmount = roundMoney(completedAmount)
+
 	report.TotalSalesAmount = roundMoney(report.TotalSalesAmount)
 	return report, nil
+}
+
+func (s *DashboardService) listCompletedSalesItems(filter SalesReportFilter) ([]SalesCompletedItem, int64, float64, error) {
+	q := query.NotDeleted(s.freshDB().Model(&model.UserInventoryUsage{})).
+		Where("status = ?", model.InventoryUsageCompleted)
+	if filter.MerchantID != nil {
+		q = q.Where("merchant_id = ?", *filter.MerchantID)
+	}
+	if filter.StartDate != nil {
+		q = q.Where("updated_at >= ?", *filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		q = q.Where("updated_at < ?", *filter.EndDate)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, 0, err
+	}
+
+	var usages []model.UserInventoryUsage
+	if err := q.Preload("Product", "is_deleted = ?", model.NotDeleted).
+		Order("updated_at DESC").
+		Limit(500).
+		Find(&usages).Error; err != nil {
+		return nil, 0, 0, err
+	}
+
+	items := make([]SalesCompletedItem, 0, len(usages))
+	var sum float64
+	for _, u := range usages {
+		name := ""
+		unitPrice := 0.0
+		isPkg := false
+		if u.Product != nil {
+			name = u.Product.Name
+			unitPrice = u.Product.Price
+			isPkg = u.Product.ItemType == model.ProductItemTypePackage
+		}
+		amount := roundMoney(unitPrice * float64(u.Quantity))
+		sum += amount
+		fulfillType := "pickup"
+		fulfillText := "到店自提·已核销"
+		if u.DeliveryType == model.DeliveryTypeDelivery {
+			fulfillType = "delivery"
+			fulfillText = "骑手配送·已确认收货"
+		}
+		pkgText := ""
+		if isPkg {
+			pkgText = u.PackageSelections.SummaryText()
+		}
+		items = append(items, SalesCompletedItem{
+			UsageID: u.ID, ProductID: u.ProductID, ProductName: name,
+			Quantity: u.Quantity, UnitPrice: unitPrice, Amount: amount,
+			FulfillType: fulfillType, FulfillText: fulfillText,
+			CompletedAt: u.UpdatedAt.Format("2006-01-02 15:04"),
+			PackageText: pkgText, IsPackage: isPkg,
+		})
+	}
+	return items, total, sum, nil
 }
 
 func (s *DashboardService) validSalesOrderQuery(merchantID *uint64) *gorm.DB {

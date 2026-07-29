@@ -577,7 +577,7 @@ func (s *InventoryService) ListUsagesForAdmin(merchantID *uint64, status *uint8,
 	return views, total, nil
 }
 
-func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64) error {
+func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, packageUnits []PackageUnitInput) error {
 	var usage model.UserInventoryUsage
 	if err := query.NotDeleted(tx).
 		Preload("Product", "is_deleted = ?", model.NotDeleted).
@@ -588,7 +588,20 @@ func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64) er
 		"status": model.InventoryUsageCompleted,
 	}
 	if usage.Product != nil && usage.Product.ItemType == model.ProductItemTypePackage {
-		updates["package_select_status"] = model.PackageSelectPending
+		// 套餐必须先选配再核销完成：不允许进入 pending
+		if len(packageUnits) == 0 {
+			return ErrPackageSelectionRequired
+		}
+		units, err := normalizePackageUnits(packageUnits, nil, usage.Quantity)
+		if err != nil {
+			return err
+		}
+		snap, err := applyPackageUnitsInTx(tx, usage.ProductID, usage.Quantity, units)
+		if err != nil {
+			return err
+		}
+		updates["package_selections"] = snap
+		updates["package_select_status"] = model.PackageSelectDone
 	}
 	return tx.Model(&usage).
 		Where("status = ?", model.InventoryUsagePendingVerify).

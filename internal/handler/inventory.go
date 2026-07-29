@@ -38,6 +38,7 @@ type UseBatchInventoryRequest struct {
 
 type ConfirmPackageSelectionRequest struct {
 	PackageSelections []service.PackageSelectionInput `json:"package_selections"`
+	PackageUnits      []service.PackageUnitInput      `json:"package_units"`
 }
 
 // UseInventory godoc

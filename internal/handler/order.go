@@ -312,7 +312,8 @@ type ReviewOrderRequest struct {
 }
 
 type VerifyRequest struct {
-	Code string `json:"code" binding:"required" example:"V1a2b3c4d"`
+	Code         string                    `json:"code" binding:"required" example:"V1a2b3c4d"`
+	PackageUnits []service.PackageUnitInput `json:"package_units"`
 }
 
 // ListMerchantOrders godoc
@@ -503,7 +504,7 @@ func (h *MerchantOrderHandler) Verify(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	record, err := h.VerifySvc.Verify(*scope, operatorID, req.Code)
+	record, err := h.VerifySvc.Verify(*scope, operatorID, req.Code, req.PackageUnits)
 	if err != nil {
 		handleVerifyError(c, err)
 		return
@@ -521,6 +522,12 @@ func handleVerifyError(c *gin.Context, err error) {
 		response.BadRequest(c, "核销码已过期")
 	case errors.Is(err, service.ErrVerifyMerchantMismatch):
 		response.Fail(c, 403, 403, "非本店商品，无法核销")
+	case errors.Is(err, service.ErrPackageSelectionRequired):
+		response.BadRequest(c, "套餐请先完成选配再核销")
+	case errors.Is(err, service.ErrInsufficientStock):
+		response.BadRequest(c, "套餐内商品库存不足")
+	case errors.Is(err, service.ErrInvalidProductArg):
+		response.BadRequest(c, err.Error())
 	default:
 		response.InternalError(c, "核销失败")
 	}
@@ -653,7 +660,7 @@ func (h *MerchantOrderHandler) ConfirmPackageSelection(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	view, err := h.InventorySvc.ConfirmPackageSelection(*scope, id, req.PackageSelections)
+	view, err := h.InventorySvc.ConfirmPackageSelection(*scope, id, req.PackageSelections, req.PackageUnits)
 	if err != nil {
 		handleInventoryError(c, err)
 		return

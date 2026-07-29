@@ -63,7 +63,8 @@ func (s *VerificationService) LookupByCode(merchantID uint64, code string) (*Ver
 }
 
 // Verify 一次性核销：整单/整次使用记录完成，不支持部分数量。
-func (s *VerificationService) Verify(merchantID, operatorID uint64, code string) (*model.VerificationRecord, error) {
+// 套餐须传 packageUnits（份数=quantity），选配与核销在同一事务完成；未选配则不核销。
+func (s *VerificationService) Verify(merchantID, operatorID uint64, code string, packageUnits []PackageUnitInput) (*model.VerificationRecord, error) {
 	var vc model.VerificationCode
 	var record model.VerificationRecord
 
@@ -107,7 +108,7 @@ func (s *VerificationService) Verify(merchantID, operatorID uint64, code string)
 				return err
 			}
 			if s.InventorySvc != nil {
-				return s.InventorySvc.CompleteUsageByVerify(tx, usage.ID)
+				return s.InventorySvc.CompleteUsageByVerify(tx, usage.ID, packageUnits)
 			}
 			return tx.Model(&usage).Update("status", model.InventoryUsageCompleted).Error
 		}
@@ -134,6 +135,9 @@ func (s *VerificationService) Verify(merchantID, operatorID uint64, code string)
 			return nil, ErrVerifyMerchantMismatch
 		}
 		if errors.Is(err, ErrVerifyCodeNotFound) || errors.Is(err, ErrVerifyCodeUsed) || errors.Is(err, ErrVerifyCodeExpired) {
+			return nil, err
+		}
+		if errors.Is(err, ErrPackageSelectionRequired) || errors.Is(err, ErrInsufficientStock) || errors.Is(err, ErrInvalidProductArg) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("核销失败: %w", err)

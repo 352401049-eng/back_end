@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"yujixinjiang/backend/internal/model"
 	"yujixinjiang/backend/internal/query"
@@ -16,8 +17,80 @@ var (
 	ErrPickupNotAllowed         = errors.New("product does not allow pickup")
 )
 
+// PackageUnitInput 一份套餐的选配（核销时 quantity>1 需多份）。
+type PackageUnitInput struct {
+	PackageSelections []PackageSelectionInput `json:"package_selections"`
+}
+
+func normalizePackageUnits(units []PackageUnitInput, single []PackageSelectionInput, quantity uint32) ([][]PackageSelectionInput, error) {
+	if quantity == 0 {
+		quantity = 1
+	}
+	out := make([][]PackageSelectionInput, 0, quantity)
+	if len(units) > 0 {
+		if uint32(len(units)) != quantity {
+			return nil, fmt.Errorf("%w: 需为全部 %d 份套餐完成选配", ErrPackageSelectionRequired, quantity)
+		}
+		for _, u := range units {
+			out = append(out, u.PackageSelections)
+		}
+		return out, nil
+	}
+	if single == nil {
+		single = []PackageSelectionInput{}
+	}
+	// 兼容旧客户端：只传一份选配时，复制到每一份
+	for i := uint32(0); i < quantity; i++ {
+		out = append(out, single)
+	}
+	return out, nil
+}
+
+func applyPackageUnitsInTx(tx *gorm.DB, productID uint64, quantity uint32, units [][]PackageSelectionInput) (model.PackageSelectionSnapshot, error) {
+	if uint32(len(units)) != quantity {
+		return nil, fmt.Errorf("%w: 需为全部 %d 份套餐完成选配", ErrPackageSelectionRequired, quantity)
+	}
+	groups, err := (&ProductService{DB: tx}).LoadPackageGroups(productID)
+	if err != nil {
+		return nil, err
+	}
+	merged := make(model.PackageSelectionSnapshot, 0)
+	for i, sels := range units {
+		lines, err := ResolvePackageSelections(tx, productID, sels)
+		if err != nil {
+			return nil, err
+		}
+		if len(lines) == 0 {
+			return nil, ErrPackageSelectionRequired
+		}
+		for _, ln := range lines {
+			if err := deductProductStockInTx(tx, ln.Product.ID, ln.Qty); err != nil {
+				return nil, err
+			}
+		}
+		snap := buildPackageSelectionSnapshot(groups, sels, lines)
+		if quantity > 1 {
+			for j := range snap {
+				prefix := fmt.Sprintf("第%d份", i+1)
+				if snap[j].GroupName != "" {
+					snap[j].GroupName = prefix + "·" + snap[j].GroupName
+				} else {
+					snap[j].GroupName = prefix
+				}
+			}
+		}
+		merged = append(merged, snap...)
+	}
+	return merged, nil
+}
+
 // ConfirmPackageSelection 商家核销套餐后确认选配，并扣减组件库存。
-func (s *InventoryService) ConfirmPackageSelection(merchantID, usageID uint64, selections []PackageSelectionInput) (*InventoryUsageView, error) {
+// packageUnits 优先；为空时回退 packageSelections（并按 quantity 复制）。
+func (s *InventoryService) ConfirmPackageSelection(
+	merchantID, usageID uint64,
+	selections []PackageSelectionInput,
+	packageUnits []PackageUnitInput,
+) (*InventoryUsageView, error) {
 	var usage model.UserInventoryUsage
 	if err := query.NotDeleted(s.DB).
 		Where("id = ? AND merchant_id = ?", usageID, merchantID).
@@ -38,22 +111,15 @@ func (s *InventoryService) ConfirmPackageSelection(merchantID, usageID uint64, s
 		return nil, ErrInventoryUsageInvalid
 	}
 
-	lines, err := ResolvePackageSelections(s.DB, usage.ProductID, selections)
+	units, err := normalizePackageUnits(packageUnits, selections, usage.Quantity)
 	if err != nil {
 		return nil, err
 	}
-	groups, err := (&ProductService{DB: s.DB}).LoadPackageGroups(usage.ProductID)
-	if err != nil {
-		return nil, err
-	}
-	snap := buildPackageSelectionSnapshot(groups, selections, lines)
 
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
-		for _, ln := range lines {
-			qty := ln.Qty * usage.Quantity
-			if err := deductProductStockInTx(tx, ln.Product.ID, qty); err != nil {
-				return err
-			}
+		snap, err := applyPackageUnitsInTx(tx, usage.ProductID, usage.Quantity, units)
+		if err != nil {
+			return err
 		}
 		return tx.Model(&usage).Updates(map[string]interface{}{
 			"package_selections":    snap,
@@ -132,19 +198,35 @@ func restorePackageComponentStock(tx *gorm.DB, usage *model.UserInventoryUsage) 
 	if usage.PackageSelectStatus != model.PackageSelectDone && usage.PackageSelectStatus != model.PackageSelectUserSet {
 		return nil
 	}
+	expanded := packageSnapExpanded(usage.PackageSelections)
 	for _, g := range usage.PackageSelections {
 		for _, it := range g.Items {
-			qty := it.Qty * usage.Quantity
-			if qty == 0 {
+			rollbackQty := it.Qty
+			// 外卖用户选配 / 旧版商家一次选配：快照为单份结构，扣减时乘过 quantity
+			if !expanded && usage.PackageSelectStatus != model.PackageSelectDone {
+				rollbackQty = it.Qty * usage.Quantity
+			} else if !expanded && usage.Quantity > 1 {
+				rollbackQty = it.Qty * usage.Quantity
+			}
+			if rollbackQty == 0 {
 				continue
 			}
 			if err := tx.Model(&model.Product{}).Where("id = ?", it.ProductID).
-				Update("stock", gorm.Expr("stock + ?", qty)).Error; err != nil {
+				Update("stock", gorm.Expr("stock + ?", rollbackQty)).Error; err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func packageSnapExpanded(snap model.PackageSelectionSnapshot) bool {
+	for _, g := range snap {
+		if strings.HasPrefix(g.GroupName, "第") && strings.Contains(g.GroupName, "份") {
+			return true
+		}
+	}
+	return false
 }
 
 func enrichUsageViewPackage(view *InventoryUsageView) {
