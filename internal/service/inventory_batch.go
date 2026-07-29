@@ -85,6 +85,19 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 		loaded = append(loaded, loadedItem{inv: inv, qty: qty, sels: it.PackageSelections})
 	}
 
+	// 同一背包行可能拆成多份提交（每份独立套餐选配），需按合计校验库存
+	needByInv := map[uint64]uint32{}
+	qtyByInv := map[uint64]uint32{}
+	for _, item := range loaded {
+		needByInv[item.inv.ID] += item.qty
+		qtyByInv[item.inv.ID] = item.inv.Quantity
+	}
+	for id, need := range needByInv {
+		if qtyByInv[id] < need {
+			return nil, ErrInventoryInsufficient
+		}
+	}
+
 	var addrSnap *model.AddressSnapshot
 	if deliveryType == model.DeliveryTypeDelivery {
 		var addr model.UserAddress
