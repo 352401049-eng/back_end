@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -648,11 +649,17 @@ func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, pa
 		if err != nil {
 			return err
 		}
-		updates["package_selections"] = snap
+		raw, err := json.Marshal(snap)
+		if err != nil {
+			return err
+		}
+		updates["package_selections"] = json.RawMessage(raw)
 		updates["package_select_status"] = model.PackageSelectDone
 	}
-	return tx.Model(&usage).
-		Where("status = ?", model.InventoryUsagePendingVerify).
+	// 用纯 Model 更新，避免 Preload 的 Product 触发关联 upsert；
+	// map Updates 不会走字段 serializer:json，须自行 JSON 编码。
+	return query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
+		Where("id = ? AND status = ?", usageID, model.InventoryUsagePendingVerify).
 		Updates(updates).Error
 }
 

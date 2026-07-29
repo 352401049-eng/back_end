@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -121,10 +122,16 @@ func (s *InventoryService) ConfirmPackageSelection(
 		if err != nil {
 			return err
 		}
-		return tx.Model(&usage).Updates(map[string]interface{}{
-			"package_selections":    snap,
-			"package_select_status": model.PackageSelectDone,
-		}).Error
+		raw, err := json.Marshal(snap)
+		if err != nil {
+			return err
+		}
+		return query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
+			Where("id = ?", usageID).
+			Updates(map[string]interface{}{
+				"package_selections":    json.RawMessage(raw),
+				"package_select_status": model.PackageSelectDone,
+			}).Error
 	})
 	if err != nil {
 		return nil, err
