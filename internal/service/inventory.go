@@ -90,11 +90,7 @@ func (s *InventoryService) CreditFromOrder(tx *gorm.DB, accountID, orderID uint6
 func (s *InventoryService) RollbackOrderCredit(tx *gorm.DB, orderID uint64) error {
 	var logs []model.UserInventoryLog
 	if err := query.NotDeleted(tx).
-		Where("order_id = ? AND event_type IN ?", orderID, []string{
-			model.InventoryEventOrderCredit,
-			model.InventoryEventOrderRollback,
-			model.InventoryEventRefund,
-		}).
+		Where("order_id = ?", orderID).
 		Find(&logs).Error; err != nil {
 		return err
 	}
@@ -102,52 +98,81 @@ func (s *InventoryService) RollbackOrderCredit(tx *gorm.DB, orderID uint64) erro
 		return nil
 	}
 
-	credited := int32(0)
-	alreadyOut := int32(0)
-	var accountID uint64
+	type balKey struct {
+		AccountID uint64
+		ProductID uint64
+		Spec      string
+	}
+	type balVal struct {
+		net     int32
+		hadUse  bool
+		hadCred bool
+	}
+	bals := map[balKey]*balVal{}
+	keys := make([]balKey, 0)
 	for _, lg := range logs {
-		accountID = lg.AccountID
+		k := balKey{AccountID: lg.AccountID, ProductID: lg.ProductID, Spec: lg.Spec}
+		b, ok := bals[k]
+		if !ok {
+			b = &balVal{}
+			bals[k] = b
+			keys = append(keys, k)
+		}
+		b.net += lg.DeltaQty
 		switch lg.EventType {
 		case model.InventoryEventOrderCredit:
-			credited += lg.DeltaQty
-		case model.InventoryEventOrderRollback, model.InventoryEventRefund:
-			// delta 为负，取绝对值计入已扣减
-			if lg.DeltaQty < 0 {
-				alreadyOut += -lg.DeltaQty
-			} else {
-				alreadyOut += lg.DeltaQty
-			}
+			b.hadCred = true
+		case model.InventoryEventUse:
+			b.hadUse = true
 		}
 	}
-	remaining := credited - alreadyOut
-	if remaining <= 0 {
+
+	hadCred := false
+	stillInBag := int32(0)
+	for _, k := range keys {
+		b := bals[k]
+		if b.hadCred {
+			hadCred = true
+		}
+		if b.net > 0 {
+			stillInBag += b.net
+		}
+	}
+	// 已入账但净余额为 0：说明已使用完毕，无法整单回滚
+	if hadCred && stillInBag <= 0 {
+		return ErrInventoryRollback
+	}
+	if stillInBag <= 0 {
 		return nil
 	}
 
-	var items []model.OrderItem
-	if err := query.NotDeleted(tx).Where("order_id = ?", orderID).Find(&items).Error; err != nil {
-		return err
-	}
-	items = filterOutPackageProductItems(tx, orderID, items)
-	for _, it := range items {
-		spec := orderItemSpec(it)
-		rollbackQty := int32(it.Quantity)
-		if rollbackQty > remaining {
-			rollbackQty = remaining
-		}
-		if rollbackQty <= 0 {
+	for _, k := range keys {
+		need := bals[k].net
+		if need <= 0 {
 			continue
 		}
-		if err := s.adjustQuantity(tx, accountID, it.ProductID, spec, -rollbackQty, &orderID, nil, model.InventoryEventOrderRollback, strPtr("订单取消回滚")); err != nil {
+		var inv model.UserInventory
+		err := query.NotDeleted(tx).
+			Where("account_id = ? AND product_id = ? AND spec = ?", k.AccountID, k.ProductID, k.Spec).
+			First(&inv).Error
+		avail := int32(0)
+		if err == nil {
+			avail = int32(inv.Quantity)
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if avail < need {
+			// 流水上仍有余额但背包不足：部分已使用，无法整单回滚
+			return ErrInventoryRollback
+		}
+		oid := orderID
+		if err := s.adjustQuantity(tx, k.AccountID, k.ProductID, k.Spec, -need, &oid, nil,
+			model.InventoryEventOrderRollback, strPtr("订单取消回滚")); err != nil {
 			if errors.Is(err, ErrInventoryInsufficient) {
 				return ErrInventoryRollback
 			}
 			return err
 		}
-		remaining -= rollbackQty
-	}
-	if remaining > 0 {
-		return ErrInventoryRollback
 	}
 	return nil
 }

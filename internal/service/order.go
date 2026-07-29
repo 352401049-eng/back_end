@@ -622,6 +622,9 @@ func (s *OrderService) Cancel(accountID, orderID uint64) error {
 		}
 		if s.InventorySvc != nil {
 			if err := s.InventorySvc.RollbackOrderCredit(tx, orderID); err != nil {
+				if errors.Is(err, ErrInventoryRollback) {
+					return fmt.Errorf("%w: 商品已使用，无法取消", ErrInventoryRollback)
+				}
 				return err
 			}
 		}
@@ -736,6 +739,11 @@ func (s *OrderService) List(accountID uint64, merchantID *uint64, page, pageSize
 		pageSize = 10
 	}
 	offset := (page - 1) * pageSize
+
+	// 商家查看待审列表时：若已开自动审核，顺带修复卡在待审的脏数据（入背包并标已通过）
+	if merchantID != nil && statusCode == "pending_merchant" {
+		_, _ = s.AutoApprovePendingForMerchant(*merchantID)
+	}
 
 	q := query.NotDeleted(s.DB.Model(&model.Order{}))
 	if merchantID != nil {
@@ -865,7 +873,7 @@ func (s *OrderService) MerchantReview(merchantID, orderID uint64, approve bool, 
 			if s.InventorySvc != nil {
 				if err := s.InventorySvc.RollbackOrderCredit(tx, orderID); err != nil {
 					if errors.Is(err, ErrInventoryRollback) {
-						return fmt.Errorf("%w: 商品已入背包或已使用，无法拒绝，请改点「通过」", ErrInventoryRollback)
+						return fmt.Errorf("%w: 商品已使用无法拒绝退款；若只是卡在待审请点「通过」", ErrInventoryRollback)
 					}
 					return err
 				}
@@ -888,6 +896,12 @@ func (s *OrderService) MerchantReview(merchantID, orderID uint64, approve bool, 
 			}).Error
 		})
 		if err != nil {
+			// 自动审核店铺的脏待审单：拒绝失败时尝试直接标为已通过，移出审核队列
+			if errors.Is(err, ErrInventoryRollback) {
+				if healErr := s.healPendingIfAutoApprove(merchantID, orderID); healErr == nil {
+					return s.GetView(0, orderID, &merchantID)
+				}
+			}
 			return nil, err
 		}
 		return s.GetView(0, orderID, &merchantID)

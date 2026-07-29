@@ -80,6 +80,20 @@ func (s *OrderService) maybeAutoApproveInTx(tx *gorm.DB, orderID uint64) error {
 	return tx.Model(&order).Update("merchant_review_stage", model.MerchantReviewApproved).Error
 }
 
+// healPendingIfAutoApprove 自动审核店铺下，把卡死的待审单标为已通过（入背包幂等）。
+func (s *OrderService) healPendingIfAutoApprove(merchantID, orderID uint64) error {
+	var mp model.MerchantProfile
+	if err := query.NotDeleted(s.DB).Select("id", "auto_approve").First(&mp, merchantID).Error; err != nil {
+		return err
+	}
+	if mp.AutoApprove != 1 {
+		return fmt.Errorf("auto approve off")
+	}
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		return s.maybeAutoApproveInTx(tx, orderID)
+	})
+}
+
 // AutoApprovePendingForMerchant 商家开启自动审核后，将已有待审订单批量入背包。
 func (s *OrderService) AutoApprovePendingForMerchant(merchantID uint64) (int, error) {
 	if merchantID == 0 {
