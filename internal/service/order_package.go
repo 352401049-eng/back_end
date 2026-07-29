@@ -160,14 +160,14 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		}
 	}
 
-	lines, err := s.resolvePackageSelections(pkg.ID, input.PackageSelections)
+	// 购买时不选配：仅校验套餐已配置分组；组件库存在使用/商家确认时再扣
+	groups, err := (&ProductService{DB: s.DB}).LoadPackageGroups(pkg.ID)
 	if err != nil {
 		return nil, err
 	}
-	if len(lines) == 0 {
-		return nil, fmt.Errorf("%w: 请完成套餐选配", ErrInvalidProductArg)
+	if len(groups) == 0 {
+		return nil, fmt.Errorf("%w: 套餐未配置分组", ErrInvalidProductArg)
 	}
-	// 套餐本体库存：与活动库存取交后仍须扣减 package 商品自身 stock
 	if pkg.Stock < 1 {
 		return nil, ErrInsufficientStock
 	}
@@ -301,21 +301,6 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			return err
 		}
 
-		for _, ln := range lines {
-			item := model.OrderItem{
-				OrderID: order.ID, ProductID: ln.Product.ID,
-				PurchaseType: input.PurchaseType,
-				ProductName:  ln.Product.Name, ProductImage: &ln.Product.CoverURL,
-				UnitPrice: ln.UnitPrice, Quantity: ln.Qty, Subtotal: roundMoney(ln.LineTotal),
-			}
-			if err := tx.Create(&item).Error; err != nil {
-				return err
-			}
-			if err := deductProductStockInTx(tx, ln.Product.ID, ln.Qty); err != nil {
-				return err
-			}
-		}
-
 		if s.ActivitySvc != nil && activityProductID != nil {
 			if err := s.ActivitySvc.CreditSoldInTx(tx, *activityProductID, 1); err != nil {
 				return err
@@ -330,8 +315,17 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 	return s.GetView(accountID, order.ID, nil)
 }
 
+// ResolvePackageSelections 校验并展开套餐选配（使用时用户选 / 核销后商家确认）。
+func ResolvePackageSelections(db *gorm.DB, packageProductID uint64, selections []PackageSelectionInput) ([]resolvedPackageLine, error) {
+	return resolvePackageSelectionsWithDB(db, packageProductID, selections)
+}
+
 func (s *OrderService) resolvePackageSelections(packageProductID uint64, selections []PackageSelectionInput) ([]resolvedPackageLine, error) {
-	groups, err := (&ProductService{DB: s.DB}).LoadPackageGroups(packageProductID)
+	return resolvePackageSelectionsWithDB(s.DB, packageProductID, selections)
+}
+
+func resolvePackageSelectionsWithDB(db *gorm.DB, packageProductID uint64, selections []PackageSelectionInput) ([]resolvedPackageLine, error) {
+	groups, err := (&ProductService{DB: db}).LoadPackageGroups(packageProductID)
 	if err != nil {
 		return nil, err
 	}
@@ -418,6 +412,59 @@ func (s *OrderService) resolvePackageSelections(packageProductID uint64, selecti
 		}
 	}
 	return out, nil
+}
+
+// buildPackageSelectionSnapshot 将已解析的选配写入 usage 快照。
+func buildPackageSelectionSnapshot(groups []PackageGroupView, selections []PackageSelectionInput, lines []resolvedPackageLine) model.PackageSelectionSnapshot {
+	nameByID := map[uint64]string{}
+	for _, ln := range lines {
+		nameByID[ln.Product.ID] = ln.Product.Name
+	}
+	groupName := map[uint64]string{}
+	for _, g := range groups {
+		groupName[g.ID] = g.Name
+	}
+	out := make(model.PackageSelectionSnapshot, 0, len(selections)+len(groups))
+	// 固定组也写入快照，便于商家/骑手展示完整套餐内容
+	for _, g := range groups {
+		if g.GroupType == model.PackageGroupTypeFixed {
+			items := make([]model.PackageSelectionItemSnap, 0, len(g.Items))
+			for _, c := range g.Items {
+				qty := c.MaxQty
+				if qty == 0 {
+					qty = 1
+				}
+				items = append(items, model.PackageSelectionItemSnap{
+					ProductID: c.ProductID, ProductName: c.Name, Qty: qty,
+				})
+			}
+			out = append(out, model.PackageSelectionGroupSnap{
+				GroupID: g.ID, GroupName: g.Name, Items: items,
+			})
+			continue
+		}
+		var items []model.PackageSelectionItemSnap
+		for _, sel := range selections {
+			if sel.GroupID != g.ID {
+				continue
+			}
+			for _, it := range sel.Items {
+				if it.Qty == 0 {
+					continue
+				}
+				name := nameByID[it.ProductID]
+				items = append(items, model.PackageSelectionItemSnap{
+					ProductID: it.ProductID, ProductName: name, Qty: it.Qty,
+				})
+			}
+		}
+		if len(items) > 0 {
+			out = append(out, model.PackageSelectionGroupSnap{
+				GroupID: g.ID, GroupName: g.Name, Items: items,
+			})
+		}
+	}
+	return out
 }
 
 // cancelPackageChildrenInTx 兼容历史跨店父单：级联取消子单。

@@ -220,6 +220,7 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.GET("/user/coupons/applicable", ch.ListApplicable)
 	r.POST("/user/coupons/claim", ch.Claim)
 	r.GET("/user/inventory", h.Inventory)
+	r.POST("/user/inventory/use-batch", h.UseInventoryBatch)
 	r.POST("/user/inventory/:id/use", h.UseInventory)
 	r.GET("/user/inventory/usages", h.ListInventoryUsages)
 	r.GET("/user/inventory/usages/:id", h.GetInventoryUsage)
@@ -322,8 +323,10 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.POST("/verify", mo.Verify)
 	r.GET("/verification-records", mo.ListVerificationRecords)
 	r.GET("/inventory-usages", mo.ListInventoryUsages)
+	r.GET("/inventory-usages/package-pending", mo.ListPendingPackageSelections)
 	r.GET("/inventory-usages/:id", mo.GetInventoryUsage)
 	r.PATCH("/inventory-usages/:id/cancel-review", mo.ReviewCancelInventoryUsage)
+	r.POST("/inventory-usages/:id/confirm-package", mo.ConfirmPackageSelection)
 
 	r.GET("/coupons", ch.ListMerchant)
 	r.POST("/coupons", ch.CreateMerchant)

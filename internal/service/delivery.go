@@ -20,7 +20,7 @@ var (
 	ErrDeliveryStatusInvalid = errors.New("delivery status invalid")
 )
 
-// genPickupCode 生成 4 位数字出餐号，同一商家未完成配送单内不重复。
+// genPickupCode ?? 4 ???????????????????????
 func genPickupCode(tx *gorm.DB, merchantID uint64) string {
 	for i := 0; i < 8; i++ {
 		var b [2]byte
@@ -33,7 +33,7 @@ func genPickupCode(tx *gorm.DB, merchantID uint64) string {
 			continue
 		}
 		candidate := fmt.Sprintf("%04d", code)
-		// 校验同一商家已有配送单中不重复
+		// ???????????????
 		var existing int64
 		tx.Model(&model.DeliveryOrder{}).
 			Where("pickup_code = ? AND is_deleted = ? AND "+
@@ -53,9 +53,19 @@ type CompleteDeliveryInput struct {
 	Photos []string
 }
 
+type DeliveryUsageLine struct {
+	UsageID              uint64 `json:"usage_id"`
+	ProductID            uint64 `json:"product_id"`
+	ProductName          string `json:"product_name"`
+	Quantity             uint32 `json:"quantity"`
+	IsPackage            bool   `json:"is_package"`
+	PackageSelectionText string `json:"package_selection_text,omitempty"`
+}
+
 type DeliveryView struct {
 	model.DeliveryOrder
-	StatusText string `json:"status_text"`
+	StatusText string              `json:"status_text"`
+	UsageItems []DeliveryUsageLine `json:"usage_items,omitempty"`
 }
 
 type DeliveryService struct {
@@ -74,7 +84,7 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{}))
 	switch scope {
 	case "pending":
-		// 仅展示商家已确认出餐的订单，备餐中(merchant_prepared=0)骑手不可见
+		// ??????????????????merchant_prepared=0)??????
 		q = q.Where("status = ? AND rider_id IS NULL AND merchant_prepared = 1", model.DeliveryPendingAccept)
 	case "active":
 		q = q.Where("rider_id = ? AND status IN ?", riderID, []int{
@@ -102,10 +112,10 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
-	return toDeliveryViews(list), total, nil
+	return toDeliveryViews(s.DB, list), total, nil
 }
 
-// ListForUser scope: active=配送中 pending_confirm=待确认收货 history=已完成
+// ListForUser scope: active=??? pending_confirm=??????history=????
 func (s *DeliveryService) ListForUser(accountID uint64, scope string, page, pageSize int) ([]DeliveryView, int64, error) {
 	if page < 1 {
 		page = 1
@@ -145,7 +155,7 @@ func (s *DeliveryService) ListForUser(accountID uint64, scope string, page, page
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
-	return toDeliveryViews(list), total, nil
+	return toDeliveryViews(s.DB, list), total, nil
 }
 
 func (s *DeliveryService) GetForUser(accountID, deliveryID uint64) (*DeliveryView, error) {
@@ -161,7 +171,7 @@ func (s *DeliveryService) GetForUser(accountID, deliveryID uint64) (*DeliveryVie
 		}
 		return nil, err
 	}
-	view := toDeliveryView(d)
+	view := toDeliveryView(s.DB, d)
 	return &view, nil
 }
 
@@ -174,12 +184,25 @@ func (s *DeliveryService) Accept(riderID, deliveryID uint64) (*DeliveryView, err
 			}
 			return err
 		}
-		if d.InventoryUsageID != nil {
-			var usage model.UserInventoryUsage
-			if err := query.NotDeleted(tx).First(&usage, *d.InventoryUsageID).Error; err == nil {
+		if d.InventoryUsageID != nil || d.OrderID == nil {
+			// ???????? usage ?????? usage ???????????????
+			var active int64
+			_ = query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
+				Where("delivery_order_id = ? AND status NOT IN ?", d.ID, []uint8{
+					model.InventoryUsageCancelled, model.InventoryUsageCancelPending,
+				}).Count(&active)
+			if active == 0 && d.InventoryUsageID != nil {
+				var usage model.UserInventoryUsage
+				if err := query.NotDeleted(tx).First(&usage, *d.InventoryUsageID).Error; err != nil {
+					return ErrDeliveryNotFound
+				}
 				if usage.Status == model.InventoryUsageCancelPending || usage.Status == model.InventoryUsageCancelled {
 					return ErrDeliveryNotFound
 				}
+				active = 1
+			}
+			if active == 0 && d.OrderID == nil {
+				return ErrDeliveryNotFound
 			}
 		}
 		now := time.Now()
@@ -208,7 +231,7 @@ func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, erro
 		return nil, err
 	}
 	if d.Status != model.DeliveryAccepted || d.MerchantPrepared != 1 {
-		// 商家未出餐不可开始配送（保险校验，pending 列表已过滤）
+		// ?????????????????pending ??????
 		return nil, ErrDeliveryStatusInvalid
 	}
 	now := time.Now()
@@ -224,8 +247,8 @@ func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, erro
 	return s.getViewByID(deliveryID)
 }
 
-// MarkPrepared 商家确认出餐：备餐中(merchant_prepared=0) -> 已出餐(1)，
-// 并把关联订单从 Preparing 推进到 PendingShip(待骑手接单)。
+// MarkPrepared ??????????(merchant_prepared=0) -> ????1)??
+// ????????Preparing ????PendingShip(????????
 func (s *DeliveryService) MarkPrepared(merchantID, deliveryID uint64) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
@@ -237,10 +260,10 @@ func (s *DeliveryService) MarkPrepared(merchantID, deliveryID uint64) (*Delivery
 			return err
 		}
 		if d.Status != model.DeliveryPendingAccept || d.MerchantPrepared != 0 {
-			// 仅备餐中(merchant_prepared=0)且未被接单的配送单可确认出餐
+			// ????(merchant_prepared=0)???????????????
 			return ErrDeliveryStatusInvalid
 		}
-		// 校验商家归属
+		// ??????
 		if !deliveryBelongsToMerchant(tx, &d, merchantID) {
 			return ErrDeliveryForbidden
 		}
@@ -251,7 +274,7 @@ func (s *DeliveryService) MarkPrepared(merchantID, deliveryID uint64) (*Delivery
 		}).Error; err != nil {
 			return err
 		}
-		// 关联订单从备餐中推进到待骑手接单
+		// ????????????????
 		if d.OrderID != nil {
 			return tx.Model(&model.Order{}).
 				Where("id = ? AND status = ?", *d.OrderID, model.OrderStatusPreparing).
@@ -265,8 +288,8 @@ func (s *DeliveryService) MarkPrepared(merchantID, deliveryID uint64) (*Delivery
 	return s.getViewByID(deliveryID)
 }
 
-// ReportException 骑手上报异常：已接单/配送中可上报，置为异常状态等管理员处理。
-// 订单状态保持不变（停在 Shipping），不回滚库存/券。
+// ReportException ??????????/?????????????????????
+// ??????????? Shipping???????????
 func (s *DeliveryService) ReportException(riderID, deliveryID uint64, reason string) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
@@ -292,7 +315,7 @@ func (s *DeliveryService) ReportException(riderID, deliveryID uint64, reason str
 	return s.getViewByID(deliveryID)
 }
 
-// deliveryBelongsToMerchant 校验配送单归属某商家（经 Order.MerchantID 或 InventoryUsage.MerchantID）。
+// deliveryBelongsToMerchant ?????????????Order.MerchantID ??InventoryUsage.MerchantID???
 func deliveryBelongsToMerchant(tx *gorm.DB, d *model.DeliveryOrder, merchantID uint64) bool {
 	if d.OrderID != nil {
 		var o model.Order
@@ -349,7 +372,7 @@ func (s *DeliveryService) Complete(riderID, deliveryID uint64, input CompleteDel
 func (s *DeliveryService) ConfirmReceipt(accountID, deliveryID uint64) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		// FOR UPDATE 行锁，防止并发确认收货导致重复入账
+		// FOR UPDATE ??????????????????
 		q := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).Where("id = ? AND status = ?", deliveryID, model.DeliveryDelivered)
 		if err := q.First(&d).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -372,15 +395,19 @@ func (s *DeliveryService) ConfirmReceipt(accountID, deliveryID uint64) (*Deliver
 				return err
 			}
 		}
+		// ?????????????? usage???????
+		usageQ := tx.Model(&model.UserInventoryUsage{}).
+			Where("status = ?", model.InventoryUsagePendingShip)
 		if d.InventoryUsageID != nil {
-			if err := tx.Model(&model.UserInventoryUsage{}).
-				Where("id = ? AND status = ?", *d.InventoryUsageID, model.InventoryUsagePendingShip).
-				Update("status", model.InventoryUsageCompleted).Error; err != nil {
-				return err
-			}
+			usageQ = usageQ.Where("delivery_order_id = ? OR id = ?", d.ID, *d.InventoryUsageID)
+		} else {
+			usageQ = usageQ.Where("delivery_order_id = ?", d.ID)
 		}
-		// 骑手收益入账：用户确认收货时，按 delivery_order 快照金额创建收益记录
-		// 仅当有骑手接单且收益金额 > 0 时入账；异常单/取消单不进此分支
+		if err := usageQ.Update("status", model.InventoryUsageCompleted).Error; err != nil {
+			return err
+		}
+		// ???????????????? delivery_order ??????????
+		// ???????????? > 0 ????????????????
 		if d.RiderID != nil && d.RiderEarnings > 0 {
 			merchantID := resolveDeliveryMerchantIDInTx(tx, &d)
 			earning := model.RiderEarning{
@@ -418,7 +445,7 @@ func (s *DeliveryService) ConfirmReceiptByOrderID(accountID, orderID uint64) (*D
 	return s.ConfirmReceipt(accountID, d.ID)
 }
 
-// resolveDeliveryMerchantIDInTx 从关联的 order 或 inventory_usage 解析商家 ID（delivery_order 本身无 merchant_id）。
+// resolveDeliveryMerchantIDInTx ???? order ??inventory_usage ???? ID?delivery_order ????merchant_id???
 func resolveDeliveryMerchantIDInTx(tx *gorm.DB, d *model.DeliveryOrder) uint64 {
 	if d.OrderID != nil {
 		var o model.Order
@@ -446,8 +473,9 @@ func (s *DeliveryService) CreateForOrder(orderID uint64) (*model.DeliveryOrder, 
 func (s *DeliveryService) userDeliveryQuery(accountID uint64) *gorm.DB {
 	return query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).Where(
 		`order_id IN (SELECT id FROM `+"`order`"+` WHERE account_id = ? AND is_deleted = 0)
-		OR inventory_usage_id IN (SELECT id FROM user_inventory_usage WHERE account_id = ? AND is_deleted = 0)`,
-		accountID, accountID,
+		OR inventory_usage_id IN (SELECT id FROM user_inventory_usage WHERE account_id = ? AND is_deleted = 0)
+		OR id IN (SELECT delivery_order_id FROM user_inventory_usage WHERE account_id = ? AND delivery_order_id IS NOT NULL AND is_deleted = 0)`,
+		accountID, accountID, accountID,
 	)
 }
 
@@ -462,20 +490,31 @@ func (s *DeliveryService) assertDeliveryOwner(tx *gorm.DB, accountID uint64, d *
 	if d.InventoryUsageID != nil {
 		var usage model.UserInventoryUsage
 		if err := query.NotDeleted(tx).Where("id = ? AND account_id = ?", *d.InventoryUsageID, accountID).First(&usage).Error; err != nil {
-			return ErrDeliveryForbidden
+			// ??????? usage ????
+			var n int64
+			if err2 := query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
+				Where("delivery_order_id = ? AND account_id = ?", d.ID, accountID).Count(&n).Error; err2 != nil || n == 0 {
+				return ErrDeliveryForbidden
+			}
+			return nil
 		}
 		return nil
 	}
-	return ErrDeliveryForbidden
+	var n int64
+	if err := query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
+		Where("delivery_order_id = ? AND account_id = ?", d.ID, accountID).Count(&n).Error; err != nil || n == 0 {
+		return ErrDeliveryForbidden
+	}
+	return nil
 }
 
-// ListPreparingForMerchant 商家端查备餐中的配送单（merchant_prepared=0），
-// 含购买订单路径（order_id）和背包使用路径（inventory_usage_id）。
+// ListPreparingForMerchant ????????????merchant_prepared=0??
+// ????????order_id?????????inventory_usage_id???
 func (s *DeliveryService) ListPreparingForMerchant(merchantID uint64, page, pageSize int) ([]DeliveryView, int64, error) {
 	return s.listDeliveriesForMerchant(merchantID, page, pageSize, 0)
 }
 
-// ListPreparedForMerchant 商家端查已出餐待接单的配送单（merchant_prepared=1, status=PendingAccept）。
+// ListPreparedForMerchant ???????????????merchant_prepared=1, status=PendingAccept???
 func (s *DeliveryService) ListPreparedForMerchant(merchantID uint64, page, pageSize int) ([]DeliveryView, int64, error) {
 	return s.listDeliveriesForMerchant(merchantID, page, pageSize, 1)
 }
@@ -493,8 +532,9 @@ func (s *DeliveryService) listDeliveriesForMerchant(merchantID uint64, page, pag
 		Where("status = ? AND merchant_prepared = ?", model.DeliveryPendingAccept, merchantPrepared).
 		Where(
 			"EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.merchant_id = ?) OR "+
-				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?)",
-			merchantID, merchantID,
+				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?) OR "+
+				"EXISTS (SELECT 1 FROM user_inventory_usage u2 WHERE u2.delivery_order_id = delivery_order.id AND u2.is_deleted = 0 AND u2.merchant_id = ?)",
+			merchantID, merchantID, merchantID,
 		)
 
 	var total int64
@@ -509,7 +549,7 @@ func (s *DeliveryService) listDeliveriesForMerchant(merchantID uint64, page, pag
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
-	return toDeliveryViews(list), total, nil
+	return toDeliveryViews(s.DB, list), total, nil
 }
 
 func (s *DeliveryService) getViewByID(id uint64) (*DeliveryView, error) {
@@ -517,11 +557,11 @@ func (s *DeliveryService) getViewByID(id uint64) (*DeliveryView, error) {
 	if err != nil {
 		return nil, err
 	}
-	view := toDeliveryView(*d)
+	view := toDeliveryView(s.DB, *d)
 	return &view, nil
 }
 
-// GetForRider 骑手查单条配送详情（含商家信息），校验骑手归属或待接单可查。
+// GetForRider ???????????????????????????????
 func (s *DeliveryService) GetForRider(riderID, deliveryID uint64) (*DeliveryView, error) {
 	d, err := s.getByID(deliveryID)
 	if err != nil {
@@ -530,11 +570,11 @@ func (s *DeliveryService) GetForRider(riderID, deliveryID uint64) (*DeliveryView
 		}
 		return nil, err
 	}
-	// 待接单(无 rider_id)任何骑手可查；已接单仅本人可查
+	// ??????rider_id)????????????????
 	if d.RiderID != nil && *d.RiderID != riderID {
 		return nil, ErrDeliveryForbidden
 	}
-	view := toDeliveryView(*d)
+	view := toDeliveryView(s.DB, *d)
 	return &view, nil
 }
 
@@ -553,22 +593,65 @@ func (s *DeliveryService) getByID(id uint64) (*model.DeliveryOrder, error) {
 	return &d, nil
 }
 
-func toDeliveryViews(list []model.DeliveryOrder) []DeliveryView {
+func toDeliveryViews(db *gorm.DB, list []model.DeliveryOrder) []DeliveryView {
 	views := make([]DeliveryView, 0, len(list))
 	for i := range list {
-		views = append(views, toDeliveryView(list[i]))
+		views = append(views, toDeliveryView(db, list[i]))
 	}
 	return views
 }
 
-func toDeliveryView(d model.DeliveryOrder) DeliveryView {
-	return DeliveryView{
+func toDeliveryView(db *gorm.DB, d model.DeliveryOrder) DeliveryView {
+	view := DeliveryView{
 		DeliveryOrder: d,
 		StatusText:    model.DeliveryStatusText(d.Status),
 	}
+	attachDeliveryUsageItems(db, &view)
+	return view
 }
 
-// ListForAdmin 全平台或按商家筛选配送单。
+func attachDeliveryUsageItems(db *gorm.DB, view *DeliveryView) {
+	if db == nil || view == nil {
+		return
+	}
+	var usages []model.UserInventoryUsage
+	q := query.NotDeleted(db).
+		Preload("Product", "is_deleted = ?", model.NotDeleted).
+		Where("delivery_order_id = ?", view.ID).
+		Order("id ASC")
+	if err := q.Find(&usages).Error; err != nil || len(usages) == 0 {
+		// ???? inventory_usage_id ????
+		if view.InventoryUsageID != nil {
+			var u model.UserInventoryUsage
+			if err := query.NotDeleted(db).
+				Preload("Product", "is_deleted = ?", model.NotDeleted).
+				First(&u, *view.InventoryUsageID).Error; err == nil {
+				usages = []model.UserInventoryUsage{u}
+			}
+		}
+	}
+	if len(usages) == 0 {
+		return
+	}
+	lines := make([]DeliveryUsageLine, 0, len(usages))
+	for i := range usages {
+		u := usages[i]
+		name := ""
+		isPkg := false
+		if u.Product != nil {
+			name = u.Product.Name
+			isPkg = u.Product.ItemType == model.ProductItemTypePackage
+		}
+		lines = append(lines, DeliveryUsageLine{
+			UsageID: u.ID, ProductID: u.ProductID, ProductName: name,
+			Quantity: u.Quantity, IsPackage: isPkg,
+			PackageSelectionText: u.PackageSelections.SummaryText(),
+		})
+	}
+	view.UsageItems = lines
+}
+
+// ListForAdmin ??????????????
 func (s *DeliveryService) ListForAdmin(merchantID *uint64, status *uint8, page, pageSize int) ([]DeliveryView, int64, error) {
 	if page < 1 {
 		page = 1
@@ -601,5 +684,5 @@ func (s *DeliveryService) ListForAdmin(merchantID *uint64, status *uint8, page, 
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
-	return toDeliveryViews(list), total, nil
+	return toDeliveryViews(s.DB, list), total, nil
 }

@@ -607,6 +607,60 @@ func (h *MerchantOrderHandler) GetInventoryUsage(c *gin.Context) {
 	response.OK(c, view)
 }
 
+// ListPendingPackageSelections godoc
+// @Summary      待套餐选配列表（核销后）
+// @Tags         商家端-背包
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  response.Body{data=query.PageResult}
+// @Router       /merchant/inventory-usages/package-pending [get]
+func (h *MerchantOrderHandler) ListPendingPackageSelections(c *gin.Context) {
+	scope, err := h.merchantScope(c)
+	if err != nil {
+		return
+	}
+	page, pageSize := parsePage(c)
+	list, total, err := h.InventorySvc.ListPendingPackageSelections(*scope, page, pageSize)
+	if err != nil {
+		response.InternalError(c, "获取待选配列表失败")
+		return
+	}
+	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
+}
+
+// ConfirmPackageSelection godoc
+// @Summary      确认套餐选配（核销后）
+// @Tags         商家端-背包
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int  true  "使用记录 ID"
+// @Param        body  body  ConfirmPackageSelectionRequest  true  "选配"
+// @Success      200   {object}  response.Body{data=service.InventoryUsageView}
+// @Router       /merchant/inventory-usages/{id}/confirm-package [post]
+func (h *MerchantOrderHandler) ConfirmPackageSelection(c *gin.Context) {
+	scope, err := h.merchantScope(c)
+	if err != nil {
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	var req ConfirmPackageSelectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	view, err := h.InventorySvc.ConfirmPackageSelection(*scope, id, req.PackageSelections)
+	if err != nil {
+		handleInventoryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
 // ReviewCancelInventoryUsage godoc
 // @Summary      审核背包使用取消申请
 // @Description  骑手配送单用户申请取消后，商家同意则回滚库存并取消配送

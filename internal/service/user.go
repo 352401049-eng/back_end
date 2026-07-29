@@ -255,14 +255,43 @@ func (s *UserService) ListInventory(accountID uint64) (map[string]interface{}, e
 	if err := query.NotDeleted(s.DB).Preload("Product", "is_deleted = ?", model.NotDeleted).Where("account_id = ? AND quantity > 0", accountID).Order("updated_at DESC").Find(&items).Error; err != nil {
 		return nil, err
 	}
+	merchantIDs := make([]uint64, 0, len(items))
+	seen := map[uint64]struct{}{}
+	for _, it := range items {
+		mid := it.Product.MerchantID
+		if mid == 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		merchantIDs = append(merchantIDs, mid)
+	}
+	shopNames := map[uint64]string{}
+	if len(merchantIDs) > 0 {
+		var merchants []model.MerchantProfile
+		_ = query.NotDeleted(s.DB).Select("id", "shop_name").Where("id IN ?", merchantIDs).Find(&merchants)
+		for _, m := range merchants {
+			shopNames[m.ID] = m.ShopName
+		}
+	}
 	var totalQty int64
+	list := make([]map[string]interface{}, 0, len(items))
 	for _, it := range items {
 		totalQty += int64(it.Quantity)
+		mid := it.Product.MerchantID
+		list = append(list, map[string]interface{}{
+			"id": it.ID, "account_id": it.AccountID, "product_id": it.ProductID,
+			"spec": it.Spec, "quantity": it.Quantity, "last_order_id": it.LastOrderID,
+			"created_at": it.CreatedAt, "updated_at": it.UpdatedAt,
+			"product": it.Product, "merchant_id": mid, "shop_name": shopNames[mid],
+		})
 	}
 	return map[string]interface{}{
 		"kind_count": len(items),
 		"total_qty":  totalQty,
-		"list":       items,
+		"list":       list,
 	}, nil
 }
 

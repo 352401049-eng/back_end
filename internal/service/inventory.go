@@ -36,13 +36,17 @@ type UseInventoryInput struct {
 	DeliveryLatitude  *float64
 	DeliveryLongitude *float64
 	Remark            *string
+	PackageSelections []PackageSelectionInput
 }
 
 type InventoryUsageView struct {
 	model.UserInventoryUsage
-	StatusText string      `json:"status_text"`
-	VerifyCode *string     `json:"verify_code,omitempty"`
-	Buyer      *BuyerBrief `json:"buyer,omitempty"`
+	StatusText               string  `json:"status_text"`
+	VerifyCode               *string `json:"verify_code,omitempty"`
+	Buyer                    *BuyerBrief `json:"buyer,omitempty"`
+	IsPackage                bool    `json:"is_package"`
+	PackageSelectStatusText  string  `json:"package_select_status_text,omitempty"`
+	PackageSelectionText     string  `json:"package_selection_text,omitempty"`
 }
 
 func (s *InventoryService) CreditFromOrder(tx *gorm.DB, accountID, orderID uint64, items []model.OrderItem) error {
@@ -154,12 +158,8 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 		return nil, ErrProductNotFound
 	}
 	// 虚拟商品（如电影票）只能到店核销，不支持骑手配送
-	if inv.Product.ItemType == model.ProductItemTypeVirtual && deliveryType == model.DeliveryTypeDelivery {
-		return nil, ErrVirtualNotDeliverable
-	}
-	// 商品关闭「支持骑手配送」后禁止配送履约（自取/到店核销仍可用）
-	if deliveryType == model.DeliveryTypeDelivery && inv.Product.AllowDelivery != 1 {
-		return nil, ErrDeliveryNotAllowed
+	if err := validateFulfillmentFlags(inv.Product, deliveryType); err != nil {
+		return nil, err
 	}
 
 	var addrSnap *model.AddressSnapshot
@@ -195,11 +195,22 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			return err
 		}
 
+		var snap model.PackageSelectionSnapshot
+		pkgStatus := uint8(model.PackageSelectNone)
+		if deliveryType == model.DeliveryTypeDelivery && inv.Product.ItemType == model.ProductItemTypePackage {
+			var err error
+			snap, pkgStatus, err = s.applyPackageSelectionsForDelivery(tx, inv.Product, input.Quantity, input.PackageSelections)
+			if err != nil {
+				return err
+			}
+		}
+
 		usage = model.UserInventoryUsage{
 			AccountID: accountID, InventoryID: inv.ID, ProductID: inv.ProductID,
 			MerchantID: inv.Product.MerchantID, SourceOrderID: inv.LastOrderID,
 			Quantity: input.Quantity, DeliveryType: deliveryType,
 			AddressSnapshot: addrSnap, Status: status, Remark: input.Remark,
+			PackageSelections: snap, PackageSelectStatus: pkgStatus,
 		}
 		if err := tx.Create(&usage).Error; err != nil {
 			return err
@@ -256,6 +267,8 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 		StatusText:         model.InventoryUsageStatusText(usage.Status),
 		VerifyCode:         verifyCode,
 	}
+	view.Product = &inv.Product
+	enrichUsageViewPackage(view)
 	return view, nil
 }
 
@@ -363,10 +376,34 @@ func (s *InventoryService) finalizeCancelUsage(accountID uint64, usage *model.Us
 		}
 
 		if usage.DeliveryOrderID != nil {
-			if err := tx.Model(&model.DeliveryOrder{}).
-				Where("id = ? AND status NOT IN ?", *usage.DeliveryOrderID, []int{int(model.DeliveryConfirmed), int(model.DeliveryCancelled)}).
-				Update("status", model.DeliveryCancelled).Error; err != nil {
+			if err := restorePackageComponentStock(tx, usage); err != nil {
 				return err
+			}
+			// 若同单仍有其他未取消的 usage，则不取消整笔配送单，并纠正主 usage 指针
+			var next model.UserInventoryUsage
+			errNext := query.NotDeleted(tx).
+				Where("delivery_order_id = ? AND id <> ? AND status NOT IN ?",
+					*usage.DeliveryOrderID, usage.ID,
+					[]uint8{model.InventoryUsageCancelled}).
+				Order("id ASC").First(&next).Error
+			if errNext == nil {
+				var d model.DeliveryOrder
+				if err := query.NotDeleted(tx).First(&d, *usage.DeliveryOrderID).Error; err != nil {
+					return err
+				}
+				if d.InventoryUsageID != nil && *d.InventoryUsageID == usage.ID {
+					if err := tx.Model(&d).Update("inventory_usage_id", next.ID).Error; err != nil {
+						return err
+					}
+				}
+			} else if errors.Is(errNext, gorm.ErrRecordNotFound) {
+				if err := tx.Model(&model.DeliveryOrder{}).
+					Where("id = ? AND status NOT IN ?", *usage.DeliveryOrderID, []int{int(model.DeliveryConfirmed), int(model.DeliveryCancelled)}).
+					Update("status", model.DeliveryCancelled).Error; err != nil {
+					return err
+				}
+			} else {
+				return errNext
 			}
 		}
 
@@ -410,6 +447,7 @@ func (s *InventoryService) GetUsageView(accountID, usageID uint64) (*InventoryUs
 		}
 	}
 	s.enrichUsageBuyer(view)
+	enrichUsageViewPackage(view)
 	return view, nil
 }
 
@@ -540,9 +578,21 @@ func (s *InventoryService) ListUsagesForAdmin(merchantID *uint64, status *uint8,
 }
 
 func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64) error {
-	return tx.Model(&model.UserInventoryUsage{}).
-		Where("id = ? AND status = ?", usageID, model.InventoryUsagePendingVerify).
-		Update("status", model.InventoryUsageCompleted).Error
+	var usage model.UserInventoryUsage
+	if err := query.NotDeleted(tx).
+		Preload("Product", "is_deleted = ?", model.NotDeleted).
+		First(&usage, usageID).Error; err != nil {
+		return err
+	}
+	updates := map[string]interface{}{
+		"status": model.InventoryUsageCompleted,
+	}
+	if usage.Product != nil && usage.Product.ItemType == model.ProductItemTypePackage {
+		updates["package_select_status"] = model.PackageSelectPending
+	}
+	return tx.Model(&usage).
+		Where("status = ?", model.InventoryUsagePendingVerify).
+		Updates(updates).Error
 }
 
 func (s *InventoryService) adjustQuantity(

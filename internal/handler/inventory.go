@@ -19,11 +19,25 @@ type CancelInventoryUsageRequest struct {
 type UseInventoryRequest struct {
 	Quantity uint32 `json:"quantity" example:"1"`
 	// 用指针 + required：允许传 0（稍后/到店核销），避免 uint8 零值被 required 误拒
-	DeliveryType      *uint8   `json:"delivery_type" binding:"required" example:"1"`
-	AddressID         *uint64  `json:"address_id"`
-	DeliveryLatitude  *float64 `json:"delivery_latitude"`
-	DeliveryLongitude *float64 `json:"delivery_longitude"`
-	Remark            *string  `json:"remark"`
+	DeliveryType      *uint8                         `json:"delivery_type" binding:"required" example:"1"`
+	AddressID         *uint64                        `json:"address_id"`
+	DeliveryLatitude  *float64                       `json:"delivery_latitude"`
+	DeliveryLongitude *float64                       `json:"delivery_longitude"`
+	Remark            *string                        `json:"remark"`
+	PackageSelections []service.PackageSelectionInput `json:"package_selections"`
+}
+
+type UseBatchInventoryRequest struct {
+	Items             []service.UseBatchItemInput `json:"items" binding:"required"`
+	DeliveryType      *uint8                      `json:"delivery_type" binding:"required"`
+	AddressID         *uint64                     `json:"address_id"`
+	DeliveryLatitude  *float64                    `json:"delivery_latitude"`
+	DeliveryLongitude *float64                    `json:"delivery_longitude"`
+	Remark            *string                     `json:"remark"`
+}
+
+type ConfirmPackageSelectionRequest struct {
+	PackageSelections []service.PackageSelectionInput `json:"package_selections"`
 }
 
 // UseInventory godoc
@@ -55,6 +69,38 @@ func (h *UserHandler) UseInventory(c *gin.Context) {
 	}
 	view, err := h.InventorySvc.Use(accountID, inventoryID, service.UseInventoryInput{
 		Quantity: req.Quantity, DeliveryType: *req.DeliveryType,
+		AddressID: req.AddressID, DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
+		Remark: req.Remark, PackageSelections: req.PackageSelections,
+	})
+	if err != nil {
+		handleInventoryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+// UseInventoryBatch godoc
+// @Summary      批量使用背包商品（同店）
+// @Tags         用户-背包
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body  UseBatchInventoryRequest  true  "批量使用"
+// @Success      200   {object}  response.Body{data=service.UseBatchResult}
+// @Router       /user/inventory/use-batch [post]
+func (h *UserHandler) UseInventoryBatch(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	var req UseBatchInventoryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	view, err := h.InventorySvc.UseBatch(accountID, service.UseBatchInput{
+		Items: req.Items, DeliveryType: *req.DeliveryType,
 		AddressID: req.AddressID, DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
 		Remark: req.Remark,
 	})
@@ -173,6 +219,14 @@ func handleInventoryError(c *gin.Context, err error) {
 		response.BadRequest(c, "该商品为虚拟商品，仅支持到店核销")
 	case errors.Is(err, service.ErrDeliveryNotAllowed):
 		response.BadRequest(c, "该商品不支持骑手配送")
+	case errors.Is(err, service.ErrPickupNotAllowed):
+		response.BadRequest(c, "该商品不支持到店自取")
+	case errors.Is(err, service.ErrPackageSelectionRequired):
+		response.BadRequest(c, "套餐外卖请先完成选配")
+	case errors.Is(err, service.ErrInsufficientStock):
+		response.BadRequest(c, "套餐内商品库存不足")
+	case errors.Is(err, service.ErrInvalidProductArg):
+		response.BadRequest(c, err.Error())
 	case errors.Is(err, service.ErrDeliveryOutOfRange):
 		response.BadRequest(c, "收货地址不在配送范围内")
 	case errors.Is(err, service.ErrDeliveryCoordinatesRequired):
@@ -180,6 +234,11 @@ func handleInventoryError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrDeliveryZoneInvalid):
 		response.BadRequest(c, err.Error())
 	default:
+		msg := err.Error()
+		if msg != "" && (errors.Is(err, service.ErrInventoryUsageInvalid) || len(msg) < 80) {
+			response.BadRequest(c, msg)
+			return
+		}
 		response.InternalError(c, "操作失败")
 	}
 }

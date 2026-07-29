@@ -1493,15 +1493,16 @@ func (s *OrderService) creditOrderInventory(tx *gorm.DB, accountID, orderID uint
 	if s.InventorySvc == nil || len(items) == 0 {
 		return nil
 	}
-	// 店内套餐：头行是套餐商品本身，入背包只入组件 SKU
-	items = filterOutPackageProductItems(tx, orderID, items)
+	// 店内套餐：入背包只入套餐本体（选配在使用时再做）
+	items = selectInventoryCreditItems(tx, orderID, items)
 	if len(items) == 0 {
 		return nil
 	}
 	return s.InventorySvc.CreditFromOrder(tx, accountID, orderID, items)
 }
 
-func filterOutPackageProductItems(tx *gorm.DB, orderID uint64, items []model.OrderItem) []model.OrderItem {
+// selectInventoryCreditItems 普通单入账全部明细；套餐单只入账套餐头行。
+func selectInventoryCreditItems(tx *gorm.DB, orderID uint64, items []model.OrderItem) []model.OrderItem {
 	var order model.Order
 	if err := query.NotDeleted(tx).Select("id", "package_product_id").First(&order, orderID).Error; err != nil {
 		return items
@@ -1510,14 +1511,18 @@ func filterOutPackageProductItems(tx *gorm.DB, orderID uint64, items []model.Ord
 		return items
 	}
 	pkgID := *order.PackageProductID
-	out := make([]model.OrderItem, 0, len(items))
+	out := make([]model.OrderItem, 0, 1)
 	for _, it := range items {
 		if it.ProductID == pkgID {
-			continue
+			out = append(out, it)
 		}
-		out = append(out, it)
 	}
 	return out
+}
+
+// filterOutPackageProductItems 兼容旧逻辑名：现改为套餐入账筛选。
+func filterOutPackageProductItems(tx *gorm.DB, orderID uint64, items []model.OrderItem) []model.OrderItem {
+	return selectInventoryCreditItems(tx, orderID, items)
 }
 
 // deductProductStockInTx 下单时扣减商品库存（需 stock >= quantity）。

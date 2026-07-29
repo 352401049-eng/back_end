@@ -32,6 +32,8 @@ type VerifyPreviewView struct {
 	CoverURL    string  `json:"cover_url,omitempty"`
 	Spec        string  `json:"spec,omitempty"`
 	Quantity    uint32  `json:"quantity"`
+	ItemType    uint8   `json:"item_type"`
+	IsPackage   bool    `json:"is_package"`
 	UsageID     *uint64 `json:"usage_id,omitempty"`
 	OrderID     *uint64 `json:"order_id,omitempty"`
 	OrderNo     string  `json:"order_no,omitempty"`
@@ -264,6 +266,8 @@ func toVerifyPreviewView(resolved *verifyResolveResult) *VerifyPreviewView {
 		CoverURL:    resolved.product.CoverURL,
 		Spec:        resolved.spec,
 		Quantity:    resolved.quantity,
+		ItemType:    resolved.product.ItemType,
+		IsPackage:   resolved.product.ItemType == model.ProductItemTypePackage,
 		UsageID:     resolved.usageID,
 		OrderID:     resolved.orderID,
 		OrderNo:     resolved.orderNo,
