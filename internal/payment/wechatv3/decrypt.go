@@ -17,8 +17,8 @@ type Resource struct {
 	OriginalType   string `json:"original_type"`
 }
 
-// DecryptResource 用 APIv3 密钥解密回调 resource。
-// AEAD_AES_256_GCM：nonce 12 字节，associated_data 为附加数据。
+// DecryptResource 用 APIv3 密钥解密回调 resource 或平台证书。
+// AEAD_AES_256_GCM：ciphertext 为 base64；nonce 为明文字符串（UTF-8 字节作 IV，勿 base64 解码）。
 func DecryptResource(apiKey string, r *Resource) ([]byte, error) {
 	if r.Algorithm != "AEAD_AES_256_GCM" {
 		return nil, fmt.Errorf("不支持的加密算法: %s", r.Algorithm)
@@ -27,10 +27,6 @@ func DecryptResource(apiKey string, r *Resource) ([]byte, error) {
 	ciphertext, err := base64.StdEncoding.DecodeString(r.Ciphertext)
 	if err != nil {
 		return nil, fmt.Errorf("ciphertext base64 解码失败: %w", err)
-	}
-	nonce, err := base64.StdEncoding.DecodeString(r.Nonce)
-	if err != nil {
-		return nil, fmt.Errorf("nonce base64 解码失败: %w", err)
 	}
 
 	block, err := aes.NewCipher([]byte(apiKey))
@@ -42,7 +38,7 @@ func DecryptResource(apiKey string, r *Resource) ([]byte, error) {
 		return nil, fmt.Errorf("创建 GCM 失败: %w", err)
 	}
 
-	plaintext, err := aesgcm.Open(nil, nonce, ciphertext, []byte(r.AssociatedData))
+	plaintext, err := aesgcm.Open(nil, []byte(r.Nonce), ciphertext, []byte(r.AssociatedData))
 	if err != nil {
 		return nil, fmt.Errorf("解密失败: %w", err)
 	}

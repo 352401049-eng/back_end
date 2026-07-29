@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -106,7 +107,53 @@ func Load() (*Config, error) {
 		TencentKey: getEnv("TENCENT_MAP_KEY", ""),
 	}
 
+	if err := cfg.normalizePayment(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// normalizePayment 规范化支付配置，启用微信时校验必填项。
+func (c *Config) normalizePayment() error {
+	p := &c.Payment
+	p.Provider = strings.ToLower(strings.TrimSpace(p.Provider))
+	p.WeChatMchID = strings.TrimSpace(p.WeChatMchID)
+	p.WeChatAPIKey = strings.TrimSpace(p.WeChatAPIKey)
+	p.WeChatSerialNo = strings.TrimSpace(strings.ToUpper(p.WeChatSerialNo))
+	p.WeChatCertPath = strings.TrimSpace(p.WeChatCertPath)
+	p.WeChatKeyPath = strings.TrimSpace(p.WeChatKeyPath)
+	p.WeChatNotifyURL = strings.TrimSpace(p.WeChatNotifyURL)
+
+	if p.Provider != "wechat" && p.Provider != "wx" && p.Provider != "weixin" {
+		return nil
+	}
+	if !p.WeChatEnabled {
+		return nil
+	}
+
+	missing := make([]string, 0, 6)
+	if p.WeChatMchID == "" {
+		missing = append(missing, "WECHAT_MCH_ID")
+	}
+	if p.WeChatAPIKey == "" {
+		missing = append(missing, "WECHAT_PAY_API_KEY")
+	} else if len(p.WeChatAPIKey) != 32 {
+		return fmt.Errorf("WECHAT_PAY_API_KEY 必须为 32 字符（当前 %d），请与商户平台 APIv3 密钥保持一致", len(p.WeChatAPIKey))
+	}
+	if p.WeChatSerialNo == "" {
+		missing = append(missing, "WECHAT_PAY_SERIAL_NO")
+	}
+	if p.WeChatKeyPath == "" {
+		missing = append(missing, "WECHAT_PAY_KEY_PATH")
+	}
+	if p.WeChatNotifyURL == "" {
+		missing = append(missing, "WECHAT_PAY_NOTIFY_URL")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("微信支付配置不完整，缺少: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func loadBackupConfig() BackupConfig {

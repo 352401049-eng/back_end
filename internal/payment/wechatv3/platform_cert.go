@@ -43,8 +43,17 @@ func (c *Client) FetchPlatformCerts() error {
 		item := item
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
-			certPEM, err := decryptCert(c.cfg.APIKey, &item.EncryptCertificate)
+				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						mu.Lock()
+						if firstErr == nil {
+							firstErr = fmt.Errorf("解密证书 %s panic: %v", item.SerialNo, r)
+						}
+						mu.Unlock()
+					}
+				}()
+				certPEM, err := decryptCert(c.cfg.APIKey, &item.EncryptCertificate)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {

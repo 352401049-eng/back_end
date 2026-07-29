@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -111,6 +112,26 @@ func (c *Client) APIKey() string { return c.cfg.APIKey }
 func (c *Client) MchID() string { return c.cfg.MchID }
 
 // --- 工具函数 ---
+
+// QueryOrderByOutTradeNo 主动查询微信支付订单状态（无需回调解密）。
+func (c *Client) QueryOrderByOutTradeNo(outTradeNo string) (tradeState, transactionID string, err error) {
+	path := fmt.Sprintf("/v3/pay/transactions/out-trade-no/%s?mchid=%s", outTradeNo, c.cfg.MchID)
+	code, body, err := c.Do("GET", path, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("查询订单失败: %w", err)
+	}
+	if code != http.StatusOK {
+		return "", "", fmt.Errorf("查询订单 HTTP %d: %s", code, string(body))
+	}
+	var result struct {
+		TradeState    string `json:"trade_state"`
+		TransactionID string `json:"transaction_id"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", "", fmt.Errorf("解析订单查询响应失败: %w", err)
+	}
+	return result.TradeState, result.TransactionID, nil
+}
 
 // nowUnix 返回当前 Unix 时间戳（秒）。
 func nowUnix() int64 { return time.Now().Unix() }

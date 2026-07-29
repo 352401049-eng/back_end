@@ -1,6 +1,7 @@
 package payment
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -48,7 +49,10 @@ func (p *WeChatProvider) CreatePrepay(orderID uint64, accountID uint64) (*Prepay
 		}
 		return nil, err
 	}
-	if order.Status != model.OrderStatusPendingPay {
+	// 直购待支付 / 拼团待成团且未付均可发起预支付
+	switch order.Status {
+	case model.OrderStatusPendingPay, model.OrderStatusPendingGroup:
+	default:
 		return nil, ErrInvalidState
 	}
 	if order.PayStatus != model.PayStatusUnpaid {
@@ -151,6 +155,10 @@ func (p *WeChatProvider) HandleNotify(headers map[string]string, body []byte) (*
 	eventType, plaintext, err := p.Client.ParseAndDecryptNotify(headers, body)
 	if err != nil {
 		log.Printf("[wechat notify] verify/decrypt failed: %v", err)
+		// 解密失败时，尝试主动查微信支付状态
+		if et := parseEventTypeSafely(body); et == wechatv3.EventPaySuccess {
+			return p.retrieveAndSettlePayments()
+		}
 		return nil, fmt.Errorf("回调验证失败: %w", err)
 	}
 
@@ -388,4 +396,65 @@ func truncateRunes(s string, maxLen int) string {
 // isDuplicateKey 判断是否为 MySQL 唯一索引冲突。
 func isDuplicateKey(err error) bool {
 	return errors.Is(err, gorm.ErrDuplicatedKey)
+}
+
+// parseEventTypeSafely 从回调 JSON 中提取 event_type（不依赖 resource 解密）。
+func parseEventTypeSafely(body []byte) string {
+	var cb struct {
+		EventType string `json:"event_type"`
+	}
+	if json.Unmarshal(body, &cb) == nil {
+		return cb.EventType
+	}
+	return ""
+}
+
+// retrieveAndSettlePayments 主动查微信支付单状态，处理所有待支付订单。
+func (p *WeChatProvider) retrieveAndSettlePayments() (*NotifyResult, error) {
+	if p.Client == nil {
+		return nil, ErrNotConfigured
+	}
+	var orders []model.Order
+	if err := query.NotDeleted(p.DB).
+		Where("status IN ? AND pay_status = ?",
+			[]uint8{model.OrderStatusPendingPay, model.OrderStatusPendingGroup},
+			model.PayStatusUnpaid).
+		Find(&orders).Error; err != nil {
+		return nil, err
+	}
+	for _, o := range orders {
+		tradeState, transactionID, err := p.Client.QueryOrderByOutTradeNo(o.OrderNo)
+		if err != nil {
+			log.Printf("[wechat retrieve] 查询订单 %s 失败: %v", o.OrderNo, err)
+			continue
+		}
+		if tradeState == "SUCCESS" && o.PrepayID != nil {
+			_ = p.DB.Transaction(func(tx *gorm.DB) error {
+				txID := transactionID
+				now := time.Now()
+				tx.Model(&model.PaymentTransaction{}).Where("order_id = ?", o.ID).
+					Updates(map[string]interface{}{"status": model.PayTxStatusPaid, "transaction_id": txID})
+				res := query.NotDeleted(tx.Model(&model.Order{})).
+					Where("id = ? AND pay_status = ?", o.ID, model.PayStatusUnpaid).
+					Updates(map[string]interface{}{
+						"pay_status": model.PayStatusPaid,
+						"paid_at":    now,
+						"prepay_id":  nil,
+					})
+				if res.RowsAffected == 0 {
+					return nil
+				}
+				// 仅直购待支付推进；拼团单保持 PendingGroup，等成团逻辑处理
+				tx.Model(&model.Order{}).Where("id = ? AND status = ?", o.ID, model.OrderStatusPendingPay).
+					Updates(map[string]interface{}{
+						"status":                model.OrderStatusPendingFulfill,
+						"merchant_review_stage": model.MerchantReviewPending,
+						"pay_expire_at":         nil,
+					})
+				return nil
+			})
+			log.Printf("[wechat retrieve] 订单 %s 支付成功，已处理", o.OrderNo)
+		}
+	}
+	return &NotifyResult{Paid: true, RawAck: `{"code":"SUCCESS"}`}, nil
 }

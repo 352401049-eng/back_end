@@ -28,13 +28,13 @@ type PaySuccessNotify struct {
 
 // RefundSuccessNotify 退款成功回调解密后的内容。
 type RefundSuccessNotify struct {
-	MchID       string `json:"mchid"`
-	OutTradeNo  string `json:"out_trade_no"`
-	OutRefundNo string `json:"out_refund_no"`
-	RefundID    string `json:"refund_id"`
+	MchID        string `json:"mchid"`
+	OutTradeNo   string `json:"out_trade_no"`
+	OutRefundNo  string `json:"out_refund_no"`
+	RefundID     string `json:"refund_id"`
 	RefundStatus string `json:"refund_status"` // SUCCESS
-	SuccessTime string `json:"success_time"`
-	Amount      struct {
+	SuccessTime  string `json:"success_time"`
+	Amount       struct {
 		Total       int `json:"total"`
 		Refund      int `json:"refund"`
 		PayerTotal  int `json:"payer_total"`
@@ -49,7 +49,7 @@ const (
 )
 
 // ParseAndDecryptNotify 解析回调 JSON、验签、解密 resource。
-// 返回 event_type 和解密后的 JSON 字节。
+// 返回 event_type 和解密后的 JSON 字节。平台证书缺失时会刷新后再验签，仍失败则拒绝回调。
 func (c *Client) ParseAndDecryptNotify(headers map[string]string, body []byte) (string, []byte, error) {
 	timestamp := headers["Wechatpay-Timestamp"]
 	nonce := headers["Wechatpay-Nonce"]
@@ -60,10 +60,16 @@ func (c *Client) ParseAndDecryptNotify(headers map[string]string, body []byte) (
 		return "", nil, fmt.Errorf("回调请求头不完整")
 	}
 
-	// 1. 验签
+	// 1. 强制验签：缓存未命中时刷新平台证书，仍不可用则拒绝（不可跳过）
 	cert, err := c.GetPlatformCert(serial)
 	if err != nil {
-		return "", nil, fmt.Errorf("获取平台证书失败: %w", err)
+		if fetchErr := c.FetchPlatformCerts(); fetchErr != nil {
+			return "", nil, fmt.Errorf("平台证书不可用，无法验签: %v (刷新失败: %w)", err, fetchErr)
+		}
+		cert, err = c.GetPlatformCert(serial)
+		if err != nil {
+			return "", nil, fmt.Errorf("平台证书不可用，无法验签: %w", err)
+		}
 	}
 	signing := BuildNotifySign(timestamp, nonce, string(body))
 	if err := VerifySignature(cert, signing, signature); err != nil {
