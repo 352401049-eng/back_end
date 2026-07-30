@@ -455,6 +455,9 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 	r.DELETE("/categories/:id", ae.DeleteCategory)
 	r.GET("/deliveries", ae.ListDeliveries)
 	r.GET("/deliveries/exceptions", ae.ListDeliveryExceptions)
+	r.POST("/deliveries/:id/resolve-resume", ae.AdminResolveDeliveryResume)
+	r.POST("/deliveries/:id/resolve-reassign", ae.AdminResolveDeliveryReassign)
+	r.POST("/deliveries/:id/resolve-cancel", ae.AdminResolveDeliveryCancel)
 	r.GET("/inventory-usages", ae.ListInventoryUsages)
 
 	r.GET("/rider/applications", h.ListRiderApplications)

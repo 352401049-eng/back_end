@@ -965,6 +965,258 @@ func (s *DeliveryService) ListForAdmin(merchantID *uint64, status *uint8, page, 
 	return toDeliveryViews(s.DB, list), total, nil
 }
 
+func requireExceptionLocked(tx *gorm.DB, deliveryID uint64) (*model.DeliveryOrder, error) {
+	var d model.DeliveryOrder
+	if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+		First(&d, deliveryID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrDeliveryNotFound
+		}
+		return nil, err
+	}
+	if d.Status != model.DeliveryException {
+		return nil, ErrDeliveryStatusInvalid
+	}
+	return &d, nil
+}
+
+func appendAdminRemark(old *string, remark string) string {
+	base := ""
+	if old != nil {
+		base = *old
+	}
+	note := "管理员处理：" + strings.TrimSpace(remark)
+	if base == "" {
+		return note
+	}
+	return note + "；原上报：" + base
+}
+
+func validateAdminResolveRemark(remark string) (string, error) {
+	remark = strings.TrimSpace(remark)
+	if remark == "" {
+		return "", fmt.Errorf("%w: 请填写处理备注", ErrDeliveryStatusInvalid)
+	}
+	return remark, nil
+}
+
+func resumeTargetStatus(d *model.DeliveryOrder) uint8 {
+	if d.StartedAt != nil {
+		return model.DeliveryDelivering
+	}
+	return model.DeliveryAccepted
+}
+
+func (s *DeliveryService) deliveryPaymentProvider() payment.Provider {
+	if s.DeliveryFeePaySvc != nil {
+		return s.DeliveryFeePaySvc.paymentProvider()
+	}
+	return &payment.MockProvider{DB: s.DB}
+}
+
+func cancelPendingRiderEarningsInTx(tx *gorm.DB, deliveryID uint64) error {
+	return tx.Model(&model.RiderEarning{}).
+		Where("delivery_order_id = ? AND status = ?", deliveryID, model.RiderEarningPending).
+		Update("status", model.RiderEarningCancelled).Error
+}
+
+func (s *DeliveryService) restoreDeliveryUsagesForCancelInTx(tx *gorm.DB, d *model.DeliveryOrder, deliveryID uint64, reasonText string) error {
+	var usages []model.UserInventoryUsage
+	if err := query.NotDeleted(tx).
+		Where("delivery_order_id = ? AND status IN ?", deliveryID,
+			[]int{int(model.InventoryUsagePendingShip), int(model.InventoryUsageCancelPending)}).
+		Find(&usages).Error; err != nil {
+		return err
+	}
+	if len(usages) == 0 && d.InventoryUsageID != nil {
+		var u model.UserInventoryUsage
+		if err := query.NotDeleted(tx).First(&u, *d.InventoryUsageID).Error; err == nil {
+			if u.Status == model.InventoryUsagePendingShip || u.Status == model.InventoryUsageCancelPending {
+				usages = append(usages, u)
+			}
+		}
+	}
+	for i := range usages {
+		u := usages[i]
+		if u.Status != model.InventoryUsagePendingShip && u.Status != model.InventoryUsageCancelPending {
+			continue
+		}
+		if s.InventorySvc == nil {
+			return fmt.Errorf("inventory service unavailable")
+		}
+		var inv model.UserInventory
+		if err := query.NotDeleted(tx).First(&inv, u.InventoryID).Error; err != nil {
+			return err
+		}
+		if err := s.InventorySvc.restoreInventoryUseCancel(tx, &u, inv.Spec, &reasonText); err != nil {
+			return err
+		}
+		if err := restorePackageComponentStock(tx, &u); err != nil {
+			return err
+		}
+		if err := tx.Model(&u).Updates(map[string]interface{}{
+			"status":        model.InventoryUsageCancelled,
+			"cancel_reason": reasonText,
+			"remark":        reasonText,
+		}).Error; err != nil {
+			return err
+		}
+		if u.SourceOrderID != nil {
+			_ = tx.Model(&model.Order{}).Where("id = ?", *u.SourceOrderID).
+				Update("remark", reasonText).Error
+		}
+	}
+	return nil
+}
+
+func (s *DeliveryService) cancelPaidTakeoutForDeliveryInTx(tx *gorm.DB, takeoutID uint64, reasonText string) error {
+	var to model.TakeoutOrder
+	if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&to, takeoutID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrDeliveryNotFound
+		}
+		return err
+	}
+	if to.Status == model.TakeoutStatusCancelled {
+		return nil
+	}
+	if to.PayStatus != model.PayStatusPaid {
+		return ErrDeliveryStatusInvalid
+	}
+	sub, err := payment.TakeoutSubjectFromID(tx, takeoutID, 0)
+	if err != nil {
+		return err
+	}
+	if err := s.deliveryPaymentProvider().RefundSubjectAmountInTx(tx, sub, to.PayAmount, reasonText); err != nil {
+		return err
+	}
+	if err := restoreTakeoutStockInTx(tx, &to); err != nil {
+		return err
+	}
+	return tx.Model(&to).Updates(map[string]interface{}{
+		"status": model.TakeoutStatusCancelled,
+		"remark": reasonText,
+	}).Error
+}
+
+func revertLinkedOrderOnDeliveryCancelInTx(tx *gorm.DB, orderID *uint64, reasonText string) {
+	if orderID == nil {
+		return
+	}
+	_ = tx.Model(&model.Order{}).
+		Where("id = ? AND status IN ?", *orderID,
+			[]int{int(model.OrderStatusPreparing), int(model.OrderStatusPendingShip)}).
+		Updates(map[string]interface{}{
+			"status":                model.OrderStatusPendingFulfill,
+			"merchant_review_stage": model.MerchantReviewApproved,
+			"remark":                reasonText,
+		}).Error
+}
+
+// AdminResolveResume 管理员恢复异常配送：保留骑手，按是否已开始配送回到配送中/已接单。
+func (s *DeliveryService) AdminResolveResume(deliveryID uint64, remark string) (*DeliveryView, error) {
+	remark, err := validateAdminResolveRemark(remark)
+	if err != nil {
+		return nil, err
+	}
+	var jobs []payment.RefundJob
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
+		d, err := requireExceptionLocked(tx, deliveryID)
+		if err != nil {
+			return err
+		}
+		newReason := appendAdminRemark(d.ExceptionReason, remark)
+		return tx.Model(d).Updates(map[string]interface{}{
+			"status":           resumeTargetStatus(d),
+			"exception_reason": newReason,
+		}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	payment.DispatchRefundJobs(jobs)
+	return s.getViewByID(deliveryID)
+}
+
+// AdminResolveReassign 管理员改派：清空骑手与接单时间，回到待接单。
+func (s *DeliveryService) AdminResolveReassign(deliveryID uint64, remark string) (*DeliveryView, error) {
+	remark, err := validateAdminResolveRemark(remark)
+	if err != nil {
+		return nil, err
+	}
+	var jobs []payment.RefundJob
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
+		d, err := requireExceptionLocked(tx, deliveryID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(d).Updates(map[string]interface{}{
+			"status":           model.DeliveryPendingAccept,
+			"rider_id":         nil,
+			"accepted_at":      nil,
+			"started_at":       nil,
+			"exception_reason": appendAdminRemark(d.ExceptionReason, remark),
+		}).Error; err != nil {
+			return err
+		}
+		return cancelPendingRiderEarningsInTx(tx, deliveryID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	payment.DispatchRefundJobs(jobs)
+	return s.getViewByID(deliveryID)
+}
+
+// AdminResolveCancel 管理员取消异常配送：外卖全额退款，背包/跑腿回退并退配送费。
+func (s *DeliveryService) AdminResolveCancel(deliveryID uint64, remark string) (*DeliveryView, error) {
+	remark, err := validateAdminResolveRemark(remark)
+	if err != nil {
+		return nil, err
+	}
+	var jobs []payment.RefundJob
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
+		d, err := requireExceptionLocked(tx, deliveryID)
+		if err != nil {
+			return err
+		}
+		reasonText := appendAdminRemark(d.ExceptionReason, remark)
+
+		if d.TakeoutOrderID != nil {
+			if err := s.cancelPaidTakeoutForDeliveryInTx(tx, *d.TakeoutOrderID, reasonText); err != nil {
+				return err
+			}
+		} else {
+			if err := s.restoreDeliveryUsagesForCancelInTx(tx, d, deliveryID, reasonText); err != nil {
+				return err
+			}
+			if s.DeliveryFeePaySvc != nil {
+				if err := s.DeliveryFeePaySvc.RefundForDeliveryOrderInTx(tx, deliveryID, "取消配送退配送费"); err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := tx.Model(d).Updates(map[string]interface{}{
+			"status":           model.DeliveryCancelled,
+			"exception_reason": reasonText,
+		}).Error; err != nil {
+			return err
+		}
+		revertLinkedOrderOnDeliveryCancelInTx(tx, d.OrderID, reasonText)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	payment.DispatchRefundJobs(jobs)
+	return s.getViewByID(deliveryID)
+}
+
 func (s *DeliveryService) ListExceptions(page, pageSize int) ([]DeliveryView, int64, error) {
 	if page < 1 {
 		page = 1

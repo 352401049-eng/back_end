@@ -255,6 +255,71 @@ func (h *AdminExtraHandler) ListDeliveryExceptions(c *gin.Context) {
 	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
 }
 
+type AdminResolveDeliveryRequest struct {
+	Remark string `json:"remark"`
+}
+
+// AdminResolveDeliveryResume godoc
+// @Summary      恢复异常配送（管理端）
+// @Tags         管理端-配送
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int                           true  "配送单 ID"
+// @Param        body  body  AdminResolveDeliveryRequest   true  "处理备注"
+// @Success      200  {object}  response.Body
+// @Router       /admin/deliveries/{id}/resolve-resume [post]
+func (h *AdminExtraHandler) AdminResolveDeliveryResume(c *gin.Context) {
+	adminResolveDelivery(c, h.DeliverySvc.AdminResolveResume)
+}
+
+// AdminResolveDeliveryReassign godoc
+// @Summary      改派异常配送（管理端）
+// @Tags         管理端-配送
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int                           true  "配送单 ID"
+// @Param        body  body  AdminResolveDeliveryRequest   true  "处理备注"
+// @Success      200  {object}  response.Body
+// @Router       /admin/deliveries/{id}/resolve-reassign [post]
+func (h *AdminExtraHandler) AdminResolveDeliveryReassign(c *gin.Context) {
+	adminResolveDelivery(c, h.DeliverySvc.AdminResolveReassign)
+}
+
+// AdminResolveDeliveryCancel godoc
+// @Summary      取消异常配送（管理端）
+// @Tags         管理端-配送
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int                           true  "配送单 ID"
+// @Param        body  body  AdminResolveDeliveryRequest   true  "处理备注"
+// @Success      200  {object}  response.Body
+// @Router       /admin/deliveries/{id}/resolve-cancel [post]
+func (h *AdminExtraHandler) AdminResolveDeliveryCancel(c *gin.Context) {
+	adminResolveDelivery(c, h.DeliverySvc.AdminResolveCancel)
+}
+
+func adminResolveDelivery(c *gin.Context, resolve func(uint64, string) (*service.DeliveryView, error)) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "配送单 ID 无效")
+		return
+	}
+	var req AdminResolveDeliveryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请求参数无效")
+		return
+	}
+	view, err := resolve(id, req.Remark)
+	if err != nil {
+		handleDeliveryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
 // ListAdminInventoryUsages godoc
 // @Summary      背包使用记录（管理端）
 // @Tags         管理端-背包
