@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
@@ -1464,37 +1465,84 @@ func (s *OrderService) attachItemRefundQuantities(view *OrderView) {
 	if view == nil || view.ID == 0 {
 		return
 	}
-	applyLogs := func(orderID uint64, items []model.OrderItem) (refundedQty, totalQty uint32) {
+	applyLogs := func(orderID uint64, items []model.OrderItem) (refundedQty, totalQty uint32, out []model.OrderItem) {
+		out = items
 		if len(items) == 0 {
-			return 0, 0
+			return 0, 0, out
 		}
 		var logs []model.UserInventoryLog
-		if err := s.DB.Where("order_id = ? AND event_type = ? AND delta_qty < 0",
-			orderID, model.InventoryEventRefund).Find(&logs).Error; err != nil {
-			return 0, 0
+		if err := query.NotDeleted(s.DB).
+			Where("order_id = ? AND event_type = ? AND delta_qty < 0",
+				orderID, model.InventoryEventRefund).
+			Find(&logs).Error; err != nil {
+			return 0, 0, out
 		}
 		byKey := map[string]uint32{}
+		byProduct := map[uint64]uint32{}
+		itemCountByProduct := map[uint64]int{}
+		for i := range out {
+			itemCountByProduct[out[i].ProductID]++
+		}
 		for _, lg := range logs {
 			qty := uint32(-lg.DeltaQty)
 			key := fmt.Sprintf("%d\x00%s", lg.ProductID, lg.Spec)
 			byKey[key] += qty
+			byProduct[lg.ProductID] += qty
 			refundedQty += qty
 		}
-		for i := range items {
-			totalQty += items[i].Quantity
+		var assigned uint32
+		for i := range out {
+			totalQty += out[i].Quantity
 			spec := ""
-			if items[i].Spec != nil {
-				spec = *items[i].Spec
+			if out[i].Spec != nil {
+				spec = *out[i].Spec
 			}
-			key := fmt.Sprintf("%d\x00%s", items[i].ProductID, spec)
-			items[i].RefundedQuantity = byKey[key]
+			key := fmt.Sprintf("%d\x00%s", out[i].ProductID, spec)
+			qty := byKey[key]
+			// 规格对不上时：同订单同商品仅一行则按商品汇总
+			if qty == 0 && itemCountByProduct[out[i].ProductID] == 1 {
+				qty = byProduct[out[i].ProductID]
+			}
+			out[i].RefundedQuantity = qty
+			assigned += qty
 		}
-		return refundedQty, totalQty
+		// 有流水但规格/商品对不上：单明细订单直接挂上总已退件数
+		if assigned == 0 && refundedQty > 0 && len(out) == 1 {
+			q := refundedQty
+			if q > out[0].Quantity {
+				q = out[0].Quantity
+			}
+			out[0].RefundedQuantity = q
+			assigned = q
+		}
+		// 流水缺失时：单明细订单用退款金额估算已退件数（买2退1仍能展示「已退1件」）
+		if assigned == 0 && len(out) == 1 && out[0].Quantity > 0 && view.ID == orderID {
+			paidRefund := view.RefundedAmount + view.RefundPendingAmount
+			unit := out[0].UnitPrice
+			if view.PayAmount > 0 {
+				unit = view.PayAmount / float64(out[0].Quantity)
+			}
+			if paidRefund > 0.0001 && unit > 0 {
+				est := uint32(math.Floor(paidRefund/unit + 1e-6))
+				if est > out[0].Quantity {
+					est = out[0].Quantity
+				}
+				if est > 0 {
+					out[0].RefundedQuantity = est
+					refundedQty = est
+				}
+			}
+		}
+		return refundedQty, totalQty, out
 	}
 
-	refundedQty, totalQty := applyLogs(view.ID, view.Items)
+	var refundedQty, totalQty uint32
+	var items []model.OrderItem
+	refundedQty, totalQty, items = applyLogs(view.ID, view.Items)
+	view.Items = items
 	for i := range view.Children {
-		r, t := applyLogs(view.Children[i].ID, view.Children[i].Items)
+		r, t, childItems := applyLogs(view.Children[i].ID, view.Children[i].Items)
+		view.Children[i].Items = childItems
 		refundedQty += r
 		totalQty += t
 	}
@@ -1502,11 +1550,15 @@ func (s *OrderService) attachItemRefundQuantities(view *OrderView) {
 	if refundedQty == 0 || view.StatusCode == "refunded" {
 		return
 	}
-	// 退款进行中：保持「退款中」
+	// 退款进行中：保持「退款中」，但已退件数仍展示
 	if view.RefundPendingAmount > 0.0001 || view.PayStatus == model.PayStatusRefunding {
+		if refundedQty < totalQty {
+			// 买 N 退 M 进行中也标部分退款更直观
+			view.StatusCode = "partial_refunded"
+			view.StatusText = "部分退款"
+		}
 		return
 	}
-	// 买 N 退 M（M < N）或支付仍为部分退款 → 部分退款
 	if refundedQty < totalQty || view.PayStatus == model.PayStatusPartialRefunded ||
 		(view.PayAmount > 0 && view.RefundedAmount+0.0001 < view.PayAmount) {
 		view.StatusCode = "partial_refunded"
