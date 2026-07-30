@@ -20,12 +20,13 @@ var (
 )
 
 type InventoryRefundView struct {
-	InventoryID  uint64  `json:"inventory_id"`
-	ProductID    uint64  `json:"product_id"`
-	Quantity     uint32  `json:"quantity"`
-	RefundAmount float64 `json:"refund_amount"`
-	OrderID      uint64  `json:"order_id"`
-	RemainQty    uint32  `json:"remain_qty"`
+	InventoryID   uint64  `json:"inventory_id"`
+	ProductID     uint64  `json:"product_id"`
+	Quantity      uint32  `json:"quantity"`
+	RefundAmount  float64 `json:"refund_amount"`
+	OrderID       uint64  `json:"order_id"`
+	RemainQty     uint32  `json:"remain_qty"`
+	RefundPending bool    `json:"refund_pending"` // 微信退款已提交、待回调到账
 }
 
 // InventoryRefundSource 背包内某一来源订单的可退批次（同商品不同成交价分开展示）。
@@ -160,6 +161,8 @@ func (s *OrderService) RefundInventory(accountID, inventoryID uint64, quantity u
 				}
 				return err
 			}
+			// 微信退款若发起失败，需把本批扣减的背包加回
+			payment.AttachRestoreToLastRefundJob(tx, accountID, inv.ProductID, inv.Spec, a.Quantity)
 			oid := a.OrderID
 			if err := s.InventorySvc.adjustQuantity(tx, accountID, inv.ProductID, inv.Spec,
 				-int32(a.Quantity), &oid, nil, model.InventoryEventRefund, &remark); err != nil {
@@ -187,6 +190,12 @@ func (s *OrderService) RefundInventory(accountID, inventoryID uint64, quantity u
 	})
 	if err != nil {
 		return nil, err
+	}
+	if result.OrderID > 0 {
+		var o model.Order
+		if e := query.NotDeleted(s.DB).Select("pay_status").First(&o, result.OrderID).Error; e == nil {
+			result.RefundPending = o.PayStatus == model.PayStatusRefunding
+		}
 	}
 	return &result, nil
 }

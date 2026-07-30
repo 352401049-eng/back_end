@@ -198,6 +198,12 @@ func OrderStatusDisplayText(status, reviewStage uint8) string {
 		return "拼团失败"
 	case "closed":
 		return "已关闭"
+	case "refunding":
+		return "退款中"
+	case "refunded":
+		return "已退款"
+	case "partial_refunded":
+		return "部分退款"
 	default:
 		return OrderStatusText(status)
 	}
@@ -251,6 +257,12 @@ func OrderStatusCode(status, reviewStage uint8) string {
 	}
 	if status == OrderStatusClosed {
 		return "closed"
+	}
+	if status == OrderStatusRefunding {
+		return "refunding"
+	}
+	if status == OrderStatusRefunded {
+		return "refunded"
 	}
 	return "unknown"
 }

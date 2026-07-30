@@ -342,6 +342,14 @@ func (p *WeChatProvider) handleRefundSuccess(data []byte) (*NotifyResult, error)
 		}).Error; err != nil {
 			return err
 		}
+		if status == model.PayStatusRefunded {
+			_ = query.NotDeleted(tx.Model(&model.Order{})).Where("id = ?", order.ID).
+				Update("status", model.OrderStatusRefunded).Error
+		} else if status == model.PayStatusPartialRefunded || status == model.PayStatusRefunding {
+			_ = query.NotDeleted(tx.Model(&model.Order{})).Where("id = ? AND status NOT IN ?", order.ID,
+				[]int{int(model.OrderStatusCancelled), int(model.OrderStatusClosed), int(model.OrderStatusRefunded)}).
+				Update("status", model.OrderStatusRefunding).Error
+		}
 		if pt.Status != model.PayTxStatusRefunded && status == model.PayStatusRefunded {
 			_ = tx.Model(&pt).Update("status", model.PayTxStatusRefunded).Error
 		}
@@ -401,6 +409,7 @@ func (p *WeChatProvider) RefundAmountInTx(tx *gorm.DB, orderID uint64, amount fl
 		).Updates(map[string]interface{}{
 			"pay_status":            model.PayStatusRefunding,
 			"refund_pending_amount": newPending,
+			"status":                model.OrderStatusRefunding,
 		})
 		if res.Error != nil {
 			return res.Error

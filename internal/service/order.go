@@ -1437,9 +1437,22 @@ func (s *OrderService) getOrderScoped(accountID, orderID uint64, merchantID *uin
 }
 
 func toOrderView(o *model.Order) OrderView {
+	statusCode := model.OrderStatusCode(o.Status, o.MerchantReviewStage)
+	statusText := model.OrderStatusDisplayText(o.Status, o.MerchantReviewStage)
+	// 支付退款态覆盖履约展示（背包退款后订单可能仍为 PendingFulfill/approved）
+	switch o.PayStatus {
+	case model.PayStatusRefunded:
+		statusCode = "refunded"
+		statusText = "已退款"
+	case model.PayStatusRefunding:
+		statusCode = "refunding"
+		statusText = "退款中"
+	case model.PayStatusPartialRefunded:
+		statusCode = "partial_refunded"
+		statusText = "部分退款"
+	}
 	return OrderView{
-		Order: *o, StatusText: model.OrderStatusDisplayText(o.Status, o.MerchantReviewStage),
-		StatusCode: model.OrderStatusCode(o.Status, o.MerchantReviewStage),
+		Order: *o, StatusText: statusText, StatusCode: statusCode,
 	}
 }
 
@@ -1467,16 +1480,18 @@ func (s *OrderService) attachVerifyCode(view *OrderView) {
 // attachPickupCode 填充配送单出餐号与配送单 ID（备餐中/待骑手接单/配送中等有关联 DeliveryOrder 的订单）。
 func (s *OrderService) attachPickupCode(view *OrderView) {
 	var d model.DeliveryOrder
+	// 用 Find+Limit，避免无配送单时 First 打出 record not found 日志
 	err := query.NotDeleted(s.DB).Select("id", "pickup_code").
 		Where("order_id = ?", view.ID).
-		Order("id DESC").First(&d).Error
-	if err == nil {
-		if d.PickupCode != "" {
-			view.PickupCode = d.PickupCode
-		}
-		did := d.ID
-		view.DeliveryOrderID = &did
+		Order("id DESC").Limit(1).Find(&d).Error
+	if err != nil || d.ID == 0 {
+		return
 	}
+	if d.PickupCode != "" {
+		view.PickupCode = d.PickupCode
+	}
+	did := d.ID
+	view.DeliveryOrderID = &did
 }
 
 func (s *OrderService) ensureVerifyCode(order *model.Order) (string, error) {

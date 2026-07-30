@@ -2,6 +2,7 @@ package payment
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const wechatRefundCollectorKey = "wechat_refund_collector"
@@ -26,6 +28,11 @@ type RefundJob struct {
 	PayAmount   float64
 	RefundAmt   float64
 	Reason      string
+	// 发起微信退款失败时回滚背包（背包退款路径写入）
+	RestoreAccountID uint64
+	RestoreProductID uint64
+	RestoreSpec      string
+	RestoreQty       uint32
 }
 
 // AttachRefundCollector 在事务开始时绑定退款任务收集器；Commit 成功后由 DispatchRefundJobs 派发。
@@ -85,10 +92,12 @@ func dispatchWeChatRefund(job RefundJob) {
 		if r := recover(); r != nil {
 			log.Printf("[wechat refund] panic recovered: %v", r)
 			releaseRefundPending(job.Provider, job.OrderID, job.RefundAmt)
+			restoreInventoryAfterRefundFail(job)
 		}
 	}()
 	if job.Provider == nil || job.Provider.Client == nil {
 		releaseRefundPending(job.Provider, job.OrderID, job.RefundAmt)
+		restoreInventoryAfterRefundFail(job)
 		return
 	}
 	_, err := job.Provider.Client.CreateRefund(&wechatv3.CreateRefundRequest{
@@ -105,7 +114,60 @@ func dispatchWeChatRefund(job RefundJob) {
 	if err != nil {
 		log.Printf("[wechat refund] order %s refund failed: %v", job.OrderNo, err)
 		releaseRefundPending(job.Provider, job.OrderID, job.RefundAmt)
+		restoreInventoryAfterRefundFail(job)
 	}
+}
+
+// AttachRestoreToLastRefundJob 给事务内最后一笔微信退款任务挂上背包回滚信息。
+func AttachRestoreToLastRefundJob(tx *gorm.DB, accountID, productID uint64, spec string, qty uint32) {
+	ptr := refundJobsFromTx(tx)
+	if ptr == nil || len(*ptr) == 0 || qty == 0 {
+		return
+	}
+	jobs := *ptr
+	last := &jobs[len(jobs)-1]
+	last.RestoreAccountID = accountID
+	last.RestoreProductID = productID
+	last.RestoreSpec = spec
+	last.RestoreQty = qty
+}
+
+func restoreInventoryAfterRefundFail(job RefundJob) {
+	if job.Provider == nil || job.Provider.DB == nil || job.RestoreAccountID == 0 || job.RestoreProductID == 0 || job.RestoreQty == 0 {
+		return
+	}
+	err := job.Provider.DB.Transaction(func(tx *gorm.DB) error {
+		var inv model.UserInventory
+		err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+			Where("account_id = ? AND product_id = ? AND IFNULL(spec,'') = ?",
+				job.RestoreAccountID, job.RestoreProductID, job.RestoreSpec).
+			First(&inv).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				inv = model.UserInventory{
+					AccountID: job.RestoreAccountID,
+					ProductID: job.RestoreProductID,
+					Spec:      job.RestoreSpec,
+					Quantity:  job.RestoreQty,
+				}
+				if job.OrderID > 0 {
+					oid := job.OrderID
+					inv.LastOrderID = &oid
+				}
+				return tx.Create(&inv).Error
+			}
+			return err
+		}
+		return tx.Model(&inv).Update("quantity", gorm.Expr("quantity + ?", job.RestoreQty)).Error
+	})
+	if err != nil {
+		log.Printf("[wechat refund] restore inventory order %d product %d failed: %v",
+			job.OrderID, job.RestoreProductID, err)
+		return
+	}
+	// 退款失败：冲回此前加回的商品库存
+	_ = job.Provider.DB.Model(&model.Product{}).Where("id = ?", job.RestoreProductID).
+		Update("stock", gorm.Expr("CASE WHEN stock >= ? THEN stock - ? ELSE 0 END", job.RestoreQty, job.RestoreQty)).Error
 }
 
 // releaseRefundPending 微信退款发起失败时释放预留，避免卡死可退余额。
@@ -124,6 +186,7 @@ func releaseRefundPending(p *WeChatProvider, orderID uint64, amount float64) {
 			pending = 0
 		}
 		status := order.PayStatus
+		orderStatus := (*uint8)(nil)
 		switch {
 		case order.RefundedAmount+0.0001 >= order.PayAmount:
 			status = model.PayStatusRefunded
@@ -133,11 +196,18 @@ func releaseRefundPending(p *WeChatProvider, orderID uint64, amount float64) {
 			status = model.PayStatusPartialRefunded
 		default:
 			status = model.PayStatusPaid
+			// 微信发起失败且尚无已退金额：履约态从「退款中」恢复为待履约（已入背包场景）
+			s := model.OrderStatusPendingFulfill
+			orderStatus = &s
 		}
-		return query.NotDeleted(tx.Model(&model.Order{})).Where("id = ?", orderID).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"refund_pending_amount": pending,
 			"pay_status":            status,
-		}).Error
+		}
+		if orderStatus != nil {
+			updates["status"] = *orderStatus
+		}
+		return query.NotDeleted(tx.Model(&model.Order{})).Where("id = ?", orderID).Updates(updates).Error
 	})
 	if err != nil {
 		log.Printf("[wechat refund] release pending order %d failed: %v", orderID, err)

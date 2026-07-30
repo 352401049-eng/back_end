@@ -106,6 +106,14 @@ func (p *MockProvider) RefundAmountInTx(tx *gorm.DB, orderID uint64, amount floa
 		if res.RowsAffected == 0 {
 			return fmt.Errorf("%w: order %d refund conflict", ErrInvalidState, orderID)
 		}
+		if status == model.PayStatusRefunded {
+			_ = query.NotDeleted(tx.Model(&model.Order{})).Where("id = ?", orderID).
+				Update("status", model.OrderStatusRefunded).Error
+		} else if status == model.PayStatusPartialRefunded || status == model.PayStatusRefunding {
+			_ = query.NotDeleted(tx.Model(&model.Order{})).Where("id = ? AND status NOT IN ?", orderID,
+				[]int{int(model.OrderStatusCancelled), int(model.OrderStatusClosed), int(model.OrderStatusRefunded)}).
+				Update("status", model.OrderStatusRefunding).Error
+		}
 		return nil
 	default:
 		return ErrInvalidState
