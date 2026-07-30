@@ -847,8 +847,8 @@ func attachDeliveryUsageItems(db *gorm.DB, view *DeliveryView) {
 	if len(usages) == 0 {
 		return
 	}
-	if view.DeliveryTimeRemark == "" && usages[0].Remark != "" {
-		view.DeliveryTimeRemark = usages[0].Remark
+	if view.DeliveryTimeRemark == "" && usages[0].Remark != nil && *usages[0].Remark != "" {
+		view.DeliveryTimeRemark = *usages[0].Remark
 	}
 	lines := make([]DeliveryUsageLine, 0, len(usages))
 	for i := range usages {
