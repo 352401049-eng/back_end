@@ -239,6 +239,7 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.GET("/user/takeout-orders", th.List)
 	r.GET("/user/takeout-orders/:id", th.Get)
 	r.POST("/user/takeout-orders/:id/pay", th.Pay)
+	r.POST("/user/takeout-orders/:id/cancel", th.Cancel)
 	r.POST("/user/delivery-fee-orders", dfh.Create)
 	r.POST("/user/delivery-fee-orders/:id/pay", dfh.Pay)
 	r.GET("/user/deliveries", h.ListUserDeliveries)

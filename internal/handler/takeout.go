@@ -92,6 +92,32 @@ func (h *TakeoutHandler) Pay(c *gin.Context) {
 	response.OK(c, result)
 }
 
+// CancelTakeout godoc
+// @Summary      取消待支付外卖订单
+// @Tags         用户-外卖
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "外卖单 ID"
+// @Success      200  {object}  response.Body
+// @Router       /user/takeout-orders/{id}/cancel [post]
+func (h *TakeoutHandler) Cancel(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	if err := h.TakeoutSvc.Cancel(accountID, id); err != nil {
+		handleTakeoutError(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
 // ListTakeouts godoc
 // @Summary      外卖订单列表
 // @Tags         用户-外卖

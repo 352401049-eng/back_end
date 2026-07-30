@@ -145,6 +145,7 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 	}
 
 	var pkgSelJSON json.RawMessage
+	var pkgUnits [][]PackageSelectionInput
 	if product.ItemType == model.ProductItemTypePackage {
 		groups, err := (&ProductService{DB: s.DB}).LoadPackageGroups(product.ID)
 		if err != nil {
@@ -163,15 +164,15 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 		if hasOptional && len(in.PackageSelections) == 0 && len(in.PackageUnits) == 0 {
 			return nil, ErrPackageSelectionRequired
 		}
-		units, err := normalizePackageUnits(in.PackageUnits, in.PackageSelections, in.Quantity)
+		pkgUnits, err = normalizePackageUnits(in.PackageUnits, in.PackageSelections, in.Quantity)
 		if err != nil {
 			return nil, err
 		}
-		if err := validatePackageUnitsStock(s.DB, product.ID, units); err != nil {
+		if err := validatePackageUnitsStock(s.DB, product.ID, pkgUnits); err != nil {
 			return nil, err
 		}
-		stored := make([]PackageUnitInput, len(units))
-		for i, u := range units {
+		stored := make([]PackageUnitInput, len(pkgUnits))
+		for i, u := range pkgUnits {
 			stored[i] = PackageUnitInput{PackageSelections: u}
 		}
 		raw, err := json.Marshal(stored)
@@ -181,18 +182,33 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 		pkgSelJSON = raw
 	}
 
-	needsOpts, err := ProductNeedsOptions(s.DB, product.ID)
-	if err != nil {
-		return nil, err
-	}
 	var optSnap model.OptionSelectionSnapshot
-	if needsOpts {
-		optSnap, err = ValidateAndBuildOptionSnapshot(s.DB, product.ID, in.Quantity, in.OptionSelections)
+	if product.ItemType == model.ProductItemTypePackage {
+		needsChildOpts, err := packageNeedsChildOptions(s.DB, product.ID, pkgUnits)
 		if err != nil {
 			return nil, err
 		}
-	} else if len(in.OptionSelections) > 0 {
-		return nil, ErrOptionInvalid
+		if needsChildOpts {
+			optSnap, err = validateOptionsForPackageUnits(s.DB, product.ID, pkgUnits, in.OptionSelections)
+			if err != nil {
+				return nil, err
+			}
+		} else if len(in.OptionSelections) > 0 {
+			return nil, ErrOptionInvalid
+		}
+	} else {
+		needsOpts, err := ProductNeedsOptions(s.DB, product.ID)
+		if err != nil {
+			return nil, err
+		}
+		if needsOpts {
+			optSnap, err = ValidateAndBuildOptionSnapshot(s.DB, product.ID, in.Quantity, in.OptionSelections)
+			if err != nil {
+				return nil, err
+			}
+		} else if len(in.OptionSelections) > 0 {
+			return nil, ErrOptionInvalid
+		}
 	}
 
 	unitPrice := product.Price
@@ -219,7 +235,7 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 	expireAt := now.Add(time.Duration(s.payTimeoutMinutes()) * time.Minute)
 
 	var takeout model.TakeoutOrder
-	err = s.DB.Transaction(func(tx *gorm.DB) error {
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		takeout = model.TakeoutOrder{
 			OrderNo:            genTakeoutOrderNo(),
 			AccountID:          accountID,
@@ -387,32 +403,64 @@ func (s *TakeoutService) ExpireStalePendingPay(now time.Time) (int, error) {
 
 func (s *TakeoutService) expireOnePendingPayTakeout(takeoutID uint64) error {
 	return s.DB.Transaction(func(tx *gorm.DB) error {
+		return s.cancelPendingPayInTx(tx, takeoutID, 0)
+	})
+}
+
+// Cancel 用户取消待支付外卖单：关微信单、回滚预扣库存。
+func (s *TakeoutService) Cancel(accountID, takeoutID uint64) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
 		var to model.TakeoutOrder
 		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
 			First(&to, takeoutID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrTakeoutNotFound
+			}
 			return err
 		}
-		if to.Status != model.TakeoutStatusPendingPay {
+		if to.AccountID != accountID {
+			return ErrTakeoutForbidden
+		}
+		if to.Status == model.TakeoutStatusCancelled {
 			return nil
 		}
-		if to.PayStatus == model.PayStatusPaid {
-			return s.MarkPaidInTx(tx, takeoutID, time.Now())
+		if to.Status != model.TakeoutStatusPendingPay || to.PayStatus == model.PayStatusPaid {
+			return ErrTakeoutStatusInvalid
 		}
-		if wp, ok := s.Payment.(*payment.WeChatProvider); ok && wp.Client != nil {
-			if err := wp.Client.CloseOrder(wp.MchID, to.OrderNo); err != nil {
-				log.Printf("[pay-expire] close wechat takeout %s failed: %v", to.OrderNo, err)
-			}
-		}
-		if err := restoreTakeoutStockInTx(tx, &to); err != nil {
-			return err
-		}
-		return query.NotDeleted(tx.Model(&model.TakeoutOrder{})).
-			Where("id = ? AND status = ?", takeoutID, model.TakeoutStatusPendingPay).
-			Updates(map[string]interface{}{
-				"status":        model.TakeoutStatusCancelled,
-				"pay_expire_at": nil,
-			}).Error
+		return s.cancelPendingPayInTx(tx, takeoutID, accountID)
 	})
+}
+
+// cancelPendingPayInTx 关闭待支付外卖单；accountID>0 时校验归属。
+func (s *TakeoutService) cancelPendingPayInTx(tx *gorm.DB, takeoutID, accountID uint64) error {
+	var to model.TakeoutOrder
+	if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&to, takeoutID).Error; err != nil {
+		return err
+	}
+	if accountID > 0 && to.AccountID != accountID {
+		return ErrTakeoutForbidden
+	}
+	if to.Status != model.TakeoutStatusPendingPay {
+		return nil
+	}
+	if to.PayStatus == model.PayStatusPaid {
+		return s.MarkPaidInTx(tx, takeoutID, time.Now())
+	}
+	if wp, ok := s.Payment.(*payment.WeChatProvider); ok && wp.Client != nil {
+		if err := wp.Client.CloseOrder(wp.MchID, to.OrderNo); err != nil {
+			log.Printf("[pay-expire] close wechat takeout %s failed: %v", to.OrderNo, err)
+		}
+	}
+	if err := restoreTakeoutStockInTx(tx, &to); err != nil {
+		return err
+	}
+	return query.NotDeleted(tx.Model(&model.TakeoutOrder{})).
+		Where("id = ? AND status = ?", takeoutID, model.TakeoutStatusPendingPay).
+		Updates(map[string]interface{}{
+			"status":        model.TakeoutStatusCancelled,
+			"pay_expire_at": nil,
+		}).Error
 }
 
 func (s *TakeoutService) attachPickupCode(view *TakeoutView) {
