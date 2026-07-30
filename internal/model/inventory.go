@@ -64,6 +64,8 @@ type UserInventoryUsage struct {
 	Remark               *string          `gorm:"size:256" json:"remark,omitempty"`
 	PackageSelections   PackageSelectionSnapshot `gorm:"type:json;serializer:json" json:"package_selections,omitempty"`
 	PackageSelectStatus uint8                    `gorm:"not null;default:0" json:"package_select_status"`
+	OptionSelections    OptionSelectionSnapshot  `gorm:"type:json;serializer:json" json:"option_selections,omitempty"`
+	OptionSelectStatus  uint8                    `gorm:"not null;default:0" json:"option_select_status"`
 	CreatedAt            time.Time        `json:"created_at"`
 	UpdatedAt            time.Time        `json:"updated_at"`
 	SoftDelete
