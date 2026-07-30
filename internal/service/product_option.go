@@ -36,6 +36,7 @@ type OptionItemInput struct {
 
 type OptionSelectionUnitInput struct {
 	UnitIndex uint32                      `json:"unit_index"`
+	ProductID uint64                      `json:"product_id,omitempty"`
 	Groups    []OptionSelectionGroupInput `json:"groups"`
 }
 

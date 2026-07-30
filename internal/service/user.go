@@ -281,11 +281,18 @@ func (s *UserService) ListInventory(accountID uint64) (map[string]interface{}, e
 	for _, it := range items {
 		totalQty += int64(it.Quantity)
 		mid := it.Product.MerchantID
+		hasOptions := false
+		if it.Product.ItemType != model.ProductItemTypePackage {
+			if needs, err := ProductNeedsOptions(s.DB, it.ProductID); err == nil {
+				hasOptions = needs
+			}
+		}
 		list = append(list, map[string]interface{}{
 			"id": it.ID, "account_id": it.AccountID, "product_id": it.ProductID,
 			"spec": it.Spec, "quantity": it.Quantity, "last_order_id": it.LastOrderID,
 			"created_at": it.CreatedAt, "updated_at": it.UpdatedAt,
 			"product": it.Product, "merchant_id": mid, "shop_name": shopNames[mid],
+			"has_options": hasOptions,
 		})
 	}
 	return map[string]interface{}{

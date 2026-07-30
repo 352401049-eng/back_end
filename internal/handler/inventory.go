@@ -122,6 +122,7 @@ type UseInventoryRequest struct {
 	DeliveryLongitude *float64                       `json:"delivery_longitude"`
 	Remark            *string                        `json:"remark"`
 	PackageSelections []service.PackageSelectionInput `json:"package_selections"`
+	OptionSelections  []service.OptionSelectionUnitInput `json:"option_selections"`
 }
 
 type UseBatchInventoryRequest struct {
@@ -168,7 +169,7 @@ func (h *UserHandler) UseInventory(c *gin.Context) {
 	view, err := h.InventorySvc.Use(accountID, inventoryID, service.UseInventoryInput{
 		Quantity: req.Quantity, DeliveryType: *req.DeliveryType,
 		AddressID: req.AddressID, DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
-		Remark: req.Remark, PackageSelections: req.PackageSelections,
+		Remark: req.Remark, PackageSelections: req.PackageSelections, OptionSelections: req.OptionSelections,
 	})
 	if err != nil {
 		handleInventoryError(c, err)
@@ -328,6 +329,10 @@ func handleInventoryError(c *gin.Context, err error) {
 		response.BadRequest(c, "该商品不支持到店自取")
 	case errors.Is(err, service.ErrPackageSelectionRequired):
 		response.BadRequest(c, "套餐外卖请先完成选配")
+	case errors.Is(err, service.ErrOptionRequired):
+		response.BadRequest(c, "请先完成规格选择")
+	case errors.Is(err, service.ErrOptionInvalid):
+		response.BadRequest(c, err.Error())
 	case errors.Is(err, service.ErrInsufficientStock):
 		response.BadRequest(c, "套餐内商品库存不足")
 	case errors.Is(err, service.ErrInvalidProductArg):

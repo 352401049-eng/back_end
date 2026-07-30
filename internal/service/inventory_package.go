@@ -247,6 +247,219 @@ func enrichUsageViewPackage(view *InventoryUsageView) {
 	}
 }
 
+func enrichUsageViewOptions(db *gorm.DB, view *InventoryUsageView) {
+	if view == nil || view.Product == nil {
+		return
+	}
+	if view.Product.ItemType == model.ProductItemTypePackage {
+		return
+	}
+	needs, err := ProductNeedsOptions(db, view.ProductID)
+	if err == nil {
+		view.HasOptions = needs
+	}
+}
+
+// applyOptionSelectionsForUsage 配送时校验并落库规格；自取待核销时标记待选。
+func applyOptionSelectionsForUsage(
+	tx *gorm.DB,
+	product model.Product,
+	deliveryType uint8,
+	quantity uint32,
+	packageSelections []PackageSelectionInput,
+	optionSelections []OptionSelectionUnitInput,
+) (model.OptionSelectionSnapshot, uint8, error) {
+	if product.ItemType == model.ProductItemTypePackage {
+		if deliveryType != model.DeliveryTypeDelivery {
+			needs, err := packageNeedsChildOptions(tx, product.ID, nil)
+			if err != nil {
+				return nil, 0, err
+			}
+			if !needs {
+				return nil, model.OptionSelectNone, nil
+			}
+			return nil, model.OptionSelectPending, nil
+		}
+		units, err := normalizePackageUnits(nil, packageSelections, quantity)
+		if err != nil {
+			return nil, 0, err
+		}
+		needs, err := packageNeedsChildOptions(tx, product.ID, units)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !needs {
+			return nil, model.OptionSelectNone, nil
+		}
+		snap, err := validateOptionsForPackageUnits(tx, product.ID, units, optionSelections)
+		if err != nil {
+			return nil, 0, err
+		}
+		return snap, model.OptionSelectDone, nil
+	}
+
+	needs, err := ProductNeedsOptions(tx, product.ID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !needs {
+		return nil, model.OptionSelectNone, nil
+	}
+	if deliveryType == model.DeliveryTypePickup {
+		return nil, model.OptionSelectPending, nil
+	}
+	snap, err := ValidateAndBuildOptionSnapshot(tx, product.ID, quantity, optionSelections)
+	if err != nil {
+		return nil, 0, err
+	}
+	return snap, model.OptionSelectDone, nil
+}
+
+// applyOptionSelectionsForVerify 核销完成时校验规格（自取或套餐子项）。
+func applyOptionSelectionsForVerify(
+	tx *gorm.DB,
+	product *model.Product,
+	productID uint64,
+	quantity uint32,
+	packageUnits [][]PackageSelectionInput,
+	optionSelections []OptionSelectionUnitInput,
+) (model.OptionSelectionSnapshot, uint8, error) {
+	if product != nil && product.ItemType == model.ProductItemTypePackage {
+		needs, err := packageNeedsChildOptions(tx, productID, packageUnits)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !needs {
+			return nil, model.OptionSelectNone, nil
+		}
+		snap, err := validateOptionsForPackageUnits(tx, productID, packageUnits, optionSelections)
+		if err != nil {
+			return nil, 0, err
+		}
+		return snap, model.OptionSelectDone, nil
+	}
+
+	needs, err := ProductNeedsOptions(tx, productID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !needs {
+		return nil, model.OptionSelectNone, nil
+	}
+	snap, err := ValidateAndBuildOptionSnapshot(tx, productID, quantity, optionSelections)
+	if err != nil {
+		return nil, 0, err
+	}
+	return snap, model.OptionSelectDone, nil
+}
+
+func packageNeedsChildOptions(tx *gorm.DB, packageProductID uint64, units [][]PackageSelectionInput) (bool, error) {
+	if len(units) == 0 {
+		groups, err := (&ProductService{DB: tx}).LoadPackageGroups(packageProductID)
+		if err != nil {
+			return false, err
+		}
+		for _, g := range groups {
+			if g.GroupType == model.PackageGroupTypeFixed {
+				for _, it := range g.Items {
+					needs, err := ProductNeedsOptions(tx, it.ProductID)
+					if err != nil {
+						return false, err
+					}
+					if needs {
+						return true, nil
+					}
+				}
+			}
+		}
+		return false, nil
+	}
+	for _, sels := range units {
+		lines, err := ResolvePackageSelections(tx, packageProductID, sels)
+		if err != nil {
+			return false, err
+		}
+		for _, ln := range lines {
+			needs, err := ProductNeedsOptions(tx, ln.Product.ID)
+			if err != nil {
+				return false, err
+			}
+			if needs {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// validateOptionsForPackageUnits 套餐子商品规格：按子商品汇总份数并合并快照。
+func validateOptionsForPackageUnits(
+	tx *gorm.DB,
+	packageProductID uint64,
+	units [][]PackageSelectionInput,
+	optionSelections []OptionSelectionUnitInput,
+) (model.OptionSelectionSnapshot, error) {
+	needCount := map[uint64]uint32{}
+	for _, sels := range units {
+		lines, err := ResolvePackageSelections(tx, packageProductID, sels)
+		if err != nil {
+			return nil, err
+		}
+		for _, ln := range lines {
+			needs, err := ProductNeedsOptions(tx, ln.Product.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !needs {
+				continue
+			}
+			needCount[ln.Product.ID] += ln.Qty
+		}
+	}
+	if len(needCount) == 0 {
+		return nil, nil
+	}
+	if len(needCount) > 1 {
+		for _, sel := range optionSelections {
+			if sel.ProductID == 0 {
+				return nil, fmt.Errorf("%w: 套餐多子商品须指定 product_id", ErrOptionInvalid)
+			}
+		}
+	}
+
+	merged := make(model.OptionSelectionSnapshot, 0)
+	for productID, qty := range needCount {
+		filtered := filterOptionSelectionsForProduct(optionSelections, productID, len(needCount))
+		if qty > 0 && len(filtered) == 0 {
+			return nil, ErrOptionRequired
+		}
+		snap, err := ValidateAndBuildOptionSnapshot(tx, productID, qty, filtered)
+		if err != nil {
+			return nil, err
+		}
+		merged = append(merged, snap...)
+	}
+	return merged, nil
+}
+
+func filterOptionSelectionsForProduct(
+	selections []OptionSelectionUnitInput,
+	productID uint64,
+	childCount int,
+) []OptionSelectionUnitInput {
+	out := make([]OptionSelectionUnitInput, 0, len(selections))
+	for _, sel := range selections {
+		if sel.ProductID != 0 && sel.ProductID != productID {
+			continue
+		}
+		if sel.ProductID == 0 && childCount > 1 {
+			continue
+		}
+		out = append(out, sel)
+	}
+	return out
+}
+
 func validateFulfillmentFlags(product model.Product, deliveryType uint8) error {
 	if product.ItemType == model.ProductItemTypeVirtual && deliveryType == model.DeliveryTypeDelivery {
 		return ErrVirtualNotDeliverable

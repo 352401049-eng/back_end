@@ -318,8 +318,9 @@ type ReviewOrderRequest struct {
 }
 
 type VerifyRequest struct {
-	Code         string                    `json:"code" binding:"required" example:"V1a2b3c4d"`
-	PackageUnits []service.PackageUnitInput `json:"package_units"`
+	Code             string                         `json:"code" binding:"required" example:"V1a2b3c4d"`
+	PackageUnits     []service.PackageUnitInput     `json:"package_units"`
+	OptionSelections []service.OptionSelectionUnitInput `json:"option_selections"`
 }
 
 // ListMerchantOrders godoc
@@ -510,7 +511,7 @@ func (h *MerchantOrderHandler) Verify(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	record, err := h.VerifySvc.Verify(*scope, operatorID, req.Code, req.PackageUnits)
+	record, err := h.VerifySvc.Verify(*scope, operatorID, req.Code, req.PackageUnits, req.OptionSelections)
 	if err != nil {
 		handleVerifyError(c, err)
 		return
@@ -530,6 +531,10 @@ func handleVerifyError(c *gin.Context, err error) {
 		response.Fail(c, 403, 403, "非本店商品，无法核销")
 	case errors.Is(err, service.ErrPackageSelectionRequired):
 		response.BadRequest(c, "套餐请先完成选配再核销")
+	case errors.Is(err, service.ErrOptionRequired):
+		response.BadRequest(c, "请先完成规格选择再核销")
+	case errors.Is(err, service.ErrOptionInvalid):
+		response.BadRequest(c, err.Error())
 	case errors.Is(err, service.ErrInsufficientStock):
 		response.BadRequest(c, "套餐内商品库存不足")
 	case errors.Is(err, service.ErrInvalidProductArg):

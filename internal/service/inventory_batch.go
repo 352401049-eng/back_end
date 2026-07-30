@@ -14,6 +14,7 @@ type UseBatchItemInput struct {
 	InventoryID       uint64                  `json:"inventory_id"`
 	Quantity          uint32                  `json:"quantity"`
 	PackageSelections []PackageSelectionInput `json:"package_selections"`
+	OptionSelections  []OptionSelectionUnitInput `json:"option_selections"`
 }
 
 type UseBatchInput struct {
@@ -49,6 +50,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 		inv     model.UserInventory
 		qty     uint32
 		sels    []PackageSelectionInput
+		optSels []OptionSelectionUnitInput
 	}
 	loaded := make([]loadedItem, 0, len(input.Items))
 	var merchantID uint64
@@ -82,7 +84,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 		if err := validateFulfillmentFlags(inv.Product, deliveryType); err != nil {
 			return nil, err
 		}
-		loaded = append(loaded, loadedItem{inv: inv, qty: qty, sels: it.PackageSelections})
+		loaded = append(loaded, loadedItem{inv: inv, qty: qty, sels: it.PackageSelections, optSels: it.OptionSelections})
 	}
 
 	// 同一背包行可能拆成多份提交（每份独立套餐选配），需按合计校验库存
@@ -165,12 +167,20 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 				}
 			}
 
+			optSnap, optStatus, err := applyOptionSelectionsForUsage(
+				tx, inv.Product, deliveryType, item.qty, item.sels, item.optSels,
+			)
+			if err != nil {
+				return err
+			}
+
 			usage := model.UserInventoryUsage{
 				AccountID: accountID, InventoryID: inv.ID, ProductID: inv.ProductID,
 				MerchantID: merchantID, SourceOrderID: inv.LastOrderID,
 				Quantity: item.qty, DeliveryType: deliveryType,
 				AddressSnapshot: addrSnap, Status: status, Remark: input.Remark,
 				PackageSelections: snap, PackageSelectStatus: pkgStatus,
+				OptionSelections: optSnap, OptionSelectStatus: optStatus,
 			}
 			if deliveryID > 0 {
 				usage.DeliveryOrderID = &deliveryID
@@ -208,6 +218,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 			}
 			view.Product = &inv.Product
 			enrichUsageViewPackage(&view)
+			enrichUsageViewOptions(s.DB, &view)
 			result.Usages = append(result.Usages, view)
 		}
 		return nil

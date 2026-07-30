@@ -51,6 +51,7 @@ type UseInventoryInput struct {
 	DeliveryLongitude *float64
 	Remark            *string
 	PackageSelections []PackageSelectionInput
+	OptionSelections  []OptionSelectionUnitInput
 }
 
 type InventoryUsageView struct {
@@ -59,6 +60,7 @@ type InventoryUsageView struct {
 	VerifyCode               *string `json:"verify_code,omitempty"`
 	Buyer                    *BuyerBrief `json:"buyer,omitempty"`
 	IsPackage                bool    `json:"is_package"`
+	HasOptions               bool    `json:"has_options"`
 	PackageSelectStatusText  string  `json:"package_select_status_text,omitempty"`
 	PackageSelectionText     string  `json:"package_selection_text,omitempty"`
 }
@@ -254,12 +256,20 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			}
 		}
 
+		optSnap, optStatus, err := applyOptionSelectionsForUsage(
+			tx, inv.Product, deliveryType, input.Quantity, input.PackageSelections, input.OptionSelections,
+		)
+		if err != nil {
+			return err
+		}
+
 		usage = model.UserInventoryUsage{
 			AccountID: accountID, InventoryID: inv.ID, ProductID: inv.ProductID,
 			MerchantID: inv.Product.MerchantID, SourceOrderID: inv.LastOrderID,
 			Quantity: input.Quantity, DeliveryType: deliveryType,
 			AddressSnapshot: addrSnap, Status: status, Remark: input.Remark,
 			PackageSelections: snap, PackageSelectStatus: pkgStatus,
+			OptionSelections: optSnap, OptionSelectStatus: optStatus,
 		}
 		if err := tx.Create(&usage).Error; err != nil {
 			return err
@@ -318,6 +328,7 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 	}
 	view.Product = &inv.Product
 	enrichUsageViewPackage(view)
+	enrichUsageViewOptions(s.DB, view)
 	return view, nil
 }
 
@@ -497,6 +508,7 @@ func (s *InventoryService) GetUsageView(accountID, usageID uint64) (*InventoryUs
 	}
 	s.enrichUsageBuyer(view)
 	enrichUsageViewPackage(view)
+	enrichUsageViewOptions(s.DB, view)
 	return view, nil
 }
 
@@ -626,7 +638,7 @@ func (s *InventoryService) ListUsagesForAdmin(merchantID *uint64, status *uint8,
 	return views, total, nil
 }
 
-func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, packageUnits []PackageUnitInput) error {
+func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, packageUnits []PackageUnitInput, optionSelections []OptionSelectionUnitInput) error {
 	var usage model.UserInventoryUsage
 	if err := query.NotDeleted(tx).
 		Preload("Product", "is_deleted = ?", model.NotDeleted).
@@ -636,6 +648,7 @@ func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, pa
 	updates := map[string]interface{}{
 		"status": model.InventoryUsageCompleted,
 	}
+	var resolvedPackageUnits [][]PackageSelectionInput
 	if usage.Product != nil && usage.Product.ItemType == model.ProductItemTypePackage {
 		// 套餐必须先选配再核销完成：不允许进入 pending
 		if len(packageUnits) == 0 {
@@ -645,6 +658,7 @@ func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, pa
 		if err != nil {
 			return err
 		}
+		resolvedPackageUnits = units
 		snap, err := applyPackageUnitsInTx(tx, usage.ProductID, usage.Quantity, units)
 		if err != nil {
 			return err
@@ -655,6 +669,21 @@ func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, pa
 		}
 		updates["package_selections"] = json.RawMessage(raw)
 		updates["package_select_status"] = model.PackageSelectDone
+	}
+
+	optSnap, optStatus, err := applyOptionSelectionsForVerify(
+		tx, usage.Product, usage.ProductID, usage.Quantity, resolvedPackageUnits, optionSelections,
+	)
+	if err != nil {
+		return err
+	}
+	if optStatus != model.OptionSelectNone {
+		raw, err := json.Marshal(optSnap)
+		if err != nil {
+			return err
+		}
+		updates["option_selections"] = json.RawMessage(raw)
+		updates["option_select_status"] = optStatus
 	}
 	// 用纯 Model 更新，避免 Preload 的 Product 触发关联 upsert；
 	// map Updates 不会走字段 serializer:json，须自行 JSON 编码。
