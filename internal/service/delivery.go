@@ -196,8 +196,8 @@ func (s *DeliveryService) Accept(riderID, deliveryID uint64) (*DeliveryView, err
 			// ???????? usage ?????? usage ???????????????
 			var active int64
 			_ = query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
-				Where("delivery_order_id = ? AND status NOT IN ?", d.ID, []uint8{
-					model.InventoryUsageCancelled, model.InventoryUsageCancelPending,
+				Where("delivery_order_id = ? AND status NOT IN ?", d.ID, []int{
+					int(model.InventoryUsageCancelled), int(model.InventoryUsageCancelPending),
 				}).Count(&active)
 			if active == 0 && d.InventoryUsageID != nil {
 				var usage model.UserInventoryUsage
@@ -324,7 +324,7 @@ func (s *DeliveryService) RejectPrepare(merchantID, deliveryID uint64, reason st
 		var usages []model.UserInventoryUsage
 		if err := query.NotDeleted(tx).
 			Where("delivery_order_id = ? AND status IN ?", deliveryID,
-				[]uint8{model.InventoryUsagePendingShip, model.InventoryUsageCancelPending}).
+				[]int{int(model.InventoryUsagePendingShip), int(model.InventoryUsageCancelPending)}).
 			Find(&usages).Error; err != nil {
 			return err
 		}
@@ -382,7 +382,7 @@ func (s *DeliveryService) RejectPrepare(merchantID, deliveryID uint64, reason st
 		if d.OrderID != nil {
 			_ = tx.Model(&model.Order{}).
 				Where("id = ? AND status IN ?", *d.OrderID,
-					[]uint8{model.OrderStatusPreparing, model.OrderStatusPendingShip}).
+					[]int{int(model.OrderStatusPreparing), int(model.OrderStatusPendingShip)}).
 				Updates(map[string]interface{}{
 					"status":                model.OrderStatusPendingFulfill,
 					"merchant_review_stage": model.MerchantReviewApproved,

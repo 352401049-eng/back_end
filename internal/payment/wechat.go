@@ -463,7 +463,7 @@ func (p *WeChatProvider) retrieveAndSettlePayments() (*NotifyResult, error) {
 	var orders []model.Order
 	if err := query.NotDeleted(p.DB).
 		Where("status IN ? AND pay_status = ?",
-			[]uint8{model.OrderStatusPendingPay, model.OrderStatusPendingGroup},
+			[]int{int(model.OrderStatusPendingPay), int(model.OrderStatusPendingGroup)},
 			model.PayStatusUnpaid).
 		Find(&orders).Error; err != nil {
 		return nil, err

@@ -445,7 +445,7 @@ func (s *InventoryService) finalizeCancelUsage(accountID uint64, usage *model.Us
 			errNext := query.NotDeleted(tx).
 				Where("delivery_order_id = ? AND id <> ? AND status NOT IN ?",
 					*usage.DeliveryOrderID, usage.ID,
-					[]uint8{model.InventoryUsageCancelled}).
+					[]int{int(model.InventoryUsageCancelled)}).
 				Order("id ASC").First(&next).Error
 			if errNext == nil {
 				var d model.DeliveryOrder
