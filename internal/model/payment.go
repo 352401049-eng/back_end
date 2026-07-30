@@ -13,6 +13,8 @@ const (
 // PaymentTransaction 支付流水。独立于 order 记录微信侧信息，用于对账和幂等。
 type PaymentTransaction struct {
 	ID            uint64    `gorm:"primaryKey" json:"id"`
+	SubjectType   string    `gorm:"size:32;not null;default:order" json:"subject_type"`
+	SubjectID     uint64    `gorm:"not null;default:0" json:"subject_id"`
 	OrderID       uint64    `gorm:"not null" json:"order_id"`
 	OrderNo       string    `gorm:"size:32;not null" json:"order_no"`
 	PrepayID      *string   `gorm:"size:64;uniqueIndex" json:"prepay_id,omitempty"`
