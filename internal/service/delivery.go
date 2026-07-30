@@ -70,6 +70,7 @@ type DeliveryView struct {
 	model.DeliveryOrder
 	StatusText string              `json:"status_text"`
 	UsageItems []DeliveryUsageLine `json:"usage_items,omitempty"`
+	VerifyCode *string             `json:"verify_code,omitempty"`
 }
 
 type DeliveryService struct {
@@ -118,7 +119,7 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
-	return toDeliveryViews(s.DB, list), total, nil
+	return toRiderDeliveryViews(s.DB, list), total, nil
 }
 
 // ListForUser scope: active=??? pending_confirm=??????history=????
@@ -229,7 +230,7 @@ func (s *DeliveryService) Accept(riderID, deliveryID uint64) (*DeliveryView, err
 	if err != nil {
 		return nil, err
 	}
-	return s.getViewByID(deliveryID)
+	return s.getRiderViewByID(deliveryID)
 }
 
 func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, error) {
@@ -254,7 +255,7 @@ func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, erro
 	if d.OrderID != nil {
 		_ = s.DB.Model(&model.Order{}).Where("id = ?", *d.OrderID).Update("status", model.OrderStatusShipping).Error
 	}
-	return s.getViewByID(deliveryID)
+	return s.getRiderViewByID(deliveryID)
 }
 
 // MarkPrepared ??????????(merchant_prepared=0) -> ????1)??
@@ -426,7 +427,7 @@ func (s *DeliveryService) ReportException(riderID, deliveryID uint64, reason str
 	if err != nil {
 		return nil, err
 	}
-	return s.getViewByID(deliveryID)
+	return s.getRiderViewByID(deliveryID)
 }
 
 // deliveryBelongsToMerchant ?????????????Order.MerchantID ??InventoryUsage.MerchantID???
@@ -480,7 +481,7 @@ func (s *DeliveryService) Complete(riderID, deliveryID uint64, input CompleteDel
 	if err != nil {
 		return nil, err
 	}
-	return s.getViewByID(deliveryID)
+	return s.getRiderViewByID(deliveryID)
 }
 
 func (s *DeliveryService) ConfirmReceipt(accountID, deliveryID uint64) (*DeliveryView, error) {
@@ -675,6 +676,15 @@ func (s *DeliveryService) getViewByID(id uint64) (*DeliveryView, error) {
 	return &view, nil
 }
 
+func (s *DeliveryService) getRiderViewByID(id uint64) (*DeliveryView, error) {
+	d, err := s.getByID(id)
+	if err != nil {
+		return nil, err
+	}
+	view := toRiderDeliveryView(s.DB, *d)
+	return &view, nil
+}
+
 // GetForRider ???????????????????????????????
 func (s *DeliveryService) GetForRider(riderID, deliveryID uint64) (*DeliveryView, error) {
 	d, err := s.getByID(deliveryID)
@@ -688,7 +698,7 @@ func (s *DeliveryService) GetForRider(riderID, deliveryID uint64) (*DeliveryView
 	if d.RiderID != nil && *d.RiderID != riderID {
 		return nil, ErrDeliveryForbidden
 	}
-	view := toDeliveryView(s.DB, *d)
+	view := toRiderDeliveryView(s.DB, *d)
 	return &view, nil
 }
 
@@ -722,6 +732,58 @@ func toDeliveryView(db *gorm.DB, d model.DeliveryOrder) DeliveryView {
 	}
 	attachDeliveryUsageItems(db, &view)
 	return view
+}
+
+func toRiderDeliveryViews(db *gorm.DB, list []model.DeliveryOrder) []DeliveryView {
+	views := make([]DeliveryView, 0, len(list))
+	for i := range list {
+		views = append(views, toRiderDeliveryView(db, list[i]))
+	}
+	return views
+}
+
+func toRiderDeliveryView(db *gorm.DB, d model.DeliveryOrder) DeliveryView {
+	view := toDeliveryView(db, d)
+	attachRiderVerifyCode(db, &view)
+	return view
+}
+
+// attachRiderVerifyCode 背包跑腿配送单在骑手接单后附带核销码；外卖单永不返回。
+func attachRiderVerifyCode(db *gorm.DB, view *DeliveryView) {
+	if db == nil || view == nil {
+		return
+	}
+	if view.TakeoutOrderID != nil || view.InventoryUsageID == nil || view.RiderID == nil {
+		return
+	}
+	usageIDs := make([]uint64, 0, 1+len(view.UsageItems))
+	usageIDs = append(usageIDs, *view.InventoryUsageID)
+	seen := map[uint64]struct{}{*view.InventoryUsageID: {}}
+	for _, line := range view.UsageItems {
+		if line.UsageID == 0 {
+			continue
+		}
+		if _, ok := seen[line.UsageID]; ok {
+			continue
+		}
+		seen[line.UsageID] = struct{}{}
+		usageIDs = append(usageIDs, line.UsageID)
+	}
+	var codes []string
+	for _, uid := range usageIDs {
+		var vc model.VerificationCode
+		if err := query.NotDeleted(db).
+			Where("inventory_usage_id = ? AND status = ?", uid, model.VerificationCodeUnused).
+			First(&vc).Error; err != nil {
+			continue
+		}
+		codes = append(codes, vc.Code)
+	}
+	if len(codes) == 0 {
+		return
+	}
+	joined := strings.Join(codes, "、")
+	view.VerifyCode = &joined
 }
 
 func attachDeliveryUsageItems(db *gorm.DB, view *DeliveryView) {
