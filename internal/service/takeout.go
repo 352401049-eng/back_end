@@ -961,7 +961,7 @@ func (s *TakeoutService) Reject(merchantID, takeoutID uint64, reason string) (*T
 			return err
 		}
 		res := query.NotDeleted(tx.Model(&model.TakeoutOrder{})).
-			Where("id = ? AND status IN ?", takeoutID, []uint8{model.TakeoutStatusPreparing, model.TakeoutStatusFulfilling}).
+			Where("id = ? AND status IN ?", takeoutID, []int{int(model.TakeoutStatusPreparing), int(model.TakeoutStatusFulfilling)}).
 			Updates(map[string]interface{}{
 				"status": model.TakeoutStatusCancelled,
 				"remark": reasonText,
