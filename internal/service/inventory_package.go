@@ -23,6 +23,44 @@ type PackageUnitInput struct {
 	PackageSelections []PackageSelectionInput `json:"package_selections"`
 }
 
+// validatePackageUnitsStock 汇总多份套餐组件需求并校验库存（组件需求 = 各份选配 qty 之和）。
+func validatePackageUnitsStock(db *gorm.DB, packageProductID uint64, units [][]PackageSelectionInput) error {
+	need := map[uint64]uint32{}
+	for _, sels := range units {
+		lines, err := ResolvePackageSelections(db, packageProductID, sels)
+		if err != nil {
+			return err
+		}
+		if len(lines) == 0 {
+			return ErrPackageSelectionRequired
+		}
+		for _, ln := range lines {
+			need[ln.Product.ID] += ln.Qty
+		}
+	}
+	if len(need) == 0 {
+		return nil
+	}
+	ids := make([]uint64, 0, len(need))
+	for id := range need {
+		ids = append(ids, id)
+	}
+	var products []model.Product
+	if err := query.NotDeleted(db).Select("id", "stock").Where("id IN ?", ids).Find(&products).Error; err != nil {
+		return err
+	}
+	stockByID := make(map[uint64]uint32, len(products))
+	for _, p := range products {
+		stockByID[p.ID] = p.Stock
+	}
+	for id, qty := range need {
+		if stockByID[id] < qty {
+			return ErrInsufficientStock
+		}
+	}
+	return nil
+}
+
 func normalizePackageUnits(units []PackageUnitInput, single []PackageSelectionInput, quantity uint32) ([][]PackageSelectionInput, error) {
 	if quantity == 0 {
 		quantity = 1

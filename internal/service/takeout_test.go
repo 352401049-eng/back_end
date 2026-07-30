@@ -38,3 +38,23 @@ func TestTakeoutStatusMeta(t *testing.T) {
 		t.Fatalf("got %q %q", text, code)
 	}
 }
+
+func TestDecodeTakeoutPackageUnits(t *testing.T) {
+	raw := []byte(`[{"package_selections":[{"group_id":1,"items":[{"product_id":2,"qty":1}]}]}]`)
+	units, err := decodeTakeoutPackageUnits(raw, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 1 || len(units[0]) != 1 || units[0][0].GroupID != 1 {
+		t.Fatalf("unexpected units: %+v", units)
+	}
+
+	legacy := []byte(`[{"group_id":3,"items":[{"product_id":4,"qty":2}]}]`)
+	units, err = decodeTakeoutPackageUnits(legacy, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("want 2 units, got %d", len(units))
+	}
+}

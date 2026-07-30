@@ -36,6 +36,7 @@ type CreateTakeoutInput struct {
 	AddressID          uint64
 	DeliveryTimeRemark string
 	PackageSelections  []PackageSelectionInput
+	PackageUnits       []PackageUnitInput
 	OptionSelections   []OptionSelectionUnitInput
 }
 
@@ -117,8 +118,8 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 		}
 		return nil, err
 	}
-	if product.AllowDelivery != 1 {
-		return nil, fmt.Errorf("%w: 商品不支持配送", ErrInvalidProductArg)
+	if err := validateFulfillmentFlags(product, model.DeliveryTypeDelivery); err != nil {
+		return nil, err
 	}
 	if product.Stock < in.Quantity {
 		return nil, ErrInsufficientStock
@@ -156,13 +157,21 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 				break
 			}
 		}
-		if hasOptional && len(in.PackageSelections) == 0 {
+		if hasOptional && len(in.PackageSelections) == 0 && len(in.PackageUnits) == 0 {
 			return nil, ErrPackageSelectionRequired
 		}
-		if _, err := ResolvePackageSelections(s.DB, product.ID, in.PackageSelections); err != nil {
+		units, err := normalizePackageUnits(in.PackageUnits, in.PackageSelections, in.Quantity)
+		if err != nil {
 			return nil, err
 		}
-		raw, err := json.Marshal(in.PackageSelections)
+		if err := validatePackageUnitsStock(s.DB, product.ID, units); err != nil {
+			return nil, err
+		}
+		stored := make([]PackageUnitInput, len(units))
+		for i, u := range units {
+			stored[i] = PackageUnitInput{PackageSelections: u}
+		}
+		raw, err := json.Marshal(stored)
 		if err != nil {
 			return nil, err
 		}
@@ -317,18 +326,19 @@ func (s *TakeoutService) MarkPaidInTx(tx *gorm.DB, takeoutID uint64, at time.Tim
 		if product.ItemType != model.ProductItemTypePackage {
 			continue
 		}
-		sels, err := decodeTakeoutPackageSelections(to.PackageSelections)
+		units, err := decodeTakeoutPackageUnits(to.PackageSelections, item.Quantity)
 		if err != nil {
 			return err
 		}
-		lines, err := ResolvePackageSelections(tx, item.ProductID, sels)
-		if err != nil {
-			return err
-		}
-		for _, ln := range lines {
-			qty := ln.Qty * item.Quantity
-			if err := deductProductStockInTx(tx, ln.Product.ID, qty); err != nil {
+		for _, sels := range units {
+			lines, err := ResolvePackageSelections(tx, item.ProductID, sels)
+			if err != nil {
 				return err
+			}
+			for _, ln := range lines {
+				if err := deductProductStockInTx(tx, ln.Product.ID, ln.Qty); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -356,15 +366,25 @@ func (s *TakeoutService) MarkPaidInTx(tx *gorm.DB, takeoutID uint64, at time.Tim
 	return nil
 }
 
-func decodeTakeoutPackageSelections(raw json.RawMessage) ([]PackageSelectionInput, error) {
+func decodeTakeoutPackageUnits(raw json.RawMessage, quantity uint32) ([][]PackageSelectionInput, error) {
 	if len(raw) == 0 {
-		return nil, nil
+		return normalizePackageUnits(nil, nil, quantity)
+	}
+	var units []PackageUnitInput
+	if err := json.Unmarshal(raw, &units); err == nil && len(units) > 0 {
+		out := make([][]PackageSelectionInput, 0, len(units))
+		for _, u := range units {
+			out = append(out, u.PackageSelections)
+		}
+		if uint32(len(out)) == quantity {
+			return out, nil
+		}
 	}
 	var sels []PackageSelectionInput
 	if err := json.Unmarshal(raw, &sels); err != nil {
 		return nil, fmt.Errorf("%w: package_selections 无效", ErrInvalidProductArg)
 	}
-	return sels, nil
+	return normalizePackageUnits(nil, sels, quantity)
 }
 
 // ExpireStalePendingPay 关闭超时未支付外卖单（未扣库存，无需回滚）。

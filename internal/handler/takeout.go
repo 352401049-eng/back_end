@@ -23,6 +23,7 @@ type CreateTakeoutRequest struct {
 	AddressID          uint64                          `json:"address_id"`
 	DeliveryTimeRemark string                          `json:"delivery_time_remark"`
 	PackageSelections  []service.PackageSelectionInput `json:"package_selections"`
+	PackageUnits       []service.PackageUnitInput      `json:"package_units"`
 	OptionSelections   []service.OptionSelectionUnitInput `json:"option_selections"`
 }
 
@@ -53,6 +54,7 @@ func (h *TakeoutHandler) Create(c *gin.Context) {
 		AddressID:          req.AddressID,
 		DeliveryTimeRemark: req.DeliveryTimeRemark,
 		PackageSelections:  req.PackageSelections,
+		PackageUnits:       req.PackageUnits,
 		OptionSelections:   req.OptionSelections,
 	})
 	if err != nil {
@@ -171,6 +173,8 @@ func handleTakeoutError(c *gin.Context, err error) {
 		response.BadRequest(c, "收货地址不在配送范围内")
 	case errors.Is(err, service.ErrDeliveryCoordinatesRequired):
 		response.BadRequest(c, "配送订单请提供有效收货地址")
+	case errors.Is(err, service.ErrVirtualNotDeliverable):
+		response.BadRequest(c, "虚拟商品不支持配送")
 	case errors.Is(err, service.ErrPackageSelectionRequired), errors.Is(err, service.ErrOptionRequired), errors.Is(err, service.ErrOptionInvalid):
 		msg := err.Error()
 		response.BadRequest(c, msg)
