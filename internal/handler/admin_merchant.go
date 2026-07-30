@@ -89,6 +89,7 @@ type ProductRequest struct {
 	ItemType            uint8    `json:"item_type" example:"1"`
 	Status         uint8    `json:"status" example:"0"`
 	PackageGroups  []service.PackageGroupInput `json:"package_groups"`
+	OptionGroups   []service.OptionGroupInput  `json:"option_groups"`
 }
 
 // UpdateProductRequest 选择性更新商品：只传需要修改的字段，未传字段保留原值。
@@ -113,7 +114,8 @@ type UpdateProductRequest struct {
 	GroupBuyAllowRepeat *uint8    `json:"group_buy_allow_repeat"`
 	ItemType            *uint8    `json:"item_type"`
 	Status              *uint8    `json:"status"`
-	PackageGroups       []service.PackageGroupInput `json:"package_groups"`
+	PackageGroups       []service.PackageGroupInput  `json:"package_groups"`
+	OptionGroups        *[]service.OptionGroupInput  `json:"option_groups"`
 }
 
 func (r UpdateProductRequest) hasField() bool {
@@ -122,7 +124,7 @@ func (r UpdateProductRequest) hasField() bool {
 		r.Price != nil || r.OriginalPrice != nil || r.Stock != nil || r.IsHot != nil ||
 		r.EnableGroupBuy != nil || r.EnableCoupon != nil || r.AllowPickup != nil || r.AllowDelivery != nil ||
 		r.GroupBuyTargetCount != nil || r.GroupBuyPrice != nil || r.GroupBuyAllowRepeat != nil ||
-		r.ItemType != nil || r.Status != nil || len(r.PackageGroups) > 0
+		r.ItemType != nil || r.Status != nil || len(r.PackageGroups) > 0 || r.OptionGroups != nil
 }
 
 type UpdateProductImagesRequest struct {
@@ -1487,6 +1489,10 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 	if len(req.PackageGroups) > 0 {
 		input.PackageGroups = req.PackageGroups
 	}
+	if req.OptionGroups != nil {
+		og := req.OptionGroups
+		input.OptionGroups = &og
+	}
 	return input
 }
 
@@ -1575,6 +1581,9 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	}
 	if len(req.PackageGroups) > 0 {
 		input.PackageGroups = req.PackageGroups
+	}
+	if req.OptionGroups != nil {
+		input.OptionGroups = req.OptionGroups
 	}
 	return input
 }

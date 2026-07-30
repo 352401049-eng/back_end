@@ -38,7 +38,8 @@ type ProductInput struct {
 	GroupBuyAllowRepeat uint8
 	ItemType            uint8
 	Status              uint8
-	PackageGroups       []PackageGroupInput // item_type=套餐时必填
+	PackageGroups       []PackageGroupInput  // item_type=套餐时必填
+	OptionGroups        *[]OptionGroupInput  // 非 nil 时全量替换规格组（含空切片表示清空）
 }
 
 type GroupBuyConfigInput struct {
@@ -59,11 +60,12 @@ type ProductListFilter struct {
 	ItemType           *uint8
 }
 
-// ProductDetailView 商品详情（管理端/用户端），套餐附带分组。
+// ProductDetailView 商品详情（管理端/用户端），套餐附带分组，普通商品附带规格组。
 type ProductDetailView struct {
 	model.Product
-	PackageGroups []PackageGroupView `json:"package_groups,omitempty"`
-	CanGroupBuy   bool               `json:"can_group_buy"`
+	PackageGroups []PackageGroupView        `json:"package_groups,omitempty"`
+	OptionGroups  []model.ProductOptionGroup  `json:"option_groups,omitempty"`
+	CanGroupBuy   bool                        `json:"can_group_buy"`
 	CanUseCoupon  bool               `json:"can_use_coupon"`
 	GroupBuyID    *uint64            `json:"group_buy_id,omitempty"`
 	SaleOptions   ProductSaleOptions `json:"sale_options"`
@@ -134,6 +136,11 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		}
 		if isPackage {
 			if err := s.replacePackageGroups(tx, product.ID, merchantID, input.PackageGroups); err != nil {
+				return err
+			}
+		}
+		if input.OptionGroups != nil {
+			if err := s.ReplaceOptionGroups(tx, product.ID, product.ItemType, *input.OptionGroups); err != nil {
 				return err
 			}
 		}
@@ -302,6 +309,15 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		}
 		if isPackage && len(input.PackageGroups) > 0 {
 			if err := s.replacePackageGroups(tx, id, merchantID, input.PackageGroups); err != nil {
+				return err
+			}
+		}
+		if input.OptionGroups != nil {
+			itemType := input.ItemType
+			if itemType == 0 {
+				itemType = product.ItemType
+			}
+			if err := s.ReplaceOptionGroups(tx, id, itemType, *input.OptionGroups); err != nil {
 				return err
 			}
 		}
@@ -579,6 +595,15 @@ func (s *ProductService) validateInput(input ProductInput) error {
 			}
 		}
 	}
+	if input.OptionGroups != nil {
+		itemType := input.ItemType
+		if itemType == 0 {
+			itemType = model.ProductItemTypePhysical
+		}
+		if err := validateOptionGroupsForSave(itemType, *input.OptionGroups); err != nil {
+			return err
+		}
+	}
 	if input.EnableCoupon != 0 && input.EnableCoupon != 1 {
 		return ErrInvalidProductArg
 	}
@@ -631,6 +656,12 @@ func (s *ProductService) toDetailView(product *model.Product) (*ProductDetailVie
 			return nil, err
 		}
 		view.PackageGroups = groups
+	} else {
+		groups, err := s.ListOptionGroups(product.ID)
+		if err != nil {
+			return nil, err
+		}
+		view.OptionGroups = groups
 	}
 	return view, nil
 }
