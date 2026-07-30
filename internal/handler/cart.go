@@ -128,16 +128,16 @@ type CheckoutCartRequest struct {
 }
 
 // CheckoutCart godoc
-// @Summary      购物车同店合单结算
+// @Summary      购物车合单结算（已废弃）
 // @Tags         用户-购物车
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
 // @Param        body  body  CheckoutCartRequest  true  "合单信息"
-// @Success      200   {object}  response.Body{data=service.OrderView}
+// @Failure      400   {object}  response.Body
 // @Router       /user/cart/checkout [post]
 func (h *UserHandler) CheckoutCart(c *gin.Context) {
-	accountID, ok := auth.AccountID(c)
+	_, ok := auth.AccountID(c)
 	if !ok {
 		response.Fail(c, 401, 401, "未登录")
 		return
@@ -147,22 +147,53 @@ func (h *UserHandler) CheckoutCart(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	if h.OrderSvc == nil {
+	_ = req
+	response.BadRequest(c, "请使用外卖结算")
+}
+
+type CheckoutCartTakeoutRequest struct {
+	CartItemIDs        []uint64                              `json:"cart_item_ids" binding:"required,min=1"`
+	MerchantID         uint64                                `json:"merchant_id" binding:"required"`
+	AddressID          uint64                                `json:"address_id" binding:"required"`
+	DeliveryTimeRemark string                                `json:"delivery_time_remark"`
+	Lines              []service.CartCheckoutTakeoutLineInput `json:"lines"`
+}
+
+// CheckoutCartTakeout godoc
+// @Summary      购物车外卖合单结算
+// @Tags         用户-购物车
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body  CheckoutCartTakeoutRequest  true  "外卖合单信息"
+// @Success      200   {object}  response.Body{data=service.TakeoutView}
+// @Router       /user/cart/takeout-checkout [post]
+func (h *UserHandler) CheckoutCartTakeout(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	var req CheckoutCartTakeoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	if h.TakeoutSvc == nil {
 		response.InternalError(c, "服务未就绪")
 		return
 	}
-	view, err := h.OrderSvc.CheckoutCart(accountID, service.CheckoutCartInput{
+	view, err := h.TakeoutSvc.CreateFromCart(accountID, service.CartCheckoutTakeoutInput{
 		CartItemIDs: req.CartItemIDs, MerchantID: req.MerchantID,
-		DeliveryType: req.DeliveryType, AddressID: req.AddressID,
-		DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
-		Remark: req.Remark, UserCouponID: req.UserCouponID,
+		AddressID: req.AddressID, DeliveryTimeRemark: req.DeliveryTimeRemark,
+		Lines: req.Lines,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrCartItemNotFound) {
 			response.Fail(c, 404, 404, "购物车项不存在")
 			return
 		}
-		handleOrderError(c, err)
+		handleTakeoutError(c, err)
 		return
 	}
 	response.OK(c, view)
@@ -172,8 +203,17 @@ func handleCartError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrCartItemNotFound):
 		response.Fail(c, 404, 404, "购物车项不存在")
-	case errors.Is(err, service.ErrCartProductInvalid), errors.Is(err, service.ErrInvalidProductArg):
+	case errors.Is(err, service.ErrCartProductInvalid):
 		response.BadRequest(c, "商品无效或未上架")
+	case errors.Is(err, service.ErrInvalidProductArg):
+		msg := err.Error()
+		if i := len(service.ErrInvalidProductArg.Error()); i+2 < len(msg) && msg[i:i+2] == ": " {
+			response.BadRequest(c, msg[i+2:])
+		} else {
+			response.BadRequest(c, "商品无效或未上架")
+		}
+	case errors.Is(err, service.ErrDeliveryNotAllowed), errors.Is(err, service.ErrVirtualNotDeliverable):
+		response.BadRequest(c, "该商品不支持外卖配送")
 	default:
 		response.InternalError(c, "操作失败")
 	}

@@ -109,6 +109,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		AddressSvc:   &service.AddressService{DB: db},
 		CartSvc:      cartSvc,
 		OrderSvc:     orderSvc,
+		TakeoutSvc:   takeoutSvc,
 		InventorySvc: inventorySvc,
 		DeliverySvc:  deliverySvc,
 	}
@@ -250,6 +251,7 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.GET("/user/cart", h.Cart)
 	r.POST("/user/cart", h.AddCart)
 	r.POST("/user/cart/checkout", h.CheckoutCart)
+	r.POST("/user/cart/takeout-checkout", h.CheckoutCartTakeout)
 	r.PATCH("/user/cart/:id", h.UpdateCart)
 	r.DELETE("/user/cart/:id", h.DeleteCart)
 	r.GET("/user/coupons", h.Coupons)

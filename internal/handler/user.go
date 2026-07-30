@@ -18,6 +18,7 @@ type UserHandler struct {
 	AddressSvc   *service.AddressService
 	CartSvc      *service.CartService
 	OrderSvc     *service.OrderService
+	TakeoutSvc   *service.TakeoutService
 	InventorySvc *service.InventoryService
 	DeliverySvc  *service.DeliveryService
 }

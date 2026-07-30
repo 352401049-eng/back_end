@@ -50,23 +50,11 @@ func (s *CartService) Add(accountID uint64, input AddCartInput) (*model.CartItem
 		}
 		return nil, err
 	}
-	// 普通 / 虚拟 / 套餐均可加购；活动价走立即购买（购物车无 activity 字段）
-
-	if input.PurchaseType == model.PurchaseTypeGroup {
-		if product.EnableGroupBuy != 1 {
-			return nil, ErrInvalidProductArg
-		}
-		if input.GroupBuyID == nil {
-			var gb model.GroupBuy
-			if err := query.NotDeleted(s.DB).Where("product_id = ? AND status = 1", product.ID).First(&gb).Error; err != nil {
-				return nil, ErrInvalidProductArg
-			}
-			input.GroupBuyID = &gb.ID
-		}
-	} else {
-		input.GroupBuyID = nil
-		input.GroupBuyTeamID = nil
+	if err := validateCartAddForTakeout(input.PurchaseType, product); err != nil {
+		return nil, err
 	}
+	input.GroupBuyID = nil
+	input.GroupBuyTeamID = nil
 
 	spec := ""
 	if input.Spec != nil {
