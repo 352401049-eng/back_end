@@ -251,10 +251,13 @@ func enrichUsageViewOptions(db *gorm.DB, view *InventoryUsageView) {
 	if view == nil || view.Product == nil {
 		return
 	}
+	var needs bool
+	var err error
 	if view.Product.ItemType == model.ProductItemTypePackage {
-		return
+		needs, err = packageNeedsChildOptions(db, view.ProductID, nil)
+	} else {
+		needs, err = ProductNeedsOptions(db, view.ProductID)
 	}
-	needs, err := ProductNeedsOptions(db, view.ProductID)
 	if err == nil {
 		view.HasOptions = needs
 	}
@@ -360,15 +363,13 @@ func packageNeedsChildOptions(tx *gorm.DB, packageProductID uint64, units [][]Pa
 			return false, err
 		}
 		for _, g := range groups {
-			if g.GroupType == model.PackageGroupTypeFixed {
-				for _, it := range g.Items {
-					needs, err := ProductNeedsOptions(tx, it.ProductID)
-					if err != nil {
-						return false, err
-					}
-					if needs {
-						return true, nil
-					}
+			for _, it := range g.Items {
+				needs, err := ProductNeedsOptions(tx, it.ProductID)
+				if err != nil {
+					return false, err
+				}
+				if needs {
+					return true, nil
 				}
 			}
 		}
