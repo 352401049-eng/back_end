@@ -9,9 +9,10 @@ import (
 )
 
 // orderStatusesExcludedFromBoughtQty 不计入用户限购已购件数的终态订单。
-var orderStatusesExcludedFromBoughtQty = []uint8{
-	model.OrderStatusCancelled,
-	model.OrderStatusGroupFailed,
+// 必须用 []int：GORM 会把 []uint8 当成 []byte 绑成 '<binary>'，触发 MySQL 1064。
+var orderStatusesExcludedFromBoughtQty = []int{
+	int(model.OrderStatusCancelled),
+	int(model.OrderStatusGroupFailed),
 }
 
 // refreshInstantOnDate returns the refresh clock on calendar date d (local).

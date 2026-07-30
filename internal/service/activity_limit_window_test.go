@@ -84,13 +84,21 @@ func TestCalendarWindowAt_InvalidRefreshFallsBackMidnight(t *testing.T) {
 }
 
 func TestSumBoughtQtyExcludesGroupFailed(t *testing.T) {
-	if !slices.Contains(orderStatusesExcludedFromBoughtQty, model.OrderStatusCancelled) {
+	if !slices.Contains(orderStatusesExcludedFromBoughtQty, int(model.OrderStatusCancelled)) {
 		t.Fatal("excluded statuses must include Cancelled")
 	}
-	if !slices.Contains(orderStatusesExcludedFromBoughtQty, model.OrderStatusGroupFailed) {
+	if !slices.Contains(orderStatusesExcludedFromBoughtQty, int(model.OrderStatusGroupFailed)) {
 		t.Fatal("excluded statuses must include GroupFailed")
 	}
 	if len(orderStatusesExcludedFromBoughtQty) != 2 {
 		t.Fatalf("expected exactly 2 excluded statuses, got %v", orderStatusesExcludedFromBoughtQty)
+	}
+}
+
+func TestOrderStatusesExcludedAreIntSlice(t *testing.T) {
+	// Regression: []uint8 is bound by GORM as a single []byte → MySQL 1064 near '?'.
+	var v any = orderStatusesExcludedFromBoughtQty
+	if _, ok := v.([]int); !ok {
+		t.Fatalf("orderStatusesExcludedFromBoughtQty must be []int for GORM IN clause, got %T", v)
 	}
 }
