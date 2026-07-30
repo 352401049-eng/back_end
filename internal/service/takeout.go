@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,9 +45,24 @@ type CreateTakeoutInput struct {
 
 type TakeoutView struct {
 	model.TakeoutOrder
-	StatusText string `json:"status_text"`
-	StatusCode string `json:"status_code"`
-	PickupCode string `json:"pickup_code,omitempty"`
+	StatusText             string                 `json:"status_text"`
+	StatusCode             string                 `json:"status_code"`
+	PickupCode             string                 `json:"pickup_code,omitempty"`
+	PackageSelectionText   string                 `json:"package_selection_text,omitempty"`
+	OptionSelectionText    string                 `json:"option_selection_text,omitempty"`
+	SelectionLines         []TakeoutSelectionLine `json:"selection_lines,omitempty"`
+}
+
+// TakeoutSelectionLine 按份展示套餐选配与规格，供商家/配送端直接渲染。
+type TakeoutSelectionLine struct {
+	UnitIndex              int    `json:"unit_index"`
+	UnitLabel              string `json:"unit_label,omitempty"`
+	ProductID              uint64 `json:"product_id"`
+	ProductName            string `json:"product_name"`
+	Quantity               uint32 `json:"quantity"`
+	IsPackage              bool   `json:"is_package"`
+	PackageSelectionText   string `json:"package_selection_text,omitempty"`
+	OptionSelectionText    string `json:"option_selection_text,omitempty"`
 }
 
 func computeTakeoutPayAmount(unitPrice float64, qty uint32, deliveryFee float64) float64 {
@@ -79,11 +95,144 @@ func takeoutStatusMeta(status uint8) (text, code string) {
 
 func (s *TakeoutService) toView(to *model.TakeoutOrder) *TakeoutView {
 	text, code := takeoutStatusMeta(to.Status)
-	return &TakeoutView{
+	view := &TakeoutView{
 		TakeoutOrder: *to,
 		StatusText:   text,
 		StatusCode:   code,
 	}
+	s.enrichSelectionDisplay(view)
+	return view
+}
+
+func (s *TakeoutService) enrichSelectionDisplay(view *TakeoutView) {
+	if view == nil {
+		return
+	}
+	pkgText, optText, lines := buildTakeoutSelectionDisplay(s.DB, &view.TakeoutOrder)
+	view.PackageSelectionText = pkgText
+	view.OptionSelectionText = optText
+	view.SelectionLines = lines
+}
+
+// buildTakeoutSelectionDisplay 生成套餐/规格可读摘要；多份套餐按份拆成明细行。
+func buildTakeoutSelectionDisplay(db *gorm.DB, to *model.TakeoutOrder) (pkgText, optText string, lines []TakeoutSelectionLine) {
+	if to == nil {
+		return "", "", nil
+	}
+	var optSnap model.OptionSelectionSnapshot
+	if len(to.OptionSelections) > 0 {
+		_ = json.Unmarshal(to.OptionSelections, &optSnap)
+	}
+	optText = optSnap.SummaryText()
+	optCursor := newTakeoutOptionCursor(optSnap)
+
+	items := to.Items
+	if len(items) == 0 && db != nil {
+		_ = query.NotDeleted(db).Where("takeout_order_id = ?", to.ID).Find(&items)
+	}
+	if len(items) == 0 {
+		if optText != "" {
+			lines = append(lines, TakeoutSelectionLine{
+				UnitIndex: 1, ProductName: "商品", Quantity: 1,
+				OptionSelectionText: optText,
+			})
+		}
+		return "", optText, lines
+	}
+
+	pkgPartsAll := make([]string, 0, 4)
+	for _, item := range items {
+		isPkg := false
+		if db != nil {
+			var product model.Product
+			if err := query.NotDeleted(db).Select("id", "item_type").First(&product, item.ProductID).Error; err == nil {
+				isPkg = product.ItemType == model.ProductItemTypePackage
+			}
+		}
+		if !isPkg || db == nil || len(to.PackageSelections) == 0 {
+			lines = append(lines, TakeoutSelectionLine{
+				UnitIndex: 1, ProductID: item.ProductID, ProductName: item.ProductName,
+				Quantity: item.Quantity, IsPackage: isPkg, OptionSelectionText: optText,
+			})
+			continue
+		}
+		units, err := decodeTakeoutPackageUnits(to.PackageSelections, item.Quantity)
+		if err != nil || len(units) == 0 {
+			lines = append(lines, TakeoutSelectionLine{
+				UnitIndex: 1, ProductID: item.ProductID, ProductName: item.ProductName,
+				Quantity: item.Quantity, IsPackage: true, OptionSelectionText: optText,
+			})
+			continue
+		}
+		for i, sels := range units {
+			resolved, err := ResolvePackageSelections(db, item.ProductID, sels)
+			if err != nil {
+				continue
+			}
+			childParts := make([]string, 0, len(resolved))
+			unitOptSnap := make(model.OptionSelectionSnapshot, 0, 4)
+			for _, ln := range resolved {
+				childParts = append(childParts, fmt.Sprintf("%s×%d", ln.Product.Name, ln.Qty))
+				unitOptSnap = append(unitOptSnap, optCursor.take(ln.Product.ID, ln.Qty)...)
+			}
+			unitPkg := strings.Join(childParts, "、")
+			if unitPkg != "" {
+				pkgPartsAll = append(pkgPartsAll, unitPkg)
+			}
+			unitLabel := ""
+			name := item.ProductName
+			if len(units) > 1 {
+				unitLabel = fmt.Sprintf("第%d份", i+1)
+				name = fmt.Sprintf("%s（%s）", item.ProductName, unitLabel)
+			}
+			lines = append(lines, TakeoutSelectionLine{
+				UnitIndex:            i + 1,
+				UnitLabel:            unitLabel,
+				ProductID:            item.ProductID,
+				ProductName:          name,
+				Quantity:             1,
+				IsPackage:            true,
+				PackageSelectionText: unitPkg,
+				OptionSelectionText:  unitOptSnap.SummaryText(),
+			})
+		}
+	}
+	pkgText = strings.Join(pkgPartsAll, "；")
+	return pkgText, optText, lines
+}
+
+type takeoutOptionCursor struct {
+	byProduct map[uint64][]model.OptionSelectionUnitSnap
+}
+
+func newTakeoutOptionCursor(snap model.OptionSelectionSnapshot) *takeoutOptionCursor {
+	by := make(map[uint64][]model.OptionSelectionUnitSnap)
+	for _, u := range snap {
+		by[u.ProductID] = append(by[u.ProductID], u)
+	}
+	for id := range by {
+		sort.Slice(by[id], func(i, j int) bool {
+			return by[id][i].UnitIndex < by[id][j].UnitIndex
+		})
+	}
+	return &takeoutOptionCursor{byProduct: by}
+}
+
+func (c *takeoutOptionCursor) take(productID uint64, qty uint32) model.OptionSelectionSnapshot {
+	if c == nil || qty == 0 {
+		return nil
+	}
+	list := c.byProduct[productID]
+	if len(list) == 0 {
+		return nil
+	}
+	n := int(qty)
+	if n > len(list) {
+		n = len(list)
+	}
+	out := append(model.OptionSelectionSnapshot(nil), list[:n]...)
+	c.byProduct[productID] = list[n:]
+	return out
 }
 
 func (s *TakeoutService) paymentProvider() payment.Provider {

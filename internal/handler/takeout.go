@@ -182,6 +182,32 @@ func (h *TakeoutHandler) Get(c *gin.Context) {
 	response.OK(c, view)
 }
 
+// MerchantGetTakeout godoc
+// @Summary      商家外卖订单详情
+// @Tags         商家端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "外卖单 ID"
+// @Success      200  {object}  response.Body{data=service.TakeoutView}
+// @Router       /merchant/takeout-orders/{id} [get]
+func (h *TakeoutHandler) MerchantGet(c *gin.Context) {
+	merchantID, err := resolveMerchantScope(c, h.MerchantSvc)
+	if err != nil {
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	view, err := h.TakeoutSvc.GetMerchantView(*merchantID, id)
+	if err != nil {
+		handleTakeoutError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
 // MerchantListTakeouts godoc
 // @Summary      商家外卖订单列表
 // @Tags         商家端

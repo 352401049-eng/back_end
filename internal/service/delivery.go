@@ -2,7 +2,6 @@ package service
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -875,54 +874,22 @@ func attachTakeoutDeliveryData(db *gorm.DB, view *DeliveryView) {
 	}
 	view.AddressSnapshot = to.AddressSnapshot
 
-	var optSnap model.OptionSelectionSnapshot
-	if len(to.OptionSelections) > 0 {
-		_ = json.Unmarshal(to.OptionSelections, &optSnap)
+	_, _, selLines := buildTakeoutSelectionDisplay(db, &to)
+	if len(selLines) == 0 {
+		return
 	}
-	optText := optSnap.SummaryText()
-
-	lines := make([]DeliveryUsageLine, 0, len(to.Items))
-	for i := range to.Items {
-		item := to.Items[i]
-		isPkg := false
-		var product model.Product
-		if err := query.NotDeleted(db).Select("item_type").First(&product, item.ProductID).Error; err == nil {
-			isPkg = product.ItemType == model.ProductItemTypePackage
-		}
+	lines := make([]DeliveryUsageLine, 0, len(selLines))
+	for _, ln := range selLines {
 		lines = append(lines, DeliveryUsageLine{
-			ProductID:            item.ProductID,
-			ProductName:          item.ProductName,
-			Quantity:             item.Quantity,
-			IsPackage:            isPkg,
-			PackageSelectionText: takeoutItemPackageSummaryText(db, &to, &item),
-			OptionSelectionText:  optText,
-			OptionSelections:     optSnap,
+			ProductID:            ln.ProductID,
+			ProductName:          ln.ProductName,
+			Quantity:             ln.Quantity,
+			IsPackage:            ln.IsPackage,
+			PackageSelectionText: ln.PackageSelectionText,
+			OptionSelectionText:  ln.OptionSelectionText,
 		})
 	}
-	if len(lines) > 0 {
-		view.UsageItems = lines
-	}
-}
-
-func takeoutItemPackageSummaryText(db *gorm.DB, to *model.TakeoutOrder, item *model.TakeoutOrderItem) string {
-	if db == nil || to == nil || item == nil || len(to.PackageSelections) == 0 {
-		return ""
-	}
-	units, err := decodeTakeoutPackageUnits(to.PackageSelections, item.Quantity)
-	if err != nil {
-		return ""
-	}
-	parts := make([]string, 0, 8)
-	for _, sels := range units {
-		lines, err := ResolvePackageSelections(db, item.ProductID, sels)
-		if err != nil {
-			continue
-		}
-		for _, ln := range lines {
-			parts = append(parts, fmt.Sprintf("%s×%d", ln.Product.Name, ln.Qty))
-		}
-	}
-	return strings.Join(parts, "、")
+	view.UsageItems = lines
 }
 
 // ListForAdmin ??????????????

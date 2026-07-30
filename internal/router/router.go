@@ -330,6 +330,7 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.GET("/deliveries/preparing", mo.ListPreparingDeliveries)
 	r.GET("/deliveries/prepared", mo.ListPreparedDeliveries)
 	r.GET("/takeout-orders", to.MerchantList)
+	r.GET("/takeout-orders/:id", to.MerchantGet)
 	r.POST("/takeout-orders/:id/prepare", to.MerchantPrepare)
 	r.POST("/takeout-orders/:id/reject", to.MerchantReject)
 	r.GET("/dashboard", mo.Dashboard)
