@@ -198,6 +198,9 @@ func releaseRefundPending(job RefundJob) {
 	case model.PaySubjectTakeout:
 		releaseTakeoutRefundPending(job.Provider, job.SubjectID)
 		return
+	case model.PaySubjectDeliveryFee:
+		releaseDeliveryFeeRefundPending(job.Provider, job.SubjectID)
+		return
 	default:
 		releaseOrderRefundPending(job.Provider, job.OrderID, job.RefundAmt)
 	}
@@ -225,6 +228,31 @@ func releaseTakeoutRefundPending(p *WeChatProvider, takeoutID uint64) {
 	})
 	if err != nil {
 		log.Printf("[wechat refund] release takeout pending %d failed: %v", takeoutID, err)
+	}
+}
+
+func releaseDeliveryFeeRefundPending(p *WeChatProvider, feeOrderID uint64) {
+	if p == nil || p.DB == nil || feeOrderID == 0 {
+		return
+	}
+	err := p.DB.Transaction(func(tx *gorm.DB) error {
+		var fee model.DeliveryFeeOrder
+		if err := query.NotDeleted(tx).Select("id", "pay_status", "refunded_amount").
+			First(&fee, feeOrderID).Error; err != nil {
+			return err
+		}
+		if fee.PayStatus != model.PayStatusRefunding {
+			return nil
+		}
+		status := model.PayStatusPaid
+		if fee.RefundedAmount > 0 {
+			status = model.PayStatusPartialRefunded
+		}
+		return query.NotDeleted(tx.Model(&model.DeliveryFeeOrder{})).Where("id = ?", feeOrderID).
+			Updates(map[string]interface{}{"pay_status": status}).Error
+	})
+	if err != nil {
+		log.Printf("[wechat refund] release delivery fee pending %d failed: %v", feeOrderID, err)
 	}
 }
 

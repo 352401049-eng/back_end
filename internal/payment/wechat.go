@@ -1044,6 +1044,9 @@ func (p *WeChatProvider) retrieveAndSettlePayments() (*NotifyResult, error) {
 	if err := p.retrieveAndSettleTakeoutPayments(); err != nil {
 		log.Printf("[wechat retrieve] 外卖单查单结算失败: %v", err)
 	}
+	if err := p.retrieveAndSettleDeliveryFeePayments(); err != nil {
+		log.Printf("[wechat retrieve] 配送费单查单结算失败: %v", err)
+	}
 	return &NotifyResult{Paid: true, RawAck: `{"code":"SUCCESS"}`}, nil
 }
 
@@ -1082,6 +1085,45 @@ func (p *WeChatProvider) retrieveAndSettleTakeoutPayments() error {
 			continue
 		}
 		log.Printf("[wechat retrieve] 外卖单 %s 支付成功，已处理", to.OrderNo)
+	}
+	return nil
+}
+
+// retrieveAndSettleDeliveryFeePayments 主动查单，恢复已付但未履约的配送费单。
+func (p *WeChatProvider) retrieveAndSettleDeliveryFeePayments() error {
+	if p.Client == nil {
+		return ErrNotConfigured
+	}
+	var fees []model.DeliveryFeeOrder
+	if err := query.NotDeleted(p.DB).
+		Where("status = ? AND pay_status = ?", model.DeliveryFeeStatusPendingPay, model.PayStatusUnpaid).
+		Find(&fees).Error; err != nil {
+		return err
+	}
+	for _, fee := range fees {
+		tradeState, transactionID, err := p.Client.QueryOrderByOutTradeNo(fee.OrderNo)
+		if err != nil {
+			log.Printf("[wechat retrieve] 查询配送费单 %s 失败: %v", fee.OrderNo, err)
+			continue
+		}
+		if tradeState != "SUCCESS" {
+			continue
+		}
+		if err := p.DB.Transaction(func(tx *gorm.DB) error {
+			sub, err := p.upsertPaidTransaction(tx, fee.OrderNo, transactionID, fee.PayAmount, nil)
+			if err != nil {
+				return err
+			}
+			now := time.Now()
+			if err := p.markSubjectPaidInTx(tx, sub, now); err != nil {
+				return err
+			}
+			return p.invokeSubjectPaidCallback(tx, sub)
+		}); err != nil {
+			log.Printf("[wechat retrieve] 配送费单 %s 支付成功处理失败: %v", fee.OrderNo, err)
+			continue
+		}
+		log.Printf("[wechat retrieve] 配送费单 %s 支付成功，已处理", fee.OrderNo)
 	}
 	return nil
 }

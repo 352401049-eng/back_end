@@ -100,7 +100,7 @@ func (s *TakeoutService) payTimeoutMinutes() int {
 	return 15
 }
 
-// Create 创建外卖单：校验商品/地址/配送范围/套餐选配/规格；不写背包；支付成功后再扣库存。
+// Create 创建外卖单：校验商品/地址/配送范围/套餐选配/规格；不写背包；创建时预扣库存（超时未付回滚）。
 func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*TakeoutView, error) {
 	if in.MerchantID == 0 || in.ProductID == 0 {
 		return nil, fmt.Errorf("%w: 请指定 merchant_id 与 product_id", ErrInvalidProductArg)
@@ -253,6 +253,10 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 		if err := tx.Create(&item).Error; err != nil {
 			return err
 		}
+		// 预扣库存：防止待支付期间超卖导致付款后无法履约；超时关单/拒单时回滚。
+		if err := deductTakeoutStockInTx(tx, &takeout); err != nil {
+			return err
+		}
 
 		return s.settlePaymentInTx(tx, takeout.ID, now)
 	})
@@ -300,7 +304,7 @@ func (s *TakeoutService) CreatePrepay(accountID, takeoutID uint64) (*payment.Pre
 	return result, nil
 }
 
-// MarkPaidInTx 支付成功后扣库存并推进到配餐中。
+// MarkPaidInTx 支付成功后推进到配餐中（库存已在 Create 预扣）。
 func (s *TakeoutService) MarkPaidInTx(tx *gorm.DB, takeoutID uint64, at time.Time) error {
 	var to model.TakeoutOrder
 	if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -312,38 +316,6 @@ func (s *TakeoutService) MarkPaidInTx(tx *gorm.DB, takeoutID uint64, at time.Tim
 	}
 	if to.Status != model.TakeoutStatusPendingPay {
 		return ErrTakeoutStatusInvalid
-	}
-
-	var items []model.TakeoutOrderItem
-	if err := query.NotDeleted(tx).Where("takeout_order_id = ?", takeoutID).Find(&items).Error; err != nil {
-		return err
-	}
-	for _, item := range items {
-		if err := deductProductStockInTx(tx, item.ProductID, item.Quantity); err != nil {
-			return err
-		}
-		var product model.Product
-		if err := query.NotDeleted(tx).Select("id", "item_type").First(&product, item.ProductID).Error; err != nil {
-			return err
-		}
-		if product.ItemType != model.ProductItemTypePackage {
-			continue
-		}
-		units, err := decodeTakeoutPackageUnits(to.PackageSelections, item.Quantity)
-		if err != nil {
-			return err
-		}
-		for _, sels := range units {
-			lines, err := ResolvePackageSelections(tx, item.ProductID, sels)
-			if err != nil {
-				return err
-			}
-			for _, ln := range lines {
-				if err := deductProductStockInTx(tx, ln.Product.ID, ln.Qty); err != nil {
-					return err
-				}
-			}
-		}
 	}
 
 	res := query.NotDeleted(tx.Model(&model.TakeoutOrder{})).
@@ -390,7 +362,7 @@ func decodeTakeoutPackageUnits(raw json.RawMessage, quantity uint32) ([][]Packag
 	return normalizePackageUnits(nil, sels, quantity)
 }
 
-// ExpireStalePendingPay 关闭超时未支付外卖单（未扣库存，无需回滚）。
+// ExpireStalePendingPay 关闭超时未支付外卖单并回滚预扣库存。
 func (s *TakeoutService) ExpireStalePendingPay(now time.Time) (int, error) {
 	var orders []model.TakeoutOrder
 	if err := query.NotDeleted(s.DB).
@@ -430,6 +402,9 @@ func (s *TakeoutService) expireOnePendingPayTakeout(takeoutID uint64) error {
 			if err := wp.Client.CloseOrder(wp.MchID, to.OrderNo); err != nil {
 				log.Printf("[pay-expire] close wechat takeout %s failed: %v", to.OrderNo, err)
 			}
+		}
+		if err := restoreTakeoutStockInTx(tx, &to); err != nil {
+			return err
 		}
 		return query.NotDeleted(tx.Model(&model.TakeoutOrder{})).
 			Where("id = ? AND status = ?", takeoutID, model.TakeoutStatusPendingPay).
@@ -618,6 +593,41 @@ func restoreTakeoutStockInTx(tx *gorm.DB, takeout *model.TakeoutOrder) error {
 			for _, ln := range lines {
 				if err := tx.Model(&model.Product{}).Where("id = ?", ln.Product.ID).
 					Update("stock", gorm.Expr("stock + ?", ln.Qty)).Error; err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func deductTakeoutStockInTx(tx *gorm.DB, takeout *model.TakeoutOrder) error {
+	var items []model.TakeoutOrderItem
+	if err := query.NotDeleted(tx).Where("takeout_order_id = ?", takeout.ID).Find(&items).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := deductProductStockInTx(tx, item.ProductID, item.Quantity); err != nil {
+			return err
+		}
+		var product model.Product
+		if err := query.NotDeleted(tx).Select("id", "item_type").First(&product, item.ProductID).Error; err != nil {
+			return err
+		}
+		if product.ItemType != model.ProductItemTypePackage {
+			continue
+		}
+		units, err := decodeTakeoutPackageUnits(takeout.PackageSelections, item.Quantity)
+		if err != nil {
+			return err
+		}
+		for _, sels := range units {
+			lines, err := ResolvePackageSelections(tx, item.ProductID, sels)
+			if err != nil {
+				return err
+			}
+			for _, ln := range lines {
+				if err := deductProductStockInTx(tx, ln.Product.ID, ln.Qty); err != nil {
 					return err
 				}
 			}
