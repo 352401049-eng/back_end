@@ -677,13 +677,16 @@ func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, pa
 	if err != nil {
 		return err
 	}
-	if optStatus != model.OptionSelectNone {
+	// Always write status so Pending→None clears when options were removed after usage creation.
+	updates["option_select_status"] = optStatus
+	if optStatus == model.OptionSelectNone {
+		updates["option_selections"] = nil
+	} else {
 		raw, err := json.Marshal(optSnap)
 		if err != nil {
 			return err
 		}
 		updates["option_selections"] = json.RawMessage(raw)
-		updates["option_select_status"] = optStatus
 	}
 	// 用纯 Model 更新，避免 Preload 的 Product 触发关联 upsert；
 	// map Updates 不会走字段 serializer:json，须自行 JSON 编码。

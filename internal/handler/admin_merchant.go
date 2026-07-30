@@ -898,6 +898,16 @@ func (h *AdminHandler) handleProductError(c *gin.Context, err error) {
 		response.Fail(c, 404, 404, "分类不存在")
 	case errors.Is(err, service.ErrCategoryForbidden):
 		response.Fail(c, 403, 403, "分类不属于该商家")
+	case errors.Is(err, service.ErrOptionNotAllowedOnPackage):
+		response.BadRequest(c, "套餐商品不可配置规格")
+	case errors.Is(err, service.ErrOptionInvalid):
+		msg := err.Error()
+		if i := strings.Index(msg, ": "); i >= 0 && i+2 < len(msg) {
+			msg = msg[i+2:]
+		} else {
+			msg = "规格配置无效"
+		}
+		response.BadRequest(c, msg)
 	case errors.Is(err, service.ErrInvalidProductArg):
 		msg := err.Error()
 		if i := strings.Index(msg, ": "); i >= 0 && i+2 < len(msg) {
