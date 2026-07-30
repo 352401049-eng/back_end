@@ -21,6 +21,7 @@ type CreateOrderRequest struct {
 	PurchaseType      uint8                           `json:"purchase_type" example:"1"`
 	GroupBuyID        *uint64                         `json:"group_buy_id"`
 	GroupBuyTeamID    *uint64                         `json:"group_buy_team_id"`
+	StartNewTeam      bool                            `json:"start_new_team"`
 	ActivityProductID *uint64                         `json:"activity_product_id" example:"1"`
 	DeliveryType      uint8                           `json:"delivery_type" example:"1"`
 	AddressID         *uint64                         `json:"address_id"`
@@ -81,6 +82,7 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 			ProductID: req.ProductID, MerchantID: req.MerchantID, Quantity: req.Quantity,
 			PackageSelections: req.PackageSelections,
 			PurchaseType:      req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
+			StartNewTeam: req.StartNewTeam,
 			ActivityProductID: req.ActivityProductID,
 			DeliveryType:      req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
 			DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
@@ -94,6 +96,7 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 		view, err = h.OrderSvc.Create(accountID, service.CreateOrderInput{
 			ProductID: req.ProductID, MerchantID: req.MerchantID, Quantity: req.Quantity,
 			PurchaseType: req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
+			StartNewTeam: req.StartNewTeam,
 			ActivityProductID: req.ActivityProductID,
 			DeliveryType:      req.DeliveryType, AddressID: req.AddressID, Remark: req.Remark,
 			DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
@@ -255,7 +258,13 @@ func handleOrderError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrInsufficientStock):
 		response.BadRequest(c, "库存不足")
 	case errors.Is(err, service.ErrGroupBuyInvalid):
-		response.BadRequest(c, "拼团信息无效")
+		msg := "拼团信息无效"
+		if raw := err.Error(); len(raw) > len(service.ErrGroupBuyInvalid.Error()) {
+			if i := len(service.ErrGroupBuyInvalid.Error()); i+2 < len(raw) && raw[i:i+2] == ": " {
+				msg = raw[i+2:]
+			}
+		}
+		response.BadRequest(c, msg)
 	case errors.Is(err, service.ErrGroupBuyAlreadyJoined):
 		response.BadRequest(c, "您已参与该拼团，无法重复参团")
 	case errors.Is(err, service.ErrActivityNotFound), errors.Is(err, service.ErrActivityProductNotFound):

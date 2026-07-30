@@ -29,6 +29,7 @@ type CreatePackageOrderInput struct {
 	PurchaseType      uint8
 	GroupBuyID        *uint64
 	GroupBuyTeamID    *uint64
+	StartNewTeam      bool
 	ActivityProductID *uint64
 	DeliveryType      uint8
 	AddressID         *uint64
@@ -157,6 +158,16 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		}
 	} else {
 		input.GroupBuyTeamID = nil
+		input.StartNewTeam = false
+	}
+
+	if err := assertActivityGroupBuyOnly(input.PurchaseType, actCtx); err != nil {
+		return nil, err
+	}
+	if input.PurchaseType == model.PurchaseTypeGroup {
+		if err := validateGroupBuyOrderInput(input.Quantity, input.GroupBuyTeamID, input.StartNewTeam); err != nil {
+			return nil, err
+		}
 	}
 
 	coordIn := DeliveryCoordinateInput{
@@ -290,7 +301,7 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		}
 
 		if input.PurchaseType == model.PurchaseTypeGroup {
-			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, pkg, gb, input.GroupBuyTeamID, actGB, activityID, activityProductID, now)
+			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, pkg, gb, input.GroupBuyTeamID, input.StartNewTeam, actGB, activityID, activityProductID, now)
 			if err != nil {
 				return err
 			}

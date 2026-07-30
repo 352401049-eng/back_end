@@ -45,6 +45,7 @@ type CreateOrderInput struct {
 	PurchaseType      uint8
 	GroupBuyID        *uint64
 	GroupBuyTeamID    *uint64
+	StartNewTeam      bool
 	ActivityProductID *uint64
 	DeliveryType      uint8
 	AddressID         *uint64
@@ -181,6 +182,16 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		}
 	} else {
 		input.GroupBuyTeamID = nil
+		input.StartNewTeam = false
+	}
+
+	if err := assertActivityGroupBuyOnly(input.PurchaseType, actCtx); err != nil {
+		return nil, err
+	}
+	if input.PurchaseType == model.PurchaseTypeGroup {
+		if err := validateGroupBuyOrderInput(input.Quantity, input.GroupBuyTeamID, input.StartNewTeam); err != nil {
+			return nil, err
+		}
 	}
 
 	if actCtx == nil && product.Stock < input.Quantity {
@@ -316,7 +327,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		}
 
 		if input.PurchaseType == model.PurchaseTypeGroup {
-			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, product, gb, input.GroupBuyTeamID, actGB, activityID, activityProductID, now)
+			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, product, gb, input.GroupBuyTeamID, input.StartNewTeam, actGB, activityID, activityProductID, now)
 			if err != nil {
 				return err
 			}
@@ -356,37 +367,23 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 	return s.GetView(accountID, order.ID, nil)
 }
 
-func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, product model.Product, gb model.GroupBuy, teamID *uint64, actGB *ActivityGroupBuyConfig, activityID *uint64, activityProductID *uint64, now time.Time) (uint64, error) {
+func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, product model.Product, gb model.GroupBuy, teamID *uint64, startNewTeam bool, actGB *ActivityGroupBuyConfig, activityID *uint64, activityProductID *uint64, now time.Time) (uint64, error) {
 	target := uint32(2)
-	allowRepeat := product.GroupBuyAllowRepeat
-	maxJoins := uint32(1)
 	if actGB != nil {
 		if actGB.GroupBuyTargetCount >= 2 {
 			target = actGB.GroupBuyTargetCount
-		}
-		allowRepeat = actGB.GroupBuyAllowRepeat
-		maxJoins = actGB.GroupBuyMaxJoinsPerUser
-		if maxJoins == 0 {
-			maxJoins = 1
 		}
 	} else if product.GroupBuyTargetCount != nil && *product.GroupBuyTargetCount >= 2 {
 		target = *product.GroupBuyTargetCount
 	} else if gb.TargetCount >= 2 {
 		target = gb.TargetCount
 	}
-	if allowRepeat != 1 {
-		maxJoins = 1
-	}
 
-	resolveTeamID := teamID
-	if resolveTeamID == nil && allowRepeat != 1 {
-		existing, err := findUserPendingTeamInGroupBuy(tx, accountID, gb.ID, activityID)
-		if err != nil {
-			return 0, err
-		}
-		if existing != nil {
-			return 0, ErrGroupBuyAlreadyJoined
-		}
+	var resolveTeamID *uint64
+	if startNewTeam {
+		resolveTeamID = nil
+	} else if teamID != nil && *teamID > 0 {
+		resolveTeamID = teamID
 	}
 
 	if resolveTeamID != nil {
@@ -401,7 +398,7 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, 
 		if err != nil {
 			return 0, err
 		}
-		if err := validateTeamJoinLimit(joinCount, allowRepeat, maxJoins); err != nil {
+		if err := validateTeamJoinLimit(joinCount, 0, 1); err != nil {
 			return 0, err
 		}
 		if err := tx.Model(&team).Update("current_count", gorm.Expr("current_count + 1")).Error; err != nil {
@@ -555,18 +552,12 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 		return nil
 	}
 
-	allowRepeat := product.GroupBuyAllowRepeat
-	if actGB != nil {
-		allowRepeat = actGB.GroupBuyAllowRepeat
+	distinct, err := countDistinctTeamParticipants(tx, team.ID)
+	if err != nil {
+		return err
 	}
-	if allowRepeat != 1 {
-		distinct, err := countDistinctTeamParticipants(tx, team.ID)
-		if err != nil {
-			return err
-		}
-		if distinct < team.TargetCount {
-			return nil
-		}
+	if distinct < team.TargetCount {
+		return nil
 	}
 
 	now := time.Now()
@@ -1598,6 +1589,30 @@ func normalizeDeliveryType(deliveryType uint8) (uint8, error) {
 		return 0, ErrInvalidDeliveryType
 	}
 	return deliveryType, nil
+}
+
+func validateGroupBuyOrderInput(quantity uint32, groupBuyTeamID *uint64, startNewTeam bool) error {
+	if quantity != 1 {
+		return fmt.Errorf("%w: 拼团每次只能购买 1 件", ErrGroupBuyInvalid)
+	}
+	hasTeam := groupBuyTeamID != nil && *groupBuyTeamID > 0
+	if !hasTeam && !startNewTeam {
+		return fmt.Errorf("%w: 请选择拼团或开新团", ErrGroupBuyInvalid)
+	}
+	if hasTeam && startNewTeam {
+		return fmt.Errorf("%w: 不能同时指定参团与开新团", ErrGroupBuyInvalid)
+	}
+	return nil
+}
+
+func assertActivityGroupBuyOnly(purchaseType uint8, actCtx *ActivityOrderContext) error {
+	if actCtx == nil || actCtx.ActivityProduct == nil {
+		return nil
+	}
+	if actCtx.ActivityProduct.EnableGroupBuy == 1 && purchaseType != model.PurchaseTypeGroup {
+		return fmt.Errorf("%w: 该活动商品仅支持拼团购买", ErrGroupBuyInvalid)
+	}
+	return nil
 }
 
 func assertBagPurchaseAllowed(purchaseType uint8, activityProductID *uint64) error {
