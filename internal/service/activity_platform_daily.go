@@ -29,6 +29,7 @@ func NormalizeDailyRefreshTime(s string) (string, error) {
 }
 
 // PlatformDailyBucketKey 按刷新时刻计算当前周期键（YYYY-MM-DD）。
+// 日限窗口边界与 calendarWindowAt(..., "day", refreshTime) 一致。
 // 例：刷新 10:00，则 7/30 10:00～7/31 09:59:59 同属 2026-07-30。
 func PlatformDailyBucketKey(refreshTime string, now time.Time) string {
 	rt, err := NormalizeDailyRefreshTime(refreshTime)

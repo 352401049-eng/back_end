@@ -8,28 +8,68 @@ import (
 	"gorm.io/gorm"
 )
 
-// calendarWindow returns a half-open calendar period [start, end) for unit
-// "day" | "week" | "month". Week starts Monday 00:00. end is the next period's start.
-// Unknown unit returns zero times.
-func calendarWindow(now time.Time, unit string) (start, end time.Time) {
+// orderStatusesExcludedFromBoughtQty 不计入用户限购已购件数的终态订单。
+var orderStatusesExcludedFromBoughtQty = []uint8{
+	model.OrderStatusCancelled,
+	model.OrderStatusGroupFailed,
+}
+
+// refreshInstantOnDate returns the refresh clock on calendar date d (local).
+func refreshInstantOnDate(d time.Time, refreshTime string) time.Time {
+	rt, err := NormalizeDailyRefreshTime(refreshTime)
+	if err != nil {
+		rt = "00:00:00"
+	}
+	parsed, _ := time.Parse("15:04:05", rt)
+	y, m, day := d.Date()
+	loc := d.Location()
+	return time.Date(y, m, day, parsed.Hour(), parsed.Minute(), parsed.Second(), 0, loc)
+}
+
+// calendarWindowAt returns a half-open period [start, end) for unit
+// "day" | "week" | "month" aligned to daily_refresh_time.
+// Week starts Monday at refresh; month starts on the 1st at refresh.
+// Invalid refreshTime falls back to 00:00:00. Unknown unit returns zero times.
+func calendarWindowAt(now time.Time, unit string, refreshTime string) (start, end time.Time) {
 	loc := now.Location()
 	y, m, d := now.Date()
 	midnight := time.Date(y, m, d, 0, 0, 0, 0, loc)
 
 	switch unit {
 	case "day":
-		return midnight, midnight.AddDate(0, 0, 1)
+		refreshToday := refreshInstantOnDate(midnight, refreshTime)
+		start = refreshToday
+		if now.Before(refreshToday) {
+			start = refreshToday.AddDate(0, 0, -1)
+		}
+		return start, start.AddDate(0, 0, 1)
 	case "week":
-		// time.Sunday=0 … Saturday=6 → days since Monday
 		offset := (int(now.Weekday()) + 6) % 7
-		start = midnight.AddDate(0, 0, -offset)
+		monday := midnight.AddDate(0, 0, -offset)
+		refreshMonday := refreshInstantOnDate(monday, refreshTime)
+		start = refreshMonday
+		if now.Before(refreshMonday) {
+			start = refreshMonday.AddDate(0, 0, -7)
+		}
 		return start, start.AddDate(0, 0, 7)
 	case "month":
-		start = time.Date(y, m, 1, 0, 0, 0, 0, loc)
-		return start, start.AddDate(0, 1, 0)
+		firstOfMonth := time.Date(y, m, 1, 0, 0, 0, 0, loc)
+		refreshFirst := refreshInstantOnDate(firstOfMonth, refreshTime)
+		start = refreshFirst
+		if now.Before(refreshFirst) {
+			prev := firstOfMonth.AddDate(0, -1, 0)
+			start = refreshInstantOnDate(prev, refreshTime)
+		}
+		endMonth := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, loc).AddDate(0, 1, 0)
+		return start, refreshInstantOnDate(endMonth, refreshTime)
 	default:
 		return time.Time{}, time.Time{}
 	}
+}
+
+// calendarWindow is midnight-based; prefer calendarWindowAt with DailyRefreshTime.
+func calendarWindow(now time.Time, unit string) (start, end time.Time) {
+	return calendarWindowAt(now, unit, "00:00:00")
 }
 
 // registerDeadline is createdAt + hours (hours=0 → createdAt).
@@ -44,14 +84,14 @@ func inRegisterWindow(createdAt, now time.Time, hours uint32) bool {
 	return !now.Before(createdAt) && now.Before(deadline)
 }
 
-// sumBoughtQtyInWindow 统计账号对该活动商品的已购件数（非取消）。
+// sumBoughtQtyInWindow 统计账号对该活动商品的已购件数（排除取消与拼团失败）。
 // start/end 均为非零时限制 o.created_at ∈ [start, end)；否则不限时间。
 func sumBoughtQtyInWindow(db *gorm.DB, accountID, activityProductID uint64, start, end time.Time) (uint32, error) {
 	q := db.Table("order_item oi").
 		Select("COALESCE(SUM(oi.quantity), 0)").
 		Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
 		Where("o.account_id = ? AND oi.activity_product_id = ? AND oi.is_deleted = ?", accountID, activityProductID, model.NotDeleted).
-		Where("o.status <> ?", model.OrderStatusCancelled)
+		Where("o.status NOT IN ?", orderStatusesExcludedFromBoughtQty)
 	if !start.IsZero() && !end.IsZero() {
 		q = q.Where("o.created_at >= ? AND o.created_at < ?", start, end)
 	}
@@ -169,7 +209,7 @@ func computeActivityRemaining(
 		}
 		var start, end time.Time
 		if lim.unit != "" {
-			start, end = calendarWindow(now, lim.unit)
+			start, end = calendarWindowAt(now, lim.unit, ap.DailyRefreshTime)
 		}
 		bought, err := sumBoughtQtyInWindow(db, *accountID, ap.ID, start, end)
 		if err != nil {
