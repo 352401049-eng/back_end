@@ -724,6 +724,7 @@ func (s *OrderService) GetView(accountID, orderID uint64, merchantID *uint64) (*
 	view := toOrderView(order)
 	s.attachVerifyCode(&view)
 	s.attachPickupCode(&view)
+	s.attachItemRefundQuantities(&view)
 	s.attachGroupBuyProgress(&view, accountID)
 	if merchantID != nil || accountID == 0 {
 		s.enrichBuyer(&view)
@@ -777,6 +778,7 @@ func (s *OrderService) List(accountID uint64, merchantID *uint64, page, pageSize
 		view := toOrderView(&orders[i])
 		s.attachVerifyCode(&view)
 		s.attachPickupCode(&view)
+		s.attachItemRefundQuantities(&view)
 		s.attachGroupBuyProgress(&view, accountID)
 		views = append(views, view)
 	}
@@ -1455,6 +1457,64 @@ func toOrderView(o *model.Order) OrderView {
 	return OrderView{
 		Order: *o, StatusText: statusText, StatusCode: statusCode,
 	}
+}
+
+// attachItemRefundQuantities 按库存退款流水汇总各明细已退件数，并校正「买2退1」等仍显示已入背包的问题。
+func (s *OrderService) attachItemRefundQuantities(view *OrderView) {
+	if view == nil || view.ID == 0 {
+		return
+	}
+	applyLogs := func(orderID uint64, items []model.OrderItem) (refundedQty, totalQty uint32) {
+		if len(items) == 0 {
+			return 0, 0
+		}
+		var logs []model.UserInventoryLog
+		if err := s.DB.Where("order_id = ? AND event_type = ? AND delta_qty < 0",
+			orderID, model.InventoryEventRefund).Find(&logs).Error; err != nil {
+			return 0, 0
+		}
+		byKey := map[string]uint32{}
+		for _, lg := range logs {
+			qty := uint32(-lg.DeltaQty)
+			key := fmt.Sprintf("%d\x00%s", lg.ProductID, lg.Spec)
+			byKey[key] += qty
+			refundedQty += qty
+		}
+		for i := range items {
+			totalQty += items[i].Quantity
+			spec := ""
+			if items[i].Spec != nil {
+				spec = *items[i].Spec
+			}
+			key := fmt.Sprintf("%d\x00%s", items[i].ProductID, spec)
+			items[i].RefundedQuantity = byKey[key]
+		}
+		return refundedQty, totalQty
+	}
+
+	refundedQty, totalQty := applyLogs(view.ID, view.Items)
+	for i := range view.Children {
+		r, t := applyLogs(view.Children[i].ID, view.Children[i].Items)
+		refundedQty += r
+		totalQty += t
+	}
+
+	if refundedQty == 0 || view.StatusCode == "refunded" {
+		return
+	}
+	// 退款进行中：保持「退款中」
+	if view.RefundPendingAmount > 0.0001 || view.PayStatus == model.PayStatusRefunding {
+		return
+	}
+	// 买 N 退 M（M < N）或支付仍为部分退款 → 部分退款
+	if refundedQty < totalQty || view.PayStatus == model.PayStatusPartialRefunded ||
+		(view.PayAmount > 0 && view.RefundedAmount+0.0001 < view.PayAmount) {
+		view.StatusCode = "partial_refunded"
+		view.StatusText = "部分退款"
+		return
+	}
+	view.StatusCode = "refunded"
+	view.StatusText = "已退款"
 }
 
 func normalizeDeliveryType(deliveryType uint8) (uint8, error) {

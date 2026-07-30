@@ -345,10 +345,6 @@ func (p *WeChatProvider) handleRefundSuccess(data []byte) (*NotifyResult, error)
 		if status == model.PayStatusRefunded {
 			_ = query.NotDeleted(tx.Model(&model.Order{})).Where("id = ?", order.ID).
 				Update("status", model.OrderStatusRefunded).Error
-		} else if status == model.PayStatusPartialRefunded || status == model.PayStatusRefunding {
-			_ = query.NotDeleted(tx.Model(&model.Order{})).Where("id = ? AND status NOT IN ?", order.ID,
-				[]int{int(model.OrderStatusCancelled), int(model.OrderStatusClosed), int(model.OrderStatusRefunded)}).
-				Update("status", model.OrderStatusRefunding).Error
 		}
 		if pt.Status != model.PayTxStatusRefunded && status == model.PayStatusRefunded {
 			_ = tx.Model(&pt).Update("status", model.PayTxStatusRefunded).Error

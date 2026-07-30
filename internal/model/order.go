@@ -124,6 +124,8 @@ type OrderItem struct {
 	UnitPrice      float64   `gorm:"type:decimal(10,2);not null" json:"unit_price"`
 	Quantity       uint32    `gorm:"not null" json:"quantity"`
 	Subtotal       float64   `gorm:"type:decimal(10,2);not null" json:"subtotal"`
+	// RefundedQuantity 由库存退款流水汇总，非表字段
+	RefundedQuantity uint32 `gorm:"-" json:"refunded_quantity"`
 	CreatedAt      time.Time `json:"created_at"`
 	SoftDelete
 }
