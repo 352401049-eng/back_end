@@ -98,10 +98,9 @@ func (p *WeChatProvider) createOrderPrepay(sub PaySubject) (*PrepayResult, error
 			Message: "订单已支付"}, nil
 	}
 
-	// 2. 幂等：已有成功流水则直接返回
+	// 2. 幂等：已有成功流水则直接返回（含迁移前 subject_id=0 的 legacy 行）
 	var existingTx model.PaymentTransaction
-	err := p.DB.
-		Where("subject_type = ? AND subject_id = ? AND status = ?", model.PaySubjectOrder, orderID, model.PayTxStatusPaid).
+	err := paidTransactionBySubject(p.DB, model.PaySubjectOrder, orderID).
 		First(&existingTx).Error
 	if err == nil {
 		return &PrepayResult{Provider: p.Name(), AlreadyPaid: true, NeedPay: false,
@@ -208,8 +207,7 @@ func (p *WeChatProvider) createTakeoutPrepay(sub PaySubject) (*PrepayResult, err
 	}
 
 	var existingTx model.PaymentTransaction
-	err := p.DB.
-		Where("subject_type = ? AND subject_id = ? AND status = ?", model.PaySubjectTakeout, takeoutID, model.PayTxStatusPaid).
+	err := paidTransactionBySubject(p.DB, model.PaySubjectTakeout, takeoutID).
 		First(&existingTx).Error
 	if err == nil {
 		return &PrepayResult{Provider: p.Name(), AlreadyPaid: true, NeedPay: false,
@@ -416,7 +414,21 @@ func (p *WeChatProvider) upsertPaidTransaction(tx *gorm.DB, orderNo, txID string
 		Amount:    pt.PayAmount,
 	}
 	if sub.Type == "" || sub.ID == 0 {
-		return ResolveSubjectByOrderNo(tx, orderNo)
+		resolved, err := ResolveSubjectByOrderNo(tx, orderNo)
+		if err != nil {
+			return PaySubject{}, err
+		}
+		sub = resolved
+		backfill := map[string]interface{}{
+			"subject_type": sub.Type,
+			"subject_id":   sub.ID,
+		}
+		if oid := paymentTransactionOrderID(sub); oid > 0 {
+			backfill["order_id"] = oid
+		}
+		if err := tx.Model(&pt).Updates(backfill).Error; err != nil {
+			return PaySubject{}, err
+		}
 	}
 	return sub, nil
 }
@@ -687,6 +699,8 @@ func (p *WeChatProvider) refundOrderAmountInTx(tx *gorm.DB, sub PaySubject, amou
 		}
 		if err := enqueueWeChatRefund(tx, RefundJob{
 			Provider:    p,
+			SubjectType: model.PaySubjectOrder,
+			SubjectID:   order.ID,
 			OrderID:     order.ID,
 			OrderNo:     order.OrderNo,
 			OutRefundNo: fmt.Sprintf("RF%s%d", order.OrderNo, time.Now().UnixNano()%1e12),
@@ -746,7 +760,8 @@ func (p *WeChatProvider) refundTakeoutAmountInTx(tx *gorm.DB, sub PaySubject, am
 		}
 		return enqueueWeChatRefund(tx, RefundJob{
 			Provider:    p,
-			OrderID:     0,
+			SubjectType: model.PaySubjectTakeout,
+			SubjectID:   takeout.ID,
 			OrderNo:     takeout.OrderNo,
 			OutRefundNo: fmt.Sprintf("RF%s%d", takeout.OrderNo, time.Now().UnixNano()%1e12),
 			PayAmount:   takeout.PayAmount,

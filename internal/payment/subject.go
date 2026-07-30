@@ -122,3 +122,15 @@ func paymentTransactionOrderID(sub PaySubject) uint64 {
 	}
 	return 0
 }
+
+// paidTransactionBySubject scopes a query to a paid transaction for the subject,
+// including legacy rows where subject_id=0 but order_id matches (pre-migration orders).
+func paidTransactionBySubject(db *gorm.DB, subjectType string, subjectID uint64) *gorm.DB {
+	legacyOrderID := uint64(0)
+	if subjectType == model.PaySubjectOrder {
+		legacyOrderID = subjectID
+	}
+	return db.Where("status = ?", model.PayTxStatusPaid).
+		Where("(subject_type = ? AND subject_id = ?) OR (order_id = ? AND subject_id = 0)",
+			subjectType, subjectID, legacyOrderID)
+}

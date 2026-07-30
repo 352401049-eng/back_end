@@ -51,4 +51,4 @@ ALTER TABLE `delivery_order`
 ALTER TABLE `payment_transaction`
   ADD COLUMN `subject_type` VARCHAR(32) NOT NULL DEFAULT 'order' COMMENT 'order|takeout|delivery_fee' AFTER `id`,
   ADD COLUMN `subject_id` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `subject_type`;
--- 回填：UPDATE payment_transaction SET subject_type='order', subject_id=order_id WHERE subject_id=0;
+UPDATE payment_transaction SET subject_type='order', subject_id=order_id WHERE subject_id=0;

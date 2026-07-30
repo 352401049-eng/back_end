@@ -22,7 +22,9 @@ type refundJobsCtxKey struct{}
 // RefundJob 事务提交后待派发的微信退款任务。
 type RefundJob struct {
 	Provider    *WeChatProvider
-	OrderID     uint64
+	SubjectType string // model.PaySubject*；空则按入包订单处理
+	SubjectID   uint64 // 支付主体 ID（外卖单等与 OrderID 可能不同）
+	OrderID     uint64 // 入包订单 ID；背包回滚等 legacy 路径使用
 	OrderNo     string
 	OutRefundNo string
 	PayAmount   float64
@@ -91,12 +93,12 @@ func dispatchWeChatRefund(job RefundJob) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[wechat refund] panic recovered: %v", r)
-			releaseRefundPending(job.Provider, job.OrderID, job.RefundAmt)
+			releaseRefundPending(job)
 			restoreInventoryAfterRefundFail(job)
 		}
 	}()
 	if job.Provider == nil || job.Provider.Client == nil {
-		releaseRefundPending(job.Provider, job.OrderID, job.RefundAmt)
+		releaseRefundPending(job)
 		restoreInventoryAfterRefundFail(job)
 		return
 	}
@@ -113,7 +115,7 @@ func dispatchWeChatRefund(job RefundJob) {
 	})
 	if err != nil {
 		log.Printf("[wechat refund] order %s refund failed: %v", job.OrderNo, err)
-		releaseRefundPending(job.Provider, job.OrderID, job.RefundAmt)
+		releaseRefundPending(job)
 		restoreInventoryAfterRefundFail(job)
 		return
 	}
@@ -188,7 +190,45 @@ func restoreInventoryAfterRefundFail(job RefundJob) {
 }
 
 // releaseRefundPending 微信退款发起失败时释放预留，避免卡死可退余额。
-func releaseRefundPending(p *WeChatProvider, orderID uint64, amount float64) {
+func releaseRefundPending(job RefundJob) {
+	if job.Provider == nil || job.Provider.DB == nil {
+		return
+	}
+	switch job.SubjectType {
+	case model.PaySubjectTakeout:
+		releaseTakeoutRefundPending(job.Provider, job.SubjectID)
+		return
+	default:
+		releaseOrderRefundPending(job.Provider, job.OrderID, job.RefundAmt)
+	}
+}
+
+func releaseTakeoutRefundPending(p *WeChatProvider, takeoutID uint64) {
+	if p == nil || p.DB == nil || takeoutID == 0 {
+		return
+	}
+	err := p.DB.Transaction(func(tx *gorm.DB) error {
+		var takeout model.TakeoutOrder
+		if err := query.NotDeleted(tx).Select("id", "pay_status", "refunded_amount").
+			First(&takeout, takeoutID).Error; err != nil {
+			return err
+		}
+		if takeout.PayStatus != model.PayStatusRefunding {
+			return nil
+		}
+		status := model.PayStatusPaid
+		if takeout.RefundedAmount > 0 {
+			status = model.PayStatusPartialRefunded
+		}
+		return query.NotDeleted(tx.Model(&model.TakeoutOrder{})).Where("id = ?", takeoutID).
+			Updates(map[string]interface{}{"pay_status": status}).Error
+	})
+	if err != nil {
+		log.Printf("[wechat refund] release takeout pending %d failed: %v", takeoutID, err)
+	}
+}
+
+func releaseOrderRefundPending(p *WeChatProvider, orderID uint64, amount float64) {
 	if p == nil || p.DB == nil || orderID == 0 || amount <= 0 {
 		return
 	}
