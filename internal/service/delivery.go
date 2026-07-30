@@ -73,8 +73,9 @@ type DeliveryView struct {
 }
 
 type DeliveryService struct {
-	DB           *gorm.DB
-	InventorySvc *InventoryService
+	DB                *gorm.DB
+	InventorySvc      *InventoryService
+	DeliveryFeePaySvc *DeliveryFeePayService
 }
 
 func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageSize int) ([]DeliveryView, int64, error) {
@@ -376,6 +377,11 @@ func (s *DeliveryService) RejectPrepare(merchantID, deliveryID uint64, reason st
 			"exception_reason": reasonText,
 		}).Error; err != nil {
 			return err
+		}
+		if s.DeliveryFeePaySvc != nil {
+			if err := s.DeliveryFeePaySvc.RefundForDeliveryOrderInTx(tx, deliveryID, "取消配送退配送费"); err != nil {
+				return err
+			}
 		}
 
 		// 购买订单路径：回到待履约（已入背包），备注中保留拒单原因

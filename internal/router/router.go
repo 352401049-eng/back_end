@@ -97,7 +97,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	startPendingPayExpireWorker(orderSvc, takeoutSvc, deliveryFeePaySvc)
 	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc}
 	paymentHandler := &handler.PaymentHandler{OrderSvc: orderSvc}
-	deliverySvc := &service.DeliveryService{DB: db, InventorySvc: inventorySvc}
+	deliverySvc := &service.DeliveryService{DB: db, InventorySvc: inventorySvc, DeliveryFeePaySvc: deliveryFeePaySvc}
 	riderEarningSvc := &service.RiderEarningService{DB: db}
 	dashboardSvc := &service.DashboardService{DB: db}
 	categorySvc := &service.CategoryService{DB: db}
