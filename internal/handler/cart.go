@@ -116,6 +116,58 @@ func (h *UserHandler) DeleteCart(c *gin.Context) {
 	response.OK(c, nil)
 }
 
+type CheckoutCartRequest struct {
+	CartItemIDs       []uint64 `json:"cart_item_ids" binding:"required,min=1"`
+	MerchantID        uint64   `json:"merchant_id" binding:"required"`
+	DeliveryType      uint8    `json:"delivery_type"`
+	AddressID         *uint64  `json:"address_id"`
+	DeliveryLatitude  *float64 `json:"delivery_latitude"`
+	DeliveryLongitude *float64 `json:"delivery_longitude"`
+	Remark            *string  `json:"remark"`
+	UserCouponID      *uint64  `json:"user_coupon_id"`
+}
+
+// CheckoutCart godoc
+// @Summary      购物车同店合单结算
+// @Tags         用户-购物车
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body  CheckoutCartRequest  true  "合单信息"
+// @Success      200   {object}  response.Body{data=service.OrderView}
+// @Router       /user/cart/checkout [post]
+func (h *UserHandler) CheckoutCart(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	var req CheckoutCartRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	if h.OrderSvc == nil {
+		response.InternalError(c, "服务未就绪")
+		return
+	}
+	view, err := h.OrderSvc.CheckoutCart(accountID, service.CheckoutCartInput{
+		CartItemIDs: req.CartItemIDs, MerchantID: req.MerchantID,
+		DeliveryType: req.DeliveryType, AddressID: req.AddressID,
+		DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
+		Remark: req.Remark, UserCouponID: req.UserCouponID,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrCartItemNotFound) {
+			response.Fail(c, 404, 404, "购物车项不存在")
+			return
+		}
+		handleOrderError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
 func handleCartError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrCartItemNotFound):

@@ -217,6 +217,7 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.POST("/user/deliveries/:id/confirm", h.ConfirmDeliveryReceipt)
 	r.GET("/user/cart", h.Cart)
 	r.POST("/user/cart", h.AddCart)
+	r.POST("/user/cart/checkout", h.CheckoutCart)
 	r.PATCH("/user/cart/:id", h.UpdateCart)
 	r.DELETE("/user/cart/:id", h.DeleteCart)
 	r.GET("/user/coupons", h.Coupons)

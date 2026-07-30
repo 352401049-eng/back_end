@@ -50,6 +50,7 @@ func (s *CartService) Add(accountID uint64, input AddCartInput) (*model.CartItem
 		}
 		return nil, err
 	}
+	// 普通 / 虚拟 / 套餐均可加购；活动价走立即购买（购物车无 activity 字段）
 
 	if input.PurchaseType == model.PurchaseTypeGroup {
 		if product.EnableGroupBuy != 1 {

@@ -80,6 +80,7 @@ type CartItemView struct {
 	CanGroupBuy  bool     `json:"can_group_buy"`
 	CanUseCoupon bool     `json:"can_use_coupon"`
 	GroupBuyID   *uint64  `json:"group_buy_id,omitempty"`
+	ShopName     string   `json:"shop_name,omitempty"`
 }
 
 func (s *UserService) GetOverview(accountID uint64) (*OverviewResponse, error) {
@@ -190,6 +191,27 @@ func (s *UserService) ListCart(accountID uint64) ([]CartItemView, error) {
 	if err := query.NotDeleted(s.DB).Preload("Product", "is_deleted = ?", model.NotDeleted).Where("account_id = ?", accountID).Order("updated_at DESC").Find(&items).Error; err != nil {
 		return nil, err
 	}
+	merchantIDs := make([]uint64, 0)
+	seenMid := map[uint64]struct{}{}
+	for _, item := range items {
+		mid := item.Product.MerchantID
+		if mid == 0 {
+			continue
+		}
+		if _, ok := seenMid[mid]; ok {
+			continue
+		}
+		seenMid[mid] = struct{}{}
+		merchantIDs = append(merchantIDs, mid)
+	}
+	shopNames := map[uint64]string{}
+	if len(merchantIDs) > 0 {
+		var merchants []model.MerchantProfile
+		_ = query.NotDeleted(s.DB).Select("id", "shop_name").Where("id IN ?", merchantIDs).Find(&merchants)
+		for _, m := range merchants {
+			shopNames[m.ID] = m.ShopName
+		}
+	}
 	views := make([]CartItemView, 0, len(items))
 	for _, item := range items {
 		var gb *model.GroupBuy
@@ -207,6 +229,7 @@ func (s *UserService) ListCart(accountID uint64) ([]CartItemView, error) {
 			CanGroupBuy:  sale.CanGroupBuy,
 			CanUseCoupon: sale.CanUseCoupon,
 			GroupBuyID:   sale.GroupBuyID,
+			ShopName:     shopNames[item.Product.MerchantID],
 		}
 		if item.PurchaseType == model.PurchaseTypeGroup {
 			if item.Product.GroupBuyPrice != nil {

@@ -120,10 +120,11 @@ func (h *CouponHandler) Claim(c *gin.Context) {
 // @Tags         用户-优惠券
 // @Produce      json
 // @Security     BearerAuth
-// @Param        product_id     query  int  true  "商品 ID"
-// @Param        merchant_id    query  int  true  "商家 ID"
-// @Param        quantity       query  int  false  "数量"
-// @Param        purchase_type  query  int  false  "1=直购 2=拼团"
+// @Param        product_id     query  int     true   "商品 ID"
+// @Param        merchant_id    query  int     true   "商家 ID"
+// @Param        quantity       query  int     false  "数量"
+// @Param        amount         query  number  false  "订单金额（合单时传整单小计，覆盖 quantity×单价）"
+// @Param        purchase_type  query  int     false  "1=直购 2=拼团"
 // @Success      200  {object}  response.Body
 // @Router       /user/coupons/applicable [get]
 func (h *CouponHandler) ListApplicable(c *gin.Context) {
@@ -484,9 +485,19 @@ func (h *CouponHandler) buildOrderCouponContext(c *gin.Context, accountID uint64
 	if purchaseType == model.PurchaseTypeGroup && product.GroupBuyPrice != nil {
 		unitPrice = *product.GroupBuyPrice
 	}
+	subtotal := unitPrice * float64(qty)
+	// 合单预览可传整单金额，避免用单行 quantity 误判门槛/折扣
+	if raw := c.Query("amount"); raw != "" {
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || v < 0 {
+			response.BadRequest(c, "amount 无效")
+			return service.OrderCouponContext{}, errors.New("invalid amount")
+		}
+		subtotal = v
+	}
 	return service.OrderCouponContext{
 		AccountID: accountID, MerchantID: merchantID, Product: *product,
-		Subtotal: unitPrice * float64(qty), PurchaseType: purchaseType,
+		Subtotal: subtotal, PurchaseType: purchaseType,
 	}, nil
 }
 
