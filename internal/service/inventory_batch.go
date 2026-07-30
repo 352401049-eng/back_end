@@ -154,7 +154,8 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 
 		for i, item := range loaded {
 			inv := item.inv
-			if err := s.adjustQuantity(tx, accountID, inv.ProductID, inv.Spec, -int32(item.qty), nil, nil, model.InventoryEventUse, nil); err != nil {
+			primaryOID, err := s.deductInventoryUseFIFO(tx, accountID, inv.ProductID, inv.Spec, item.qty)
+			if err != nil {
 				return err
 			}
 			var snap model.PackageSelectionSnapshot
@@ -174,9 +175,13 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 				return err
 			}
 
+			srcOID := primaryOID
+			if srcOID == nil {
+				srcOID = inv.LastOrderID
+			}
 			usage := model.UserInventoryUsage{
 				AccountID: accountID, InventoryID: inv.ID, ProductID: inv.ProductID,
-				MerchantID: merchantID, SourceOrderID: inv.LastOrderID,
+				MerchantID: merchantID, SourceOrderID: srcOID,
 				Quantity: item.qty, DeliveryType: deliveryType,
 				AddressSnapshot: addrSnap, Status: status, Remark: input.Remark,
 				PackageSelections: snap, PackageSelectStatus: pkgStatus,
@@ -188,12 +193,19 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 			if err := tx.Create(&usage).Error; err != nil {
 				return err
 			}
+			var useLogIDs []uint64
 			if err := tx.Model(&model.UserInventoryLog{}).
 				Where("account_id = ? AND product_id = ? AND spec = ? AND event_type = ? AND usage_id IS NULL",
 					accountID, inv.ProductID, inv.Spec, model.InventoryEventUse).
-				Order("id DESC").Limit(1).
-				Update("usage_id", usage.ID).Error; err != nil {
+				Order("id DESC").Limit(int(item.qty)+4).
+				Pluck("id", &useLogIDs).Error; err != nil {
 				return err
+			}
+			if len(useLogIDs) > 0 {
+				if err := tx.Model(&model.UserInventoryLog{}).Where("id IN ?", useLogIDs).
+					Update("usage_id", usage.ID).Error; err != nil {
+					return err
+				}
 			}
 
 			var verifyCode *string

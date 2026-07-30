@@ -243,7 +243,8 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		usageIDHolder := uint64(0)
-		if err := s.adjustQuantity(tx, accountID, inv.ProductID, inv.Spec, -int32(input.Quantity), nil, nil, model.InventoryEventUse, nil); err != nil {
+		primaryOID, err := s.deductInventoryUseFIFO(tx, accountID, inv.ProductID, inv.Spec, input.Quantity)
+		if err != nil {
 			return err
 		}
 
@@ -264,9 +265,13 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			return err
 		}
 
+		srcOID := primaryOID
+		if srcOID == nil {
+			srcOID = inv.LastOrderID
+		}
 		usage = model.UserInventoryUsage{
 			AccountID: accountID, InventoryID: inv.ID, ProductID: inv.ProductID,
-			MerchantID: inv.Product.MerchantID, SourceOrderID: inv.LastOrderID,
+			MerchantID: inv.Product.MerchantID, SourceOrderID: srcOID,
 			Quantity: input.Quantity, DeliveryType: deliveryType,
 			AddressSnapshot: addrSnap, Status: status, Remark: input.Remark,
 			PackageSelections: snap, PackageSelectStatus: pkgStatus,
@@ -277,12 +282,19 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 		}
 		usageIDHolder = usage.ID
 
-		// 回填 usage_id 到最近一条 use 流水
+		// 回填 usage_id 到本事务刚写入的 use 流水
+		var useLogIDs []uint64
 		if err := tx.Model(&model.UserInventoryLog{}).
 			Where("account_id = ? AND product_id = ? AND spec = ? AND event_type = ? AND usage_id IS NULL", accountID, inv.ProductID, inv.Spec, model.InventoryEventUse).
-			Order("id DESC").Limit(1).
-			Update("usage_id", usageIDHolder).Error; err != nil {
+			Order("id DESC").Limit(int(input.Quantity)+4).
+			Pluck("id", &useLogIDs).Error; err != nil {
 			return err
+		}
+		if len(useLogIDs) > 0 {
+			if err := tx.Model(&model.UserInventoryLog{}).Where("id IN ?", useLogIDs).
+				Update("usage_id", usageIDHolder).Error; err != nil {
+				return err
+			}
 		}
 
 		if deliveryType == model.DeliveryTypePickup {
@@ -423,7 +435,7 @@ func (s *InventoryService) finalizeCancelUsage(accountID uint64, usage *model.Us
 		if err := query.NotDeleted(tx).First(&inv, usage.InventoryID).Error; err != nil {
 			return err
 		}
-		if err := s.adjustQuantity(tx, accountID, usage.ProductID, inv.Spec, int32(usage.Quantity), usage.SourceOrderID, &usage.ID, model.InventoryEventUseCancel, strPtr("取消使用回滚")); err != nil {
+		if err := s.restoreInventoryUseCancel(tx, usage, inv.Spec, strPtr("取消使用回滚")); err != nil {
 			return err
 		}
 
@@ -694,6 +706,86 @@ func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, pa
 	return query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
 		Where("id = ? AND status = ?", usageID, model.InventoryUsagePendingVerify).
 		Updates(updates).Error
+}
+
+// deductInventoryUseFIFO 按来源订单 FIFO 扣减背包，并在 use 流水上写入 order_id，
+// 避免后续 use_cancel / 退款错记到 LastOrderID。
+func (s *InventoryService) deductInventoryUseFIFO(
+	tx *gorm.DB, accountID, productID uint64, spec string, quantity uint32,
+) (*uint64, error) {
+	if quantity == 0 {
+		return nil, nil
+	}
+	nets, seq, err := orderNetBalances(tx, accountID, productID, spec)
+	if err != nil {
+		return nil, err
+	}
+	need := int32(quantity)
+	var primary *uint64
+	for _, oid := range seq {
+		if need <= 0 {
+			break
+		}
+		remain := nets[oid]
+		if remain <= 0 {
+			continue
+		}
+		take := remain
+		if take > need {
+			take = need
+		}
+		oidCopy := oid
+		if err := s.adjustQuantity(tx, accountID, productID, spec, -take, &oidCopy, nil, model.InventoryEventUse, nil); err != nil {
+			return nil, err
+		}
+		if primary == nil {
+			primary = &oidCopy
+		}
+		nets[oid] -= take
+		need -= take
+	}
+	if need > 0 {
+		// 历史错账导致来源合计不足：剩余仍扣库存，不绑定来源（兼容旧数据）
+		if err := s.adjustQuantity(tx, accountID, productID, spec, -need, nil, nil, model.InventoryEventUse, nil); err != nil {
+			return nil, err
+		}
+	}
+	return primary, nil
+}
+
+// restoreInventoryUseCancel 按原 use 流水的 order_id 回滚；无流水时回退 SourceOrderID。
+func (s *InventoryService) restoreInventoryUseCancel(
+	tx *gorm.DB, usage *model.UserInventoryUsage, spec string, remark *string,
+) error {
+	var useLogs []model.UserInventoryLog
+	if err := query.NotDeleted(tx).
+		Where("usage_id = ? AND event_type = ? AND delta_qty < 0", usage.ID, model.InventoryEventUse).
+		Order("id ASC").
+		Find(&useLogs).Error; err != nil {
+		return err
+	}
+	if len(useLogs) == 0 {
+		return s.adjustQuantity(tx, usage.AccountID, usage.ProductID, spec,
+			int32(usage.Quantity), usage.SourceOrderID, &usage.ID, model.InventoryEventUseCancel, remark)
+	}
+	var restored int32
+	for i := range useLogs {
+		lg := useLogs[i]
+		qty := -lg.DeltaQty
+		if qty <= 0 {
+			continue
+		}
+		if err := s.adjustQuantity(tx, usage.AccountID, usage.ProductID, spec,
+			qty, lg.OrderID, &usage.ID, model.InventoryEventUseCancel, remark); err != nil {
+			return err
+		}
+		restored += qty
+	}
+	if remain := int32(usage.Quantity) - restored; remain > 0 {
+		return s.adjustQuantity(tx, usage.AccountID, usage.ProductID, spec,
+			remain, usage.SourceOrderID, &usage.ID, model.InventoryEventUseCancel, remark)
+	}
+	return nil
 }
 
 func (s *InventoryService) adjustQuantity(

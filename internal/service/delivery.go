@@ -350,8 +350,7 @@ func (s *DeliveryService) RejectPrepare(merchantID, deliveryID uint64, reason st
 			if err := query.NotDeleted(tx).First(&inv, u.InventoryID).Error; err != nil {
 				return err
 			}
-			if err := s.InventorySvc.adjustQuantity(tx, u.AccountID, u.ProductID, inv.Spec,
-				int32(u.Quantity), u.SourceOrderID, &u.ID, model.InventoryEventUseCancel, &reasonText); err != nil {
+			if err := s.InventorySvc.restoreInventoryUseCancel(tx, &u, inv.Spec, &reasonText); err != nil {
 				return err
 			}
 			if err := restorePackageComponentStock(tx, &u); err != nil {

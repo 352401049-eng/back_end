@@ -392,6 +392,16 @@ func orderNetBalances(db *gorm.DB, accountID, productID uint64, spec string) (ma
 		return nil, nil, err
 	}
 	bal, orderSeq := orderNetBalancesFromLogs(logs)
+
+	var invQty uint32
+	var inv model.UserInventory
+	if err := query.NotDeleted(db).
+		Select("quantity").
+		Where("account_id = ? AND product_id = ? AND spec = ?", accountID, productID, spec).
+		First(&inv).Error; err == nil {
+		invQty = inv.Quantity
+	}
+	reconcileNetBalancesToInventory(bal, orderSeq, invQty)
 	return bal, orderSeq, nil
 }
 
@@ -399,6 +409,7 @@ func orderNetBalances(db *gorm.DB, accountID, productID uint64, spec string) (ma
 // use（常无 order_id）按 FIFO 从最早仍有余额的入账订单扣减。
 func orderNetBalancesFromLogs(logs []model.UserInventoryLog) (map[uint64]int32, []uint64) {
 	bal := map[uint64]int32{}
+	ceiling := map[uint64]int32{} // 入账 - 已退款，use_cancel 不可突破
 	orderSeq := make([]uint64, 0)
 
 	touch := func(oid uint64) {
@@ -433,6 +444,7 @@ func orderNetBalancesFromLogs(logs []model.UserInventoryLog) (map[uint64]int32, 
 			oid := *lg.OrderID
 			touch(oid)
 			bal[oid] += lg.DeltaQty
+			ceiling[oid] += lg.DeltaQty
 		case model.InventoryEventUse:
 			need := -lg.DeltaQty
 			if need <= 0 {
@@ -451,9 +463,24 @@ func orderNetBalancesFromLogs(logs []model.UserInventoryLog) (map[uint64]int32, 
 			} else {
 				consumeFIFO(need)
 			}
-		case model.InventoryEventUseCancel, model.InventoryEventOrderRollback, model.InventoryEventRefund:
+		case model.InventoryEventRefund:
 			if lg.OrderID == nil {
-				// 无来源的扣减/回滚：退款类按 FIFO；回滚类少见，同样 FIFO 消费正余额或忽略
+				if lg.DeltaQty < 0 {
+					consumeFIFO(-lg.DeltaQty)
+				}
+				continue
+			}
+			oid := *lg.OrderID
+			touch(oid)
+			bal[oid] += lg.DeltaQty
+			if lg.DeltaQty < 0 {
+				ceiling[oid] += lg.DeltaQty // 降低可退上限
+				if ceiling[oid] < 0 {
+					ceiling[oid] = 0
+				}
+			}
+		case model.InventoryEventUseCancel, model.InventoryEventOrderRollback:
+			if lg.OrderID == nil {
 				if lg.DeltaQty < 0 {
 					consumeFIFO(-lg.DeltaQty)
 				}
@@ -474,7 +501,54 @@ func orderNetBalancesFromLogs(logs []model.UserInventoryLog) (map[uint64]int32, 
 			bal[oid] += lg.DeltaQty
 		}
 	}
+
+	// use 无 order_id + use_cancel 记到 LastOrderID 会造成单订单余额虚高；
+	// 单订单净余额不得超过「入账 - 已退款」。
+	for oid := range bal {
+		if bal[oid] < 0 {
+			bal[oid] = 0
+			continue
+		}
+		if capQty, ok := ceiling[oid]; ok && bal[oid] > capQty {
+			bal[oid] = capQty
+		}
+	}
 	return bal, orderSeq
+}
+
+// reconcileNetBalancesToInventory 各来源净余额合计不得超过当前背包件数。
+// 超出部分按 FIFO 从最早订单削去（消化 use/cancel 错账导致的虚高旧单余额）。
+func reconcileNetBalancesToInventory(bal map[uint64]int32, orderSeq []uint64, invQty uint32) {
+	var total int32
+	for _, oid := range orderSeq {
+		if bal[oid] < 0 {
+			bal[oid] = 0
+		}
+		total += bal[oid]
+	}
+	for oid, v := range bal {
+		if v < 0 {
+			bal[oid] = 0
+		}
+	}
+	excess := total - int32(invQty)
+	if excess <= 0 {
+		return
+	}
+	for _, oid := range orderSeq {
+		if excess <= 0 {
+			break
+		}
+		if bal[oid] <= 0 {
+			continue
+		}
+		take := bal[oid]
+		if take > excess {
+			take = excess
+		}
+		bal[oid] -= take
+		excess -= take
+	}
 }
 
 type orderRefundMeta struct {
