@@ -79,6 +79,25 @@ func TakeoutSubjectFromID(db *gorm.DB, takeoutID, accountID uint64) (PaySubject,
 	}, nil
 }
 
+// DeliveryFeeSubjectFromID 加载跑腿配送费单并构造 PaySubject。
+func DeliveryFeeSubjectFromID(db *gorm.DB, feeOrderID, accountID uint64) (PaySubject, error) {
+	var fee model.DeliveryFeeOrder
+	q := query.NotDeleted(db).Where("id = ?", feeOrderID)
+	if accountID > 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&fee).Error; err != nil {
+		return PaySubject{}, err
+	}
+	return PaySubject{
+		Type:      model.PaySubjectDeliveryFee,
+		ID:        fee.ID,
+		OrderNo:   fee.OrderNo,
+		Amount:    fee.PayAmount,
+		AccountID: fee.AccountID,
+	}, nil
+}
+
 // ResolveSubjectByOrderNo 用 out_trade_no 反查支付主体（微信回调/查单）。
 func ResolveSubjectByOrderNo(db *gorm.DB, orderNo string) (PaySubject, error) {
 	if orderNo == "" {
@@ -99,7 +118,17 @@ func ResolveSubjectByOrderNo(db *gorm.DB, orderNo string) (PaySubject, error) {
 			AccountID: to.AccountID,
 		}, nil
 	case model.PaySubjectDeliveryFee:
-		return PaySubject{}, fmt.Errorf("%w: delivery_fee subject lookup not wired yet", ErrNotSupported)
+		var fee model.DeliveryFeeOrder
+		if err := query.NotDeleted(db).Where("order_no = ?", orderNo).First(&fee).Error; err != nil {
+			return PaySubject{}, err
+		}
+		return PaySubject{
+			Type:      model.PaySubjectDeliveryFee,
+			ID:        fee.ID,
+			OrderNo:   fee.OrderNo,
+			Amount:    fee.PayAmount,
+			AccountID: fee.AccountID,
+		}, nil
 	default:
 		var o model.Order
 		if err := query.NotDeleted(db).Where("order_no = ?", orderNo).First(&o).Error; err != nil {

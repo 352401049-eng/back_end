@@ -11,30 +11,43 @@ import (
 )
 
 type UseBatchItemInput struct {
-	InventoryID       uint64                  `json:"inventory_id"`
-	Quantity          uint32                  `json:"quantity"`
-	PackageSelections []PackageSelectionInput `json:"package_selections"`
+	InventoryID       uint64                     `json:"inventory_id"`
+	Quantity          uint32                     `json:"quantity"`
+	PackageSelections []PackageSelectionInput    `json:"package_selections"`
 	OptionSelections  []OptionSelectionUnitInput `json:"option_selections"`
 }
 
 type UseBatchInput struct {
-	Items             []UseBatchItemInput
-	DeliveryType      uint8
-	AddressID         *uint64
-	DeliveryLatitude  *float64
-	DeliveryLongitude *float64
-	Remark            *string
+	Items                      []UseBatchItemInput
+	DeliveryType               uint8
+	AddressID                  *uint64
+	DeliveryLatitude           *float64
+	DeliveryLongitude          *float64
+	Remark                     *string
+	FulfillAfterDeliveryFeePay bool
 }
 
 type UseBatchResult struct {
-	Usages         []InventoryUsageView `json:"usages"`
-	DeliveryOrderID *uint64             `json:"delivery_order_id,omitempty"`
-	PickupCode     string               `json:"pickup_code,omitempty"`
-	DeliveryFee    float64              `json:"delivery_fee,omitempty"`
+	Usages          []InventoryUsageView `json:"usages"`
+	DeliveryOrderID *uint64              `json:"delivery_order_id,omitempty"`
+	PickupCode      string               `json:"pickup_code,omitempty"`
+	DeliveryFee     float64              `json:"delivery_fee,omitempty"`
 }
 
-// UseBatch 同店多商品同时使用：自取各生成核销码；外卖共用一笔配送单与一次配送费。
-func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*UseBatchResult, error) {
+type loadedUseBatchItem struct {
+	inv     model.UserInventory
+	qty     uint32
+	sels    []PackageSelectionInput
+	optSels []OptionSelectionUnitInput
+}
+
+// validateUseBatchDraft 校验批量使用草稿（不扣库存），供配送费预支付单创建。
+func (s *InventoryService) validateUseBatchDraft(accountID uint64, input UseBatchInput, merchantID uint64) error {
+	_, err := s.loadUseBatchItems(accountID, input, merchantID)
+	return err
+}
+
+func (s *InventoryService) loadUseBatchItems(accountID uint64, input UseBatchInput, expectMerchantID uint64) ([]loadedUseBatchItem, error) {
 	if len(input.Items) == 0 {
 		return nil, fmt.Errorf("%w: 请选择商品", ErrInventoryUsageInvalid)
 	}
@@ -46,13 +59,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 		return nil, ErrAddressRequired
 	}
 
-	type loadedItem struct {
-		inv     model.UserInventory
-		qty     uint32
-		sels    []PackageSelectionInput
-		optSels []OptionSelectionUnitInput
-	}
-	loaded := make([]loadedItem, 0, len(input.Items))
+	loaded := make([]loadedUseBatchItem, 0, len(input.Items))
 	var merchantID uint64
 
 	for _, it := range input.Items {
@@ -81,13 +88,15 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 		} else if inv.Product.MerchantID != merchantID {
 			return nil, fmt.Errorf("%w: 只能同时使用同一家店的商品", ErrInventoryUsageInvalid)
 		}
+		if expectMerchantID > 0 && merchantID != expectMerchantID {
+			return nil, fmt.Errorf("%w: 商家不匹配", ErrInventoryUsageInvalid)
+		}
 		if err := validateFulfillmentFlags(inv.Product, deliveryType); err != nil {
 			return nil, err
 		}
-		loaded = append(loaded, loadedItem{inv: inv, qty: qty, sels: it.PackageSelections, optSels: it.OptionSelections})
+		loaded = append(loaded, loadedUseBatchItem{inv: inv, qty: qty, sels: it.PackageSelections, optSels: it.OptionSelections})
 	}
 
-	// 同一背包行可能拆成多份提交（每份独立套餐选配），需按合计校验库存
 	needByInv := map[uint64]uint32{}
 	qtyByInv := map[uint64]uint32{}
 	for _, item := range loaded {
@@ -116,6 +125,44 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 		AddressID: input.AddressID, AddressSnapshot: addrSnap,
 	}); err != nil {
 		return nil, err
+	}
+
+	if deliveryType == model.DeliveryTypeDelivery && !input.FulfillAfterDeliveryFeePay {
+		var merchant model.MerchantProfile
+		if err := query.NotDeleted(s.DB).Select("delivery_fee").First(&merchant, merchantID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrMerchantNotFound
+			}
+			return nil, err
+		}
+		if merchant.DeliveryFee > 0 {
+			return nil, ErrDeliveryFeePaymentRequired
+		}
+	}
+
+	return loaded, nil
+}
+
+// UseBatch 同店多商品同时使用：自取各生成核销码；外卖共用一笔配送单与一次配送费。
+func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*UseBatchResult, error) {
+	loaded, err := s.loadUseBatchItems(accountID, input, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	deliveryType, _ := normalizeDeliveryType(input.DeliveryType)
+	var merchantID uint64
+	if len(loaded) > 0 {
+		merchantID = loaded[0].inv.Product.MerchantID
+	}
+
+	var addrSnap *model.AddressSnapshot
+	if deliveryType == model.DeliveryTypeDelivery {
+		var addr model.UserAddress
+		if err := query.NotDeleted(s.DB).Where("id = ? AND account_id = ?", *input.AddressID, accountID).First(&addr).Error; err != nil {
+			return nil, ErrAddressRequired
+		}
+		addrSnap = AddressSnapshotFromUserAddress(&addr)
 	}
 
 	status := model.InventoryUsagePendingVerify
@@ -209,14 +256,14 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 			}
 
 			var verifyCode *string
-			if deliveryType == model.DeliveryTypePickup {
+			if deliveryType == model.DeliveryTypePickup || deliveryType == model.DeliveryTypeDelivery {
 				vc, err := createVerificationCodeForUsage(tx, accountID, usage.ID)
 				if err != nil {
 					return err
 				}
 				verifyCode = &vc.Code
-			} else if i == 0 && deliveryID > 0 {
-				// 首个 usage 回填到 delivery_order.inventory_usage_id（兼容旧查询）
+			}
+			if deliveryType == model.DeliveryTypeDelivery && i == 0 && deliveryID > 0 {
 				if err := tx.Model(&model.DeliveryOrder{}).Where("id = ?", deliveryID).
 					Update("inventory_usage_id", usage.ID).Error; err != nil {
 					return err

@@ -23,11 +23,13 @@ var (
 	ErrInventoryCancelPending      = errors.New("inventory cancel pending review")
 	ErrVirtualNotDeliverable       = errors.New("virtual product not deliverable")
 	ErrDeliveryNotAllowed          = errors.New("product does not allow delivery")
+	ErrDeliveryFeePaymentRequired  = errors.New("delivery fee payment required")
 )
 
 type InventoryService struct {
-	DB      *gorm.DB
-	ZoneSvc *DeliveryZoneService
+	DB               *gorm.DB
+	ZoneSvc          *DeliveryZoneService
+	DeliveryFeePaySvc *DeliveryFeePayService
 }
 
 func (s *InventoryService) GetOwned(accountID, inventoryID uint64) (*model.UserInventory, error) {
@@ -232,6 +234,18 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 	}); err != nil {
 		return nil, err
 	}
+	if deliveryType == model.DeliveryTypeDelivery {
+		var merchant model.MerchantProfile
+		if err := query.NotDeleted(s.DB).Select("delivery_fee").First(&merchant, inv.Product.MerchantID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrMerchantNotFound
+			}
+			return nil, err
+		}
+		if merchant.DeliveryFee > 0 {
+			return nil, ErrDeliveryFeePaymentRequired
+		}
+	}
 
 	status := model.InventoryUsagePendingVerify
 	if deliveryType == model.DeliveryTypeDelivery {
@@ -297,13 +311,14 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			}
 		}
 
-		if deliveryType == model.DeliveryTypePickup {
+		if deliveryType == model.DeliveryTypePickup || deliveryType == model.DeliveryTypeDelivery {
 			vc, err := createVerificationCodeForUsage(tx, accountID, usage.ID)
 			if err != nil {
 				return err
 			}
 			verifyCode = &vc.Code
-		} else {
+		}
+		if deliveryType == model.DeliveryTypeDelivery {
 			// 从商家配置读取配送费/骑手收益快照写入 delivery_order
 			var merchant model.MerchantProfile
 			var deliveryFee, riderEarnings float64
@@ -474,6 +489,11 @@ func (s *InventoryService) finalizeCancelUsage(accountID uint64, usage *model.Us
 					Where("id = ? AND status NOT IN ?", *usage.DeliveryOrderID, []int{int(model.DeliveryConfirmed), int(model.DeliveryCancelled)}).
 					Update("status", model.DeliveryCancelled).Error; err != nil {
 					return err
+				}
+				if s.DeliveryFeePaySvc != nil {
+					if err := s.DeliveryFeePaySvc.RefundForDeliveryOrderInTx(tx, *usage.DeliveryOrderID, "取消配送退配送费"); err != nil {
+						return err
+					}
 				}
 			} else {
 				return errNext

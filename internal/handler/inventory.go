@@ -325,6 +325,8 @@ func handleInventoryError(c *gin.Context, err error) {
 		response.BadRequest(c, "该商品为虚拟商品，仅支持到店核销")
 	case errors.Is(err, service.ErrDeliveryNotAllowed):
 		response.BadRequest(c, "该商品不支持骑手配送")
+	case errors.Is(err, service.ErrDeliveryFeePaymentRequired):
+		response.BadRequest(c, "请先支付配送费，再提交跑腿")
 	case errors.Is(err, service.ErrPickupNotAllowed):
 		response.BadRequest(c, "该商品不支持到店自取")
 	case errors.Is(err, service.ErrPackageSelectionRequired):

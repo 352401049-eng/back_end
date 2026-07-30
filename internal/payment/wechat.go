@@ -67,7 +67,7 @@ func (p *WeChatProvider) CreatePrepayForSubject(sub PaySubject) (*PrepayResult, 
 	case model.PaySubjectTakeout:
 		return p.createTakeoutPrepay(sub)
 	case model.PaySubjectDeliveryFee:
-		return nil, fmt.Errorf("%w: delivery_fee prepay not wired yet", ErrNotSupported)
+		return p.createDeliveryFeePrepay(sub)
 	default:
 		return nil, ErrInvalidState
 	}
@@ -261,6 +261,97 @@ func (p *WeChatProvider) createTakeoutPrepay(sub PaySubject) (*PrepayResult, err
 		OrderNo:     takeout.OrderNo,
 		PrepayID:    &prepayID,
 		PayAmount:   takeout.PayAmount,
+		Status:      model.PayTxStatusPrepay,
+	}
+	if err := p.DB.Create(&pt).Error; err != nil {
+		if isDuplicateKey(err) {
+			return p.CreatePrepayForSubject(sub)
+		}
+		return nil, err
+	}
+
+	params, err := p.Client.Signer().SignPrepay(p.AppID, prepayID)
+	if err != nil {
+		return nil, fmt.Errorf("生成支付签名失败: %w", err)
+	}
+
+	return &PrepayResult{
+		Provider: p.Name(),
+		NeedPay:  true,
+		Params:   params,
+		Message:  "请调起微信支付",
+	}, nil
+}
+
+func (p *WeChatProvider) createDeliveryFeePrepay(sub PaySubject) (*PrepayResult, error) {
+	feeOrderID := sub.ID
+	accountID := sub.AccountID
+
+	var feeOrder model.DeliveryFeeOrder
+	if err := query.NotDeleted(p.DB).
+		Where("id = ? AND account_id = ?", feeOrderID, accountID).
+		First(&feeOrder).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: 配送费订单不存在", ErrNotSupported)
+		}
+		return nil, err
+	}
+	if feeOrder.Status != model.DeliveryFeeStatusPendingPay {
+		return nil, ErrInvalidState
+	}
+	if feeOrder.PayStatus != model.PayStatusUnpaid {
+		return &PrepayResult{Provider: p.Name(), AlreadyPaid: true, NeedPay: false,
+			Message: "订单已支付"}, nil
+	}
+
+	var existingTx model.PaymentTransaction
+	err := paidTransactionBySubject(p.DB, model.PaySubjectDeliveryFee, feeOrderID).
+		First(&existingTx).Error
+	if err == nil {
+		return &PrepayResult{Provider: p.Name(), AlreadyPaid: true, NeedPay: false,
+			Message: "订单已支付"}, nil
+	}
+
+	var account model.Account
+	if err := query.NotDeleted(p.DB).Select("id", "openid").First(&account, accountID).Error; err != nil {
+		return nil, fmt.Errorf("获取用户 openid 失败: %w", err)
+	}
+	if account.OpenID == nil || *account.OpenID == "" {
+		return nil, fmt.Errorf("用户未绑定微信 openid")
+	}
+
+	desc := "雨季新江跑腿配送费"
+	expireTime := ""
+	if feeOrder.PayExpireAt != nil {
+		expireTime = feeOrder.PayExpireAt.Format(time.RFC3339)
+	}
+	prepayResp, err := p.Client.CreateJSAPIPrepay(&wechatv3.CreateJSAPIPrepayRequest{
+		AppID:       p.AppID,
+		MchID:       p.MchID,
+		Description: desc,
+		OutTradeNo:  feeOrder.OrderNo,
+		NotifyURL:   p.NotifyURL,
+		Amount: wechatv3.PrepayAmount{
+			Total:    wechatv3.YuanToFen(feeOrder.PayAmount),
+			Currency: "CNY",
+		},
+		Payer: wechatv3.PrepayPayer{
+			OpenID: *account.OpenID,
+		},
+		TimeExpire: expireTime,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("微信下单失败: %w", err)
+	}
+
+	prepayID := prepayResp.PrepayID
+	pt := model.PaymentTransaction{
+		SubjectType: model.PaySubjectDeliveryFee,
+		SubjectID:   feeOrderID,
+		OrderID:     0,
+		OrderNo:     feeOrder.OrderNo,
+		PrepayID:    &prepayID,
+		PayAmount:   feeOrder.PayAmount,
 		Status:      model.PayTxStatusPrepay,
 	}
 	if err := p.DB.Create(&pt).Error; err != nil {
@@ -477,7 +568,25 @@ func (p *WeChatProvider) markSubjectPaidInTx(tx *gorm.DB, sub PaySubject, at tim
 		}
 		return nil
 	case model.PaySubjectDeliveryFee:
-		return fmt.Errorf("%w: delivery_fee settle not wired yet", ErrNotSupported)
+		res := query.NotDeleted(tx.Model(&model.DeliveryFeeOrder{})).
+			Where("id = ? AND pay_status = ?", sub.ID, model.PayStatusUnpaid).
+			Updates(map[string]interface{}{
+				"pay_status": model.PayStatusPaid,
+				"paid_at":    at,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			var fee model.DeliveryFeeOrder
+			if err := query.NotDeleted(tx).Select("pay_status").First(&fee, sub.ID).Error; err != nil {
+				return err
+			}
+			if fee.PayStatus != model.PayStatusPaid {
+				return ErrInvalidState
+			}
+		}
+		return nil
 	default:
 		return ErrInvalidState
 	}
@@ -530,7 +639,7 @@ func (p *WeChatProvider) handleRefundSuccess(data []byte) (*NotifyResult, error)
 		case model.PaySubjectTakeout:
 			return p.applyTakeoutRefundInTx(tx, pt, refundYuan)
 		case model.PaySubjectDeliveryFee:
-			return fmt.Errorf("%w: delivery_fee refund not wired yet", ErrNotSupported)
+			return p.applyDeliveryFeeRefundInTx(tx, pt, refundYuan)
 		default:
 			return p.applyOrderRefundInTx(tx, pt, refundYuan)
 		}
@@ -618,6 +727,33 @@ func (p *WeChatProvider) applyTakeoutRefundInTx(tx *gorm.DB, pt model.PaymentTra
 	return nil
 }
 
+func (p *WeChatProvider) applyDeliveryFeeRefundInTx(tx *gorm.DB, pt model.PaymentTransaction, refundYuan float64) error {
+	var fee model.DeliveryFeeOrder
+	if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+		Select("id", "pay_status", "pay_amount", "refunded_amount").
+		First(&fee, pt.SubjectID).Error; err != nil {
+		return err
+	}
+	newRefunded := fee.RefundedAmount + refundYuan
+	if newRefunded > fee.PayAmount {
+		newRefunded = fee.PayAmount
+	}
+	status := model.PayStatusPartialRefunded
+	if newRefunded+0.0001 >= fee.PayAmount {
+		status = model.PayStatusRefunded
+	}
+	if err := query.NotDeleted(tx.Model(&model.DeliveryFeeOrder{})).Where("id = ?", fee.ID).Updates(map[string]interface{}{
+		"refunded_amount": newRefunded,
+		"pay_status":      status,
+	}).Error; err != nil {
+		return err
+	}
+	if pt.Status != model.PayTxStatusRefunded && status == model.PayStatusRefunded {
+		_ = tx.Model(&pt).Update("status", model.PayTxStatusRefunded).Error
+	}
+	return nil
+}
+
 // RefundInTx 在事务内预留全额退款，事务提交后再异步发起微信退款。
 func (p *WeChatProvider) RefundInTx(tx *gorm.DB, orderID uint64) error {
 	return p.RefundAmountInTx(tx, orderID, 0, "用户取消")
@@ -646,7 +782,7 @@ func (p *WeChatProvider) RefundSubjectAmountInTx(tx *gorm.DB, sub PaySubject, am
 	case model.PaySubjectTakeout:
 		return p.refundTakeoutAmountInTx(tx, sub, amount, reason)
 	case model.PaySubjectDeliveryFee:
-		return fmt.Errorf("%w: delivery_fee refund not wired yet", ErrNotSupported)
+		return p.refundDeliveryFeeAmountInTx(tx, sub, amount, reason)
 	default:
 		return ErrInvalidState
 	}
@@ -766,6 +902,62 @@ func (p *WeChatProvider) refundTakeoutAmountInTx(tx *gorm.DB, sub PaySubject, am
 			OutRefundNo: fmt.Sprintf("RF%s%d", takeout.OrderNo, time.Now().UnixNano()%1e12),
 			PayAmount:   takeout.PayAmount,
 			RefundAmt:   newPending,
+			Reason:      refundReason,
+		})
+	default:
+		return ErrInvalidState
+	}
+}
+
+func (p *WeChatProvider) refundDeliveryFeeAmountInTx(tx *gorm.DB, sub PaySubject, amount float64, reason string) error {
+	var fee model.DeliveryFeeOrder
+	if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+		Select("id", "order_no", "pay_status", "pay_amount", "refunded_amount").
+		First(&fee, sub.ID).Error; err != nil {
+		return err
+	}
+	switch fee.PayStatus {
+	case model.PayStatusUnpaid, model.PayStatusRefunded:
+		return nil
+	case model.PayStatusPaid, model.PayStatusRefunding, model.PayStatusPartialRefunded:
+		remain := fee.PayAmount - fee.RefundedAmount
+		if remain < 0 {
+			remain = 0
+		}
+		refund := amount
+		if refund <= 0 || refund >= remain {
+			refund = remain
+		}
+		if refund <= 0 {
+			if amount > 0 {
+				return fmt.Errorf("%w: no refundable balance", ErrInvalidState)
+			}
+			return nil
+		}
+		refund = roundMoney(refund)
+		res := query.NotDeleted(tx.Model(&model.DeliveryFeeOrder{})).
+			Where("id = ? AND pay_status = ? AND refunded_amount = ?", fee.ID, fee.PayStatus, fee.RefundedAmount).
+			Updates(map[string]interface{}{
+				"pay_status": model.PayStatusRefunding,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("%w: delivery fee %d refund conflict", ErrInvalidState, fee.ID)
+		}
+		refundReason := reason
+		if refundReason == "" {
+			refundReason = "配送费退款"
+		}
+		return enqueueWeChatRefund(tx, RefundJob{
+			Provider:    p,
+			SubjectType: model.PaySubjectDeliveryFee,
+			SubjectID:   fee.ID,
+			OrderNo:     fee.OrderNo,
+			OutRefundNo: fmt.Sprintf("RF%s%d", fee.OrderNo, time.Now().UnixNano()%1e12),
+			PayAmount:   fee.PayAmount,
+			RefundAmt:   refund,
 			Reason:      refundReason,
 		})
 	default:

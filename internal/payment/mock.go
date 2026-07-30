@@ -40,7 +40,7 @@ func (p *MockProvider) SettleSubjectPaidInTx(tx *gorm.DB, sub PaySubject, at tim
 	case model.PaySubjectTakeout:
 		return p.settleTakeoutPaidInTx(tx, sub.ID, at)
 	case model.PaySubjectDeliveryFee:
-		return fmt.Errorf("%w: delivery_fee settle not wired yet", ErrNotSupported)
+		return p.settleDeliveryFeePaidInTx(tx, sub.ID, at)
 	default:
 		return ErrInvalidState
 	}
@@ -120,7 +120,7 @@ func (p *MockProvider) RefundSubjectAmountInTx(tx *gorm.DB, sub PaySubject, amou
 	case model.PaySubjectTakeout:
 		return p.refundTakeoutAmountInTx(tx, sub.ID, amount, reason)
 	case model.PaySubjectDeliveryFee:
-		return fmt.Errorf("%w: delivery_fee refund not wired yet", ErrNotSupported)
+		return p.refundDeliveryFeeAmountInTx(tx, sub.ID, amount, reason)
 	default:
 		return ErrInvalidState
 	}
@@ -247,7 +247,7 @@ func (p *MockProvider) CreatePrepayForSubject(sub PaySubject) (*PrepayResult, er
 	case model.PaySubjectTakeout:
 		return p.createTakeoutPrepay(sub)
 	case model.PaySubjectDeliveryFee:
-		return nil, fmt.Errorf("%w: delivery_fee prepay not wired yet", ErrNotSupported)
+		return p.createDeliveryFeePrepay(sub)
 	default:
 		return nil, ErrInvalidState
 	}
@@ -300,6 +300,88 @@ func (p *MockProvider) createTakeoutPrepay(sub PaySubject) (*PrepayResult, error
 	now := time.Now()
 	if err := p.DB.Transaction(func(tx *gorm.DB) error {
 		return p.settleTakeoutPaidInTx(tx, to.ID, now)
+	}); err != nil {
+		return nil, err
+	}
+	return &PrepayResult{
+		Provider: p.Name(), AlreadyPaid: true, NeedPay: false,
+		Message: "模拟支付已结算",
+	}, nil
+}
+
+func (p *MockProvider) settleDeliveryFeePaidInTx(tx *gorm.DB, feeOrderID uint64, at time.Time) error {
+	if feeOrderID == 0 {
+		return ErrInvalidState
+	}
+	res := query.NotDeleted(tx.Model(&model.DeliveryFeeOrder{})).
+		Where("id = ? AND pay_status = ?", feeOrderID, model.PayStatusUnpaid).
+		Updates(map[string]interface{}{
+			"pay_status": model.PayStatusPaid,
+			"paid_at":    at,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		var fee model.DeliveryFeeOrder
+		if err := query.NotDeleted(tx).Select("id", "pay_status").First(&fee, feeOrderID).Error; err != nil {
+			return err
+		}
+		if fee.PayStatus == model.PayStatusPaid {
+			return nil
+		}
+		return ErrInvalidState
+	}
+	return nil
+}
+
+func (p *MockProvider) refundDeliveryFeeAmountInTx(tx *gorm.DB, feeOrderID uint64, amount float64, reason string) error {
+	if feeOrderID == 0 {
+		return ErrInvalidState
+	}
+	_ = reason
+	var fee model.DeliveryFeeOrder
+	if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+		Select("id", "pay_status", "pay_amount", "refunded_amount").
+		First(&fee, feeOrderID).Error; err != nil {
+		return err
+	}
+	return p.applyRefundAmount(tx, fee.PayStatus, fee.PayAmount, fee.RefundedAmount, 0, amount, func(refund float64, status uint8, newRefunded float64) error {
+		res := query.NotDeleted(tx.Model(&model.DeliveryFeeOrder{})).
+			Where("id = ? AND pay_status = ? AND refunded_amount = ?", feeOrderID, fee.PayStatus, fee.RefundedAmount).
+			Updates(map[string]interface{}{
+				"pay_status":      status,
+				"refunded_amount": newRefunded,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("%w: delivery fee %d refund conflict", ErrInvalidState, feeOrderID)
+		}
+		return nil
+	})
+}
+
+func (p *MockProvider) createDeliveryFeePrepay(sub PaySubject) (*PrepayResult, error) {
+	var fee model.DeliveryFeeOrder
+	if err := query.NotDeleted(p.DB).
+		Where("id = ? AND account_id = ?", sub.ID, sub.AccountID).
+		First(&fee).Error; err != nil {
+		return nil, err
+	}
+	if fee.PayStatus == model.PayStatusPaid {
+		return &PrepayResult{
+			Provider: p.Name(), AlreadyPaid: true, NeedPay: false,
+			Message: "模拟支付已结算",
+		}, nil
+	}
+	if fee.PayStatus != model.PayStatusUnpaid {
+		return nil, ErrInvalidState
+	}
+	now := time.Now()
+	if err := p.DB.Transaction(func(tx *gorm.DB) error {
+		return p.settleDeliveryFeePaidInTx(tx, fee.ID, now)
 	}); err != nil {
 		return nil, err
 	}
