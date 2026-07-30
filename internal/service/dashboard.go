@@ -150,7 +150,7 @@ func (s *DashboardService) Merchant(merchantID uint64) (*MerchantDashboard, erro
 		model.NotDeleted, merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPendingUse,
 	).Count(&d.PendingUseReview)
 
-	// 备餐中：订单路径（Order.status=Preparing）+ 背包路径（delivery_order.merchant_prepared=0）
+	// 备餐中：订单路径（Order.status=Preparing）+ 背包路径（delivery_order.merchant_prepared=0）+ 外卖配餐中
 	s.freshDB().Model(&model.Order{}).Where(
 		"is_deleted = ? AND merchant_id = ? AND status = ?",
 		model.NotDeleted, merchantID, model.OrderStatusPreparing,
@@ -162,6 +162,12 @@ func (s *DashboardService) Merchant(merchantID uint64) (*MerchantDashboard, erro
 		model.NotDeleted, model.DeliveryPendingAccept, merchantID,
 	).Count(&deliveryPreparing)
 	d.PendingPreparingCount += deliveryPreparing
+	var takeoutPreparing int64
+	s.freshDB().Model(&model.TakeoutOrder{}).Where(
+		"is_deleted = ? AND merchant_id = ? AND status = ?",
+		model.NotDeleted, merchantID, model.TakeoutStatusPreparing,
+	).Count(&takeoutPreparing)
+	d.PendingPreparingCount += takeoutPreparing
 
 	start, end := todayRange()
 	s.freshDB().Model(&model.VerificationRecord{}).Where(
