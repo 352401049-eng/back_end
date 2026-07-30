@@ -1208,7 +1208,7 @@ func (s *DeliveryService) AdminResolveCancel(deliveryID uint64, remark string) (
 			return err
 		}
 		revertLinkedOrderOnDeliveryCancelInTx(tx, d.OrderID, reasonText)
-		return nil
+		return cancelPendingRiderEarningsInTx(tx, deliveryID)
 	})
 	if err != nil {
 		return nil, err
