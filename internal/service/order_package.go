@@ -290,7 +290,7 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		}
 
 		if input.PurchaseType == model.PurchaseTypeGroup {
-			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, pkg, gb, input.GroupBuyTeamID, actGB, activityID)
+			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, pkg, gb, input.GroupBuyTeamID, actGB, activityID, activityProductID, now)
 			if err != nil {
 				return err
 			}

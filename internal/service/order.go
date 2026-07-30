@@ -316,7 +316,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		}
 
 		if input.PurchaseType == model.PurchaseTypeGroup {
-			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, product, gb, input.GroupBuyTeamID, actGB, activityID)
+			teamID, err := s.joinOrCreateTeam(tx, accountID, order.ID, product, gb, input.GroupBuyTeamID, actGB, activityID, activityProductID, now)
 			if err != nil {
 				return err
 			}
@@ -356,7 +356,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 	return s.GetView(accountID, order.ID, nil)
 }
 
-func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, product model.Product, gb model.GroupBuy, teamID *uint64, actGB *ActivityGroupBuyConfig, activityID *uint64) (uint64, error) {
+func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, product model.Product, gb model.GroupBuy, teamID *uint64, actGB *ActivityGroupBuyConfig, activityID *uint64, activityProductID *uint64, now time.Time) (uint64, error) {
 	target := uint32(2)
 	allowRepeat := product.GroupBuyAllowRepeat
 	maxJoins := uint32(1)
@@ -377,8 +377,6 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, 
 	if allowRepeat != 1 {
 		maxJoins = 1
 	}
-
-	expire := time.Now().Add(24 * time.Hour)
 
 	resolveTeamID := teamID
 	if resolveTeamID == nil && allowRepeat != 1 {
@@ -414,6 +412,15 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, 
 		}
 		return team.ID, nil
 	}
+
+	var ap *model.ActivityProduct
+	if activityProductID != nil {
+		var loaded model.ActivityProduct
+		if err := query.NotDeleted(tx).First(&loaded, *activityProductID).Error; err == nil {
+			ap = &loaded
+		}
+	}
+	expire := computeGroupExpireAt(now, ap)
 
 	team := model.GroupBuyTeam{
 		GroupBuyID: gb.ID, LeaderID: accountID, TargetCount: target,

@@ -32,21 +32,21 @@ func TestCalendarWindowAt_Day_WithRefresh(t *testing.T) {
 
 func TestCalendarWindowAt_Week_MondayRefresh(t *testing.T) {
 	loc := time.Local
-	// Tue 2026-07-22 13:00, refresh 12:00 → week [Mon 07-21 12:00, Mon 07-28 12:00)
-	now := time.Date(2026, 7, 22, 13, 0, 0, 0, loc)
+	// Tue 2026-07-21 13:00, refresh 12:00 → week [Mon 07-20 12:00, Mon 07-27 12:00)
+	now := time.Date(2026, 7, 21, 13, 0, 0, 0, loc)
 	start, end := calendarWindowAt(now, "week", "12:00:00")
 
-	wantStart := time.Date(2026, 7, 21, 12, 0, 0, 0, loc)
-	wantEnd := time.Date(2026, 7, 28, 12, 0, 0, 0, loc)
+	wantStart := time.Date(2026, 7, 20, 12, 0, 0, 0, loc)
+	wantEnd := time.Date(2026, 7, 27, 12, 0, 0, 0, loc)
 	if !start.Equal(wantStart) || !end.Equal(wantEnd) {
 		t.Fatalf("week window (Tue): got [%v, %v), want [%v, %v)", start, end, wantStart, wantEnd)
 	}
 
 	// Monday before refresh → previous week
-	mon := time.Date(2026, 7, 21, 11, 0, 0, 0, loc)
+	mon := time.Date(2026, 7, 20, 11, 0, 0, 0, loc)
 	start, end = calendarWindowAt(mon, "week", "12:00:00")
-	wantStart = time.Date(2026, 7, 14, 12, 0, 0, 0, loc)
-	wantEnd = time.Date(2026, 7, 21, 12, 0, 0, 0, loc)
+	wantStart = time.Date(2026, 7, 13, 12, 0, 0, 0, loc)
+	wantEnd = time.Date(2026, 7, 20, 12, 0, 0, 0, loc)
 	if !start.Equal(wantStart) || !end.Equal(wantEnd) {
 		t.Fatalf("week window (Mon before refresh): got [%v, %v), want [%v, %v)", start, end, wantStart, wantEnd)
 	}
