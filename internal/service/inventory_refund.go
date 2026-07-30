@@ -65,7 +65,7 @@ func (s *OrderService) ListInventoryRefundSources(accountID, inventoryID uint64)
 		productName = product.Name
 	}
 
-	batches, err := listRefundBatches(s.DB, accountID, inv.ProductID, inv.Spec, inv.Quantity)
+	batches, err := listRefundBatches(s.DB, accountID, inv.ProductID, inv.Spec, inv.Quantity, !s.paymentProvider().ImmediateSettle())
 	if err != nil {
 		return nil, err
 	}
@@ -122,13 +122,14 @@ func (s *OrderService) RefundInventory(accountID, inventoryID uint64, quantity u
 
 		var allocs []refundAlloc
 		var err error
+		requirePayTx := !s.paymentProvider().ImmediateSettle()
 		if len(items) > 0 {
-			allocs, err = allocateInventoryRefundItems(tx, accountID, inv.ProductID, inv.Spec, inv.Quantity, items)
+			allocs, err = allocateInventoryRefundItems(tx, accountID, inv.ProductID, inv.Spec, inv.Quantity, items, requirePayTx)
 		} else {
 			if inv.Quantity < quantity {
 				return ErrInventoryInsufficient
 			}
-			allocs, err = allocateInventoryRefund(tx, accountID, inv.ProductID, inv.Spec, quantity, orderID)
+			allocs, err = allocateInventoryRefund(tx, accountID, inv.ProductID, inv.Spec, quantity, orderID, requirePayTx)
 		}
 		if err != nil {
 			return err
@@ -218,7 +219,7 @@ type refundBatch struct {
 	CreatedAt    time.Time
 }
 
-func listRefundBatches(db *gorm.DB, accountID, productID uint64, spec string, invQty uint32) ([]refundBatch, error) {
+func listRefundBatches(db *gorm.DB, accountID, productID uint64, spec string, invQty uint32, requirePayTx bool) ([]refundBatch, error) {
 	nets, orderSeq, err := orderNetBalances(db, accountID, productID, spec)
 	if err != nil {
 		return nil, err
@@ -246,6 +247,9 @@ func listRefundBatches(db *gorm.DB, accountID, productID uint64, spec string, in
 			// 该来源暂不可退（支付态/余额），跳过
 			continue
 		}
+		if requirePayTx && !orderHasPaidPaymentTx(db, oid) {
+			continue
+		}
 		if takeQty == 0 {
 			continue
 		}
@@ -266,7 +270,7 @@ func listRefundBatches(db *gorm.DB, accountID, productID uint64, spec string, in
 }
 
 // allocateInventoryRefundItems 按用户勾选的多来源精确分摊。
-func allocateInventoryRefundItems(tx *gorm.DB, accountID, productID uint64, spec string, invQty uint32, items []InventoryRefundItemInput) ([]refundAlloc, error) {
+func allocateInventoryRefundItems(tx *gorm.DB, accountID, productID uint64, spec string, invQty uint32, items []InventoryRefundItemInput, requirePayTx bool) ([]refundAlloc, error) {
 	nets, _, err := orderNetBalances(tx, accountID, productID, spec)
 	if err != nil {
 		return nil, err
@@ -289,6 +293,9 @@ func allocateInventoryRefundItems(tx *gorm.DB, accountID, productID uint64, spec
 		if int32(it.Quantity) > remain {
 			return nil, fmt.Errorf("%w: 该来源可退数量不足", ErrInventoryRefundInvalid)
 		}
+		if requirePayTx && !orderHasPaidPaymentTx(tx, it.OrderID) {
+			return nil, fmt.Errorf("%w: 该来源订单无微信支付流水，不可退款", ErrInventoryRefundInvalid)
+		}
 		takeQty, amount, err := planOrderItemRefund(tx, it.OrderID, productID, spec, it.Quantity)
 		if err != nil {
 			return nil, err
@@ -309,7 +316,7 @@ func allocateInventoryRefundItems(tx *gorm.DB, accountID, productID uint64, spec
 }
 
 // allocateInventoryRefund 分摊退款。orderID 非空时只从该订单扣；否则 FIFO，跳过暂不可退来源（与列表接口一致）。
-func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec string, quantity uint32, orderID *uint64) ([]refundAlloc, error) {
+func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec string, quantity uint32, orderID *uint64, requirePayTx bool) ([]refundAlloc, error) {
 	nets, orderSeq, err := orderNetBalances(tx, accountID, productID, spec)
 	if err != nil {
 		return nil, err
@@ -326,6 +333,9 @@ func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec stri
 		take := remain
 		if take > need {
 			take = need
+		}
+		if requirePayTx && !orderHasPaidPaymentTx(tx, oid) {
+			return nil, fmt.Errorf("%w: 该来源订单无微信支付流水，不可退款", ErrInventoryRefundInvalid)
 		}
 		takeQty, amount, err := planOrderItemRefund(tx, oid, productID, spec, uint32(take))
 		if err != nil {
@@ -354,6 +364,9 @@ func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec stri
 		if take > need {
 			take = need
 		}
+		if requirePayTx && !orderHasPaidPaymentTx(tx, oid) {
+			continue
+		}
 		takeQty, amount, err := planOrderItemRefund(tx, oid, productID, spec, uint32(take))
 		if err != nil || takeQty == 0 || amount <= 0 {
 			// 与 listRefundBatches 一致：跳过暂不可退来源，继续下一笔
@@ -369,26 +382,99 @@ func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec stri
 }
 
 func orderNetBalances(db *gorm.DB, accountID, productID uint64, spec string) (map[uint64]int32, []uint64, error) {
+	// 必须包含 order_id 为空的 use 流水：使用时未绑定来源订单，若忽略会导致
+	// 已核销的旧订单仍显示可退净余额，FIFO 退款错记到早期订单。
 	var logs []model.UserInventoryLog
 	if err := query.NotDeleted(db).
-		Where("account_id = ? AND product_id = ? AND spec = ? AND order_id IS NOT NULL", accountID, productID, spec).
+		Where("account_id = ? AND product_id = ? AND spec = ?", accountID, productID, spec).
 		Order("id ASC").
 		Find(&logs).Error; err != nil {
 		return nil, nil, err
 	}
+	bal, orderSeq := orderNetBalancesFromLogs(logs)
+	return bal, orderSeq, nil
+}
+
+// orderNetBalancesFromLogs 按时间回放流水，计算各来源订单仍留在背包中的净数量。
+// use（常无 order_id）按 FIFO 从最早仍有余额的入账订单扣减。
+func orderNetBalancesFromLogs(logs []model.UserInventoryLog) (map[uint64]int32, []uint64) {
 	bal := map[uint64]int32{}
 	orderSeq := make([]uint64, 0)
-	for _, lg := range logs {
-		if lg.OrderID == nil {
-			continue
-		}
-		oid := *lg.OrderID
+
+	touch := func(oid uint64) {
 		if _, ok := bal[oid]; !ok {
 			orderSeq = append(orderSeq, oid)
 		}
-		bal[oid] += lg.DeltaQty
 	}
-	return bal, orderSeq, nil
+	// 将 qty（正数）按 FIFO 从各来源净余额扣减
+	consumeFIFO := func(need int32) {
+		for _, oid := range orderSeq {
+			if need <= 0 {
+				break
+			}
+			if bal[oid] <= 0 {
+				continue
+			}
+			take := bal[oid]
+			if take > need {
+				take = need
+			}
+			bal[oid] -= take
+			need -= take
+		}
+	}
+
+	for _, lg := range logs {
+		switch lg.EventType {
+		case model.InventoryEventOrderCredit:
+			if lg.OrderID == nil || lg.DeltaQty <= 0 {
+				continue
+			}
+			oid := *lg.OrderID
+			touch(oid)
+			bal[oid] += lg.DeltaQty
+		case model.InventoryEventUse:
+			need := -lg.DeltaQty
+			if need <= 0 {
+				continue
+			}
+			if lg.OrderID != nil {
+				oid := *lg.OrderID
+				touch(oid)
+				bal[oid] += lg.DeltaQty // 负数
+				if bal[oid] < 0 {
+					// 指定来源不够时，差额继续 FIFO（容错历史脏数据）
+					extra := -bal[oid]
+					bal[oid] = 0
+					consumeFIFO(extra)
+				}
+			} else {
+				consumeFIFO(need)
+			}
+		case model.InventoryEventUseCancel, model.InventoryEventOrderRollback, model.InventoryEventRefund:
+			if lg.OrderID == nil {
+				// 无来源的扣减/回滚：退款类按 FIFO；回滚类少见，同样 FIFO 消费正余额或忽略
+				if lg.DeltaQty < 0 {
+					consumeFIFO(-lg.DeltaQty)
+				}
+				continue
+			}
+			oid := *lg.OrderID
+			touch(oid)
+			bal[oid] += lg.DeltaQty
+		default:
+			if lg.OrderID == nil {
+				if lg.DeltaQty < 0 {
+					consumeFIFO(-lg.DeltaQty)
+				}
+				continue
+			}
+			oid := *lg.OrderID
+			touch(oid)
+			bal[oid] += lg.DeltaQty
+		}
+	}
+	return bal, orderSeq
 }
 
 type orderRefundMeta struct {
@@ -467,6 +553,18 @@ func planOrderItemRefund(tx *gorm.DB, orderID, productID uint64, spec string, qt
 		return 0, 0, err
 	}
 	return planOrderItemRefundWithMeta(meta, qty)
+}
+
+// orderHasPaidPaymentTx 是否存在微信支付流水（含已退款）。历史 mock 单无此流水，不可作微信退款来源。
+func orderHasPaidPaymentTx(db *gorm.DB, orderID uint64) bool {
+	var n int64
+	if err := db.Model(&model.PaymentTransaction{}).
+		Where("order_id = ? AND status IN ? AND transaction_id IS NOT NULL AND transaction_id <> ''",
+			orderID, []uint8{model.PayTxStatusPaid, model.PayTxStatusRefunded}).
+		Count(&n).Error; err != nil {
+		return false
+	}
+	return n > 0
 }
 
 func planOrderItemRefundWithMeta(meta *orderRefundMeta, qty uint32) (uint32, float64, error) {
