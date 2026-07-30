@@ -242,6 +242,20 @@ func (s *TakeoutService) paymentProvider() payment.Provider {
 	return &payment.MockProvider{DB: s.DB}
 }
 
+// runTx 包装事务：绑定微信退款收集器，提交成功后再异步发起退款。
+func (s *TakeoutService) runTx(fn func(tx *gorm.DB) error) error {
+	var jobs []payment.RefundJob
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
+		return fn(tx)
+	})
+	if err != nil {
+		return err
+	}
+	payment.DispatchRefundJobs(jobs)
+	return nil
+}
+
 func (s *TakeoutService) payTimeoutMinutes() int {
 	if s.PayTimeoutMinutes > 0 {
 		return s.PayTimeoutMinutes
@@ -896,7 +910,7 @@ func (s *TakeoutService) Reject(merchantID, takeoutID uint64, reason string) (*T
 	}
 	reasonText := "商家拒单：" + reason
 
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
+	err := s.runTx(func(tx *gorm.DB) error {
 		var to model.TakeoutOrder
 		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
 			First(&to, takeoutID).Error; err != nil {

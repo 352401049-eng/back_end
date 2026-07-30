@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"yujixinjiang/backend/internal/model"
+	"yujixinjiang/backend/internal/payment"
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
@@ -318,7 +319,9 @@ func (s *DeliveryService) RejectPrepare(merchantID, deliveryID uint64, reason st
 	reasonText := "商家拒单：" + reason
 
 	var d model.DeliveryOrder
+	var jobs []payment.RefundJob
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
 		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
 			First(&d, deliveryID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -411,6 +414,7 @@ func (s *DeliveryService) RejectPrepare(merchantID, deliveryID uint64, reason st
 	if err != nil {
 		return nil, err
 	}
+	payment.DispatchRefundJobs(jobs)
 	return s.getViewByID(deliveryID)
 }
 
