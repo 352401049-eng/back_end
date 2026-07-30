@@ -398,6 +398,81 @@ func (h *StoreHandler) GetActivityGroupProgress(c *gin.Context) {
 	response.OK(c, progress)
 }
 
+func parseJoinableTeamsLimit(c *gin.Context) int {
+	limit := 20
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+			if limit > 50 {
+				limit = 50
+			}
+		}
+	}
+	return limit
+}
+
+// ListProductJoinableTeams godoc
+// @Summary      商品可参团团列表
+// @Description  返回未满、未过期的待成团列表，按人数多→少、过期近→远排序
+// @Tags         用户-商城
+// @Produce      json
+// @Param        id     path   int  true   "商品 ID"
+// @Param        limit  query  int  false  "条数，默认20，上限50"
+// @Success      200  {object}  response.Body{data=[]service.JoinableGroupTeamView}
+// @Router       /products/{id}/group/teams [get]
+func (h *StoreHandler) ListProductJoinableTeams(c *gin.Context) {
+	productID, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	teams, err := h.OrderSvc.ListJoinableTeams(productID, nil, nil, parseJoinableTeamsLimit(c))
+	if err != nil {
+		handleOrderError(c, err)
+		return
+	}
+	response.OK(c, teams)
+}
+
+// ListActivityJoinableTeams godoc
+// @Summary      活动商品可参团团列表
+// @Tags         用户-商城
+// @Produce      json
+// @Param        id                  path   int  true  "活动 ID"
+// @Param        activity_product_id path   int  true  "活动商品 ID"
+// @Param        limit               query  int  false "条数，默认20，上限50"
+// @Success      200  {object}  response.Body{data=[]service.JoinableGroupTeamView}
+// @Router       /activities/{id}/products/{activity_product_id}/group/teams [get]
+func (h *StoreHandler) ListActivityJoinableTeams(c *gin.Context) {
+	activityID, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "活动 ID 无效")
+		return
+	}
+	apID, err := parseUintParam(c, "activity_product_id")
+	if err != nil {
+		response.BadRequest(c, "活动商品 ID 无效")
+		return
+	}
+	view, err := h.ActivitySvc.GetStoreProduct(activityID, apID)
+	if err != nil {
+		handleStoreGroupError(c, err)
+		return
+	}
+	if !view.CanGroupBuy {
+		response.BadRequest(c, "该商品不支持拼团")
+		return
+	}
+	actID := activityID
+	apIDVal := apID
+	teams, err := h.OrderSvc.ListJoinableTeams(view.ActivityProduct.ProductID, &actID, &apIDVal, parseJoinableTeamsLimit(c))
+	if err != nil {
+		handleStoreGroupError(c, err)
+		return
+	}
+	response.OK(c, teams)
+}
+
 func handleStoreGroupError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrProductNotFound), errors.Is(err, service.ErrActivityNotFound),

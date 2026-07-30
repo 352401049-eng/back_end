@@ -96,6 +96,15 @@ type GroupBuyProgress struct {
 	IsLeader        bool    `json:"is_leader"`
 }
 
+type JoinableGroupTeamView struct {
+	TeamID       uint64 `json:"team_id"`
+	CurrentCount uint32 `json:"current_count"`
+	TargetCount  uint32 `json:"target_count"`
+	Remain       uint32 `json:"remain"`
+	ExpireAt     string `json:"expire_at"`
+	LeaderName   string `json:"leader_name,omitempty"`
+}
+
 func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderView, error) {
 	if input.Quantity == 0 {
 		input.Quantity = 1
@@ -1140,6 +1149,100 @@ func (s *OrderService) GetActivityGroupProgress(accountID, activityID, activityP
 	return progress, nil
 }
 
+func (s *OrderService) ListJoinableTeams(productID uint64, activityID, activityProductID *uint64, limit int) ([]JoinableGroupTeamView, error) {
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	if activityID != nil && activityProductID != nil {
+		if s.ActivitySvc == nil {
+			return nil, ErrGroupBuyInvalid
+		}
+		view, err := s.ActivitySvc.GetStoreProduct(*activityID, *activityProductID)
+		if err != nil {
+			return nil, err
+		}
+		if !view.CanGroupBuy {
+			return nil, ErrGroupBuyInvalid
+		}
+		if view.ActivityProduct.ProductID != productID {
+			return nil, ErrGroupBuyInvalid
+		}
+	} else if activityID != nil || activityProductID != nil {
+		return nil, ErrGroupBuyInvalid
+	}
+
+	var product model.Product
+	if err := query.NotDeleted(s.DB).First(&product, productID).Error; err != nil {
+		return nil, ErrProductNotFound
+	}
+
+	var gb model.GroupBuy
+	if err := query.NotDeleted(s.DB).Where("product_id = ? AND status = 1", productID).First(&gb).Error; err != nil {
+		return nil, ErrGroupBuyInvalid
+	}
+
+	now := time.Now()
+	type teamRow struct {
+		ID           uint64
+		CurrentCount uint32
+		TargetCount  uint32
+		ExpireAt     time.Time
+		LeaderID     uint64
+	}
+
+	var rows []teamRow
+	q := s.DB.Table("group_buy_team t").
+		Select("t.id, t.current_count, t.target_count, t.expire_at, t.leader_id").
+		Where("t.is_deleted = ? AND t.group_buy_id = ? AND t.status = ?", model.NotDeleted, gb.ID, model.GroupBuyTeamPending).
+		Where("t.current_count < t.target_count").
+		Where("t.expire_at > ?", now)
+
+	if activityID != nil {
+		q = q.
+			Joins("JOIN order_item oi ON oi.group_buy_team_id = t.id AND oi.is_deleted = ?", model.NotDeleted).
+			Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
+			Where("oi.activity_id = ? AND o.status = ?", *activityID, model.OrderStatusPendingGroup)
+	} else {
+		q = q.
+			Joins("JOIN order_item oi ON oi.group_buy_team_id = t.id AND oi.is_deleted = ?", model.NotDeleted).
+			Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
+			Where("oi.activity_id IS NULL AND o.status = ?", model.OrderStatusPendingGroup)
+	}
+
+	if err := q.Group("t.id").
+		Order("t.current_count DESC, t.expire_at ASC, t.id ASC").
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	leaderIDs := make([]uint64, 0, len(rows))
+	for _, r := range rows {
+		leaderIDs = append(leaderIDs, r.LeaderID)
+	}
+	leaderNames := loadAccountNicknames(s.DB, leaderIDs)
+
+	out := make([]JoinableGroupTeamView, 0, len(rows))
+	for _, r := range rows {
+		view := JoinableGroupTeamView{
+			TeamID:       r.ID,
+			CurrentCount: r.CurrentCount,
+			TargetCount:  r.TargetCount,
+			Remain:       r.TargetCount - r.CurrentCount,
+			ExpireAt:     r.ExpireAt.Format(time.RFC3339),
+		}
+		if name := leaderNames[r.LeaderID]; name != "" {
+			view.LeaderName = name
+		}
+		out = append(out, view)
+	}
+	return out, nil
+}
+
 func (s *OrderService) attachGroupBuyProgress(view *OrderView, accountID uint64) {
 	if view.Status != model.OrderStatusPendingGroup {
 		return
@@ -1346,6 +1449,28 @@ func countDistinctTeamParticipants(db *gorm.DB, teamID uint64) (uint32, error) {
 		WHERE oi.group_buy_team_id = ? AND oi.is_deleted = 0 AND o.status = ?
 	`, teamID, model.OrderStatusPendingGroup).Scan(&distinct).Error
 	return uint32(distinct), err
+}
+
+func loadAccountNicknames(db *gorm.DB, accountIDs []uint64) map[uint64]string {
+	result := make(map[uint64]string)
+	if len(accountIDs) == 0 {
+		return result
+	}
+	type row struct {
+		ID       uint64
+		Nickname string
+	}
+	var rows []row
+	_ = db.Table("account").
+		Select("id, COALESCE(NULLIF(nickname,''), '拼友') AS nickname").
+		Where("id IN ?", accountIDs).
+		Scan(&rows).Error
+	for _, r := range rows {
+		if r.Nickname != "" {
+			result[r.ID] = r.Nickname
+		}
+	}
+	return result
 }
 
 func findLatestActivityPendingTeam(db *gorm.DB, groupBuyID, activityID uint64) (*uint64, error) {

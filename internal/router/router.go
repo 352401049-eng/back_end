@@ -163,6 +163,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		public.GET("/categories", categoryHandler.ListCategories)
 		public.GET("/products", storeHandler.ListProductsByMerchant)
 		public.GET("/products/:id/group", middleware.OptionalAuth(cfg.JWT.Secret, db), storeHandler.GetGroupProgress)
+		public.GET("/products/:id/group/teams", middleware.OptionalAuth(cfg.JWT.Secret, db), storeHandler.ListProductJoinableTeams)
 		public.GET("/products/:id", storeHandler.GetProduct)
 
 		public.GET("/announcements", announcementHandler.ListPublic)
@@ -174,6 +175,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		public.GET("/activities/:id/products", activityHandler.ListPublicProducts)
 		public.GET("/activities/:id/products/:activity_product_id", middleware.OptionalAuth(cfg.JWT.Secret, db), activityHandler.GetPublicProduct)
 		public.GET("/activities/:id/products/:activity_product_id/group", middleware.OptionalAuth(cfg.JWT.Secret, db), storeHandler.GetActivityGroupProgress)
+		public.GET("/activities/:id/products/:activity_product_id/group/teams", middleware.OptionalAuth(cfg.JWT.Secret, db), storeHandler.ListActivityJoinableTeams)
 
 		public.GET("/merchants", storeHandler.ListMerchants)
 		public.GET("/merchants/:id", storeHandler.GetMerchant)
