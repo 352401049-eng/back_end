@@ -558,9 +558,10 @@ func planOrderItemRefund(tx *gorm.DB, orderID, productID uint64, spec string, qt
 // orderHasPaidPaymentTx 是否存在微信支付流水（含已退款）。历史 mock 单无此流水，不可作微信退款来源。
 func orderHasPaidPaymentTx(db *gorm.DB, orderID uint64) bool {
 	var n int64
+	// 勿用 []uint8：GORM 会当成 []byte，生成 status IN '<binary>' 导致 SQL 语法错误
 	if err := db.Model(&model.PaymentTransaction{}).
 		Where("order_id = ? AND status IN ? AND transaction_id IS NOT NULL AND transaction_id <> ''",
-			orderID, []uint8{model.PayTxStatusPaid, model.PayTxStatusRefunded}).
+			orderID, []int{int(model.PayTxStatusPaid), int(model.PayTxStatusRefunded)}).
 		Count(&n).Error; err != nil {
 		return false
 	}
