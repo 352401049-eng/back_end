@@ -69,11 +69,25 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		ActivitySvc: activitySvc, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
 		PayTimeoutMinutes: cfg.Payment.PayTimeoutMinutes,
 	}
+	takeoutSvc := &service.TakeoutService{
+		DB: db, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
+		PayTimeoutMinutes: cfg.Payment.PayTimeoutMinutes,
+	}
 	if wp, ok := payProvider.(*payment.WeChatProvider); ok {
 		wp.OnPaidInTx = orderSvc.AdvanceAfterPaidInTx
+		wp.OnSubjectPaidInTx = func(tx *gorm.DB, sub payment.PaySubject) error {
+			switch sub.Type {
+			case model.PaySubjectTakeout:
+				return takeoutSvc.MarkPaidInTx(tx, sub.ID, time.Now())
+			case model.PaySubjectOrder:
+				return orderSvc.AdvanceAfterPaidInTx(tx, sub.ID)
+			default:
+				return nil
+			}
+		}
 	}
 	startGroupExpireWorker(orderSvc)
-	startPendingPayExpireWorker(orderSvc)
+	startPendingPayExpireWorker(orderSvc, takeoutSvc)
 	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc}
 	paymentHandler := &handler.PaymentHandler{OrderSvc: orderSvc}
 	deliverySvc := &service.DeliveryService{DB: db, InventorySvc: inventorySvc}
@@ -91,6 +105,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		InventorySvc: inventorySvc,
 		DeliverySvc:  deliverySvc,
 	}
+	takeoutHandler := &handler.TakeoutHandler{TakeoutSvc: takeoutSvc}
 	merchantSvc := &service.MerchantService{DB: db}
 	productSvc := &service.ProductService{DB: db, CategorySvc: categorySvc}
 	riderSvc := &service.RiderApplicationService{DB: db}
@@ -182,7 +197,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		user := authorized.Group("")
 		// admin 可代客下单测试（OrderService 仍按 accountID 隔离数据，无越权风险）
 		user.Use(middleware.RequireAccountTypes(model.AccountTypeUser, model.AccountTypeAdmin))
-		registerUserRoutes(user, userHandler, couponHandler, paymentHandler)
+		registerUserRoutes(user, userHandler, couponHandler, paymentHandler, takeoutHandler)
 
 		merchant := authorized.Group("/merchant")
 		merchant.Use(middleware.RequireAccountTypes(model.AccountTypeMerchant, model.AccountTypeAdmin))
@@ -200,7 +215,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	return r
 }
 
-func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.CouponHandler, ph *handler.PaymentHandler) {
+func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.CouponHandler, ph *handler.PaymentHandler, th *handler.TakeoutHandler) {
 	r.GET("/user/overview", h.Overview)
 	r.GET("/user/profile", h.Profile)
 	r.GET("/user/orders", h.Orders)
@@ -212,6 +227,10 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.POST("/user/orders/:id/confirm-pickup", h.ConfirmPickup)
 	r.POST("/user/orders/:id/confirm-receipt", h.ConfirmOrderReceipt)
 	r.GET("/user/payment/provider", ph.Provider)
+	r.POST("/user/takeout-orders", th.Create)
+	r.GET("/user/takeout-orders", th.List)
+	r.GET("/user/takeout-orders/:id", th.Get)
+	r.POST("/user/takeout-orders/:id/pay", th.Pay)
 	r.GET("/user/deliveries", h.ListUserDeliveries)
 	r.GET("/user/deliveries/:id", h.GetUserDelivery)
 	r.POST("/user/deliveries/:id/confirm", h.ConfirmDeliveryReceipt)
@@ -257,17 +276,24 @@ func startGroupExpireWorker(orderSvc *service.OrderService) {
 	}()
 }
 
-// startPendingPayExpireWorker 定时关闭超时未支付的订单并回滚库存/券/销量。
-func startPendingPayExpireWorker(orderSvc *service.OrderService) {
+// startPendingPayExpireWorker 定时关闭超时未支付的入包/外卖订单。
+func startPendingPayExpireWorker(orderSvc *service.OrderService, takeoutSvc *service.TakeoutService) {
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			n, err := orderSvc.ExpireStalePendingPayOrders(time.Now())
+			now := time.Now()
+			n, err := orderSvc.ExpireStalePendingPayOrders(now)
 			if err != nil {
 				log.Printf("待支付超时关单部分失败: %v (本批成功 %d)", err, n)
 			} else if n > 0 {
-				log.Printf("待支付超时已关闭 %d 个订单", n)
+				log.Printf("待支付超时已关闭 %d 个入包订单", n)
+			}
+			tn, terr := takeoutSvc.ExpireStalePendingPay(now)
+			if terr != nil {
+				log.Printf("外卖待支付超时关单部分失败: %v (本批成功 %d)", terr, tn)
+			} else if tn > 0 {
+				log.Printf("外卖待支付超时已关闭 %d 个订单", tn)
 			}
 		}
 	}()
