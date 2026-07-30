@@ -155,6 +155,9 @@ func buildSeckillLimitLabels(ap *model.ActivityProduct) []string {
 			labels = append(labels, fmt.Sprintf("窗内限购%d件", ap.RegisterMax))
 		}
 	}
+	if ap.PlatformDailyMax > 0 {
+		labels = append(labels, fmt.Sprintf("今日限量%d件", ap.PlatformDailyMax))
+	}
 	if ap.DailyMax > 0 {
 		labels = append(labels, fmt.Sprintf("每日限购%d件", ap.DailyMax))
 	}

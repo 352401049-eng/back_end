@@ -174,6 +174,11 @@ func (s *OrderService) RefundInventory(accountID, inventoryID uint64, quantity u
 				Update("stock", gorm.Expr("stock + ?", a.Quantity)).Error; err != nil {
 				return err
 			}
+			if s.ActivitySvc != nil {
+				if err := s.ActivitySvc.RollbackPlatformDailyOnRefundInTx(tx, a.OrderID, inv.ProductID, a.Quantity); err != nil {
+					return err
+				}
+			}
 			totalRefund += a.Amount
 			totalQty += a.Quantity
 		}

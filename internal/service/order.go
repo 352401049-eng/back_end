@@ -233,7 +233,10 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 				First(&apLock, *activityProductID).Error; err != nil {
 				return err
 			}
-			if err := s.ActivitySvc.checkUserLimits(tx, accountID, actCtx.ActivityProduct, input.Quantity); err != nil {
+			if _, err := ensurePlatformDailyBucketLocked(tx, &apLock, now); err != nil {
+				return err
+			}
+			if err := s.ActivitySvc.checkUserLimits(tx, accountID, &apLock, input.Quantity); err != nil {
 				return err
 			}
 		}
@@ -325,8 +328,14 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		}
 
 		if s.ActivitySvc != nil && activityProductID != nil {
-			if err := s.ActivitySvc.CreditSoldInTx(tx, *activityProductID, input.Quantity); err != nil {
+			bucket, err := s.ActivitySvc.CreditSoldInTx(tx, *activityProductID, input.Quantity)
+			if err != nil {
 				return err
+			}
+			if bucket != nil {
+				if err := tx.Model(&item).Update("platform_daily_bucket", *bucket).Error; err != nil {
+					return err
+				}
 			}
 		}
 

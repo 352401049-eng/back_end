@@ -43,6 +43,8 @@ type ActivityProductRequest struct {
 	ActivityMax             uint32   `json:"activity_max" example:"0"`
 	RegisterHours           uint32   `json:"register_hours" example:"0"`
 	RegisterMax             uint32   `json:"register_max" example:"0"`
+	PlatformDailyMax        uint32   `json:"platform_daily_max" example:"0"`
+	DailyRefreshTime        string   `json:"daily_refresh_time" example:"00:00:00"`
 	EnableGroupBuy          uint8    `json:"enable_group_buy" example:"0"`
 	GroupBuyPrice           *float64 `json:"group_buy_price"`
 	GroupBuyTargetCount     *uint32  `json:"group_buy_target_count"`
@@ -69,6 +71,8 @@ type activityProductAddBody struct {
 	ActivityMax             FlexUInt32      `json:"activity_max"`
 	RegisterHours           FlexUInt32      `json:"register_hours"`
 	RegisterMax             FlexUInt32      `json:"register_max"`
+	PlatformDailyMax        FlexUInt32      `json:"platform_daily_max"`
+	DailyRefreshTime        string          `json:"daily_refresh_time"`
 	EnableGroupBuy          FlexUInt8       `json:"enable_group_buy"`
 	GroupBuyPrice           FlexFloat64Ptr  `json:"group_buy_price"`
 	GroupBuyTargetCount     FlexUInt32Ptr   `json:"group_buy_target_count"`
@@ -107,6 +111,7 @@ func parseActivityProductAddBody(c *gin.Context) (ActivityProductRequest, error)
 		PerUserMaxQty: raw.PerUserMaxQty.Uint32(), PerUserMaxOrders: raw.PerUserMaxOrders.Uint32(),
 		DailyMax: raw.DailyMax.Uint32(), WeeklyMax: raw.WeeklyMax.Uint32(), MonthlyMax: raw.MonthlyMax.Uint32(),
 		ActivityMax: raw.ActivityMax.Uint32(), RegisterHours: raw.RegisterHours.Uint32(), RegisterMax: raw.RegisterMax.Uint32(),
+		PlatformDailyMax: raw.PlatformDailyMax.Uint32(), DailyRefreshTime: raw.DailyRefreshTime,
 		EnableGroupBuy: raw.EnableGroupBuy.Uint8(), GroupBuyPrice: raw.GroupBuyPrice.Ptr(),
 		GroupBuyTargetCount: raw.GroupBuyTargetCount.Ptr(), GroupBuyAllowRepeat: raw.GroupBuyAllowRepeat.Uint8(),
 		GroupBuyMaxJoinsPerUser: raw.GroupBuyMaxJoinsPerUser.Uint32(),
@@ -124,9 +129,11 @@ type activityProductUpdateBody struct {
 	WeeklyMax               FlexUInt32Ptr  `json:"weekly_max"`
 	MonthlyMax              FlexUInt32Ptr  `json:"monthly_max"`
 	ActivityMax             FlexUInt32Ptr  `json:"activity_max"`
-	RegisterHours           FlexUInt32Ptr  `json:"register_hours"`
-	RegisterMax             FlexUInt32Ptr  `json:"register_max"`
-	EnableGroupBuy          FlexUInt8Ptr   `json:"enable_group_buy"`
+	RegisterHours           FlexUInt32Ptr        `json:"register_hours"`
+	RegisterMax             FlexUInt32Ptr        `json:"register_max"`
+	PlatformDailyMax        FlexUInt32Ptr        `json:"platform_daily_max"`
+	DailyRefreshTime        FlexNullableString   `json:"daily_refresh_time"`
+	EnableGroupBuy          FlexUInt8Ptr         `json:"enable_group_buy"`
 	GroupBuyPrice           FlexFloat64Ptr `json:"group_buy_price"`
 	GroupBuyTargetCount     FlexUInt32Ptr  `json:"group_buy_target_count"`
 	GroupBuyAllowRepeat     FlexUInt8Ptr   `json:"group_buy_allow_repeat"`
@@ -146,6 +153,7 @@ func parseActivityProductUpdateBody(c *gin.Context) (UpdateActivityProductReques
 		PerUserMaxQty: raw.PerUserMaxQty.Ptr(), PerUserMaxOrders: raw.PerUserMaxOrders.Ptr(),
 		DailyMax: raw.DailyMax.Ptr(), WeeklyMax: raw.WeeklyMax.Ptr(), MonthlyMax: raw.MonthlyMax.Ptr(),
 		ActivityMax: raw.ActivityMax.Ptr(), RegisterHours: raw.RegisterHours.Ptr(), RegisterMax: raw.RegisterMax.Ptr(),
+		PlatformDailyMax: raw.PlatformDailyMax.Ptr(), DailyRefreshTime: raw.DailyRefreshTime.Ptr(),
 		EnableGroupBuy: raw.EnableGroupBuy.Ptr(), GroupBuyPrice: raw.GroupBuyPrice.Ptr(),
 		GroupBuyTargetCount: raw.GroupBuyTargetCount.Ptr(), GroupBuyAllowRepeat: raw.GroupBuyAllowRepeat.Ptr(),
 		GroupBuyMaxJoinsPerUser: raw.GroupBuyMaxJoinsPerUser.Ptr(),
@@ -165,6 +173,8 @@ type UpdateActivityProductRequest struct {
 	ActivityMax             *uint32  `json:"activity_max" example:"0"`
 	RegisterHours           *uint32  `json:"register_hours" example:"0"`
 	RegisterMax             *uint32  `json:"register_max" example:"0"`
+	PlatformDailyMax        *uint32  `json:"platform_daily_max" example:"0"`
+	DailyRefreshTime        *string  `json:"daily_refresh_time" example:"00:00:00"`
 	EnableGroupBuy          *uint8   `json:"enable_group_buy" example:"1"`
 	GroupBuyPrice           *float64 `json:"group_buy_price" example:"7.9"`
 	GroupBuyTargetCount     *uint32  `json:"group_buy_target_count" example:"3"`
@@ -191,6 +201,7 @@ func toActivityProductInput(req ActivityProductRequest) service.ActivityProductI
 		PerUserMaxOrders: req.PerUserMaxOrders,
 		DailyMax: req.DailyMax, WeeklyMax: req.WeeklyMax, MonthlyMax: req.MonthlyMax,
 		ActivityMax: req.ActivityMax, RegisterHours: req.RegisterHours, RegisterMax: req.RegisterMax,
+		PlatformDailyMax: req.PlatformDailyMax, DailyRefreshTime: req.DailyRefreshTime,
 		EnableGroupBuy: req.EnableGroupBuy,
 		GroupBuyPrice: req.GroupBuyPrice, GroupBuyTargetCount: req.GroupBuyTargetCount,
 		GroupBuyAllowRepeat: req.GroupBuyAllowRepeat,
@@ -205,6 +216,7 @@ func toActivityProductPatch(req UpdateActivityProductRequest) service.UpdateActi
 		PerUserMaxQty: req.PerUserMaxQty, PerUserMaxOrders: req.PerUserMaxOrders,
 		DailyMax: req.DailyMax, WeeklyMax: req.WeeklyMax, MonthlyMax: req.MonthlyMax,
 		ActivityMax: req.ActivityMax, RegisterHours: req.RegisterHours, RegisterMax: req.RegisterMax,
+		PlatformDailyMax: req.PlatformDailyMax, DailyRefreshTime: req.DailyRefreshTime,
 		EnableGroupBuy: req.EnableGroupBuy, GroupBuyPrice: req.GroupBuyPrice,
 		GroupBuyTargetCount: req.GroupBuyTargetCount, GroupBuyAllowRepeat: req.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: req.GroupBuyMaxJoinsPerUser,

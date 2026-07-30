@@ -52,6 +52,8 @@ type ActivityProductInput struct {
 	ActivityMax             uint32
 	RegisterHours           uint32
 	RegisterMax             uint32
+	PlatformDailyMax        uint32
+	DailyRefreshTime        string
 	EnableGroupBuy          uint8
 	GroupBuyPrice           *float64
 	GroupBuyTargetCount     *uint32
@@ -74,6 +76,8 @@ type UpdateActivityProductPatch struct {
 	ActivityMax             *uint32
 	RegisterHours           *uint32
 	RegisterMax             *uint32
+	PlatformDailyMax        *uint32
+	DailyRefreshTime        *string
 	EnableGroupBuy          *uint8
 	GroupBuyPrice           *float64
 	GroupBuyTargetCount     *uint32
@@ -294,6 +298,11 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 	if err := validateActivityProductInput(input); err != nil {
 		return nil, err
 	}
+	rt, err := NormalizeDailyRefreshTime(input.DailyRefreshTime)
+	if err != nil {
+		return nil, err
+	}
+	input.DailyRefreshTime = rt
 	var product model.Product
 	pq := query.NotDeleted(s.DB).Where("id = ?", input.ProductID)
 	// 商家专场活动仍限制同店商品；平台活动（merchant_id=0）可跨店挂品
@@ -336,6 +345,7 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 		PerUserMaxQty: input.PerUserMaxQty, PerUserMaxOrders: input.PerUserMaxOrders,
 		DailyMax: input.DailyMax, WeeklyMax: input.WeeklyMax, MonthlyMax: input.MonthlyMax,
 		ActivityMax: input.ActivityMax, RegisterHours: input.RegisterHours, RegisterMax: input.RegisterMax,
+		PlatformDailyMax: input.PlatformDailyMax, DailyRefreshTime: input.DailyRefreshTime,
 		EnableGroupBuy: input.EnableGroupBuy, GroupBuyPrice: input.GroupBuyPrice,
 		GroupBuyTargetCount:     input.GroupBuyTargetCount,
 		GroupBuyAllowRepeat:     input.GroupBuyAllowRepeat,
@@ -398,6 +408,7 @@ func activityProductUpdates(input ActivityProductInput, maxJoins uint32, status 
 		"per_user_max_qty": input.PerUserMaxQty, "per_user_max_orders": input.PerUserMaxOrders,
 		"daily_max": input.DailyMax, "weekly_max": input.WeeklyMax, "monthly_max": input.MonthlyMax,
 		"activity_max": input.ActivityMax, "register_hours": input.RegisterHours, "register_max": input.RegisterMax,
+		"platform_daily_max": input.PlatformDailyMax, "daily_refresh_time": input.DailyRefreshTime,
 		"enable_group_buy": input.EnableGroupBuy, "group_buy_price": input.GroupBuyPrice,
 		"group_buy_target_count":       input.GroupBuyTargetCount,
 		"group_buy_allow_repeat":       input.GroupBuyAllowRepeat,
@@ -426,6 +437,11 @@ func (s *ActivityService) UpdateProductInActivity(activityID, apID uint64, patch
 	if err := validateActivityProductInput(merged); err != nil {
 		return nil, err
 	}
+	rt, err := NormalizeDailyRefreshTime(merged.DailyRefreshTime)
+	if err != nil {
+		return nil, err
+	}
+	merged.DailyRefreshTime = rt
 	maxJoins := merged.GroupBuyMaxJoinsPerUser
 	if maxJoins == 0 {
 		maxJoins = 1
@@ -449,7 +465,8 @@ func (p UpdateActivityProductPatch) hasField() bool {
 	return p.ActivityPrice != nil || p.ActivityStock != nil || p.PerUserMaxQty != nil ||
 		p.PerUserMaxOrders != nil || p.DailyMax != nil || p.WeeklyMax != nil ||
 		p.MonthlyMax != nil || p.ActivityMax != nil || p.RegisterHours != nil ||
-		p.RegisterMax != nil || p.EnableGroupBuy != nil || p.GroupBuyPrice != nil ||
+		p.RegisterMax != nil || p.PlatformDailyMax != nil || p.DailyRefreshTime != nil ||
+		p.EnableGroupBuy != nil || p.GroupBuyPrice != nil ||
 		p.GroupBuyTargetCount != nil || p.GroupBuyAllowRepeat != nil ||
 		p.GroupBuyMaxJoinsPerUser != nil || p.EnableCoupon != nil || p.SortOrder != nil || p.Status != nil
 }
@@ -466,6 +483,8 @@ func activityProductInputToPatch(input ActivityProductInput) UpdateActivityProdu
 		ActivityMax:             &input.ActivityMax,
 		RegisterHours:           &input.RegisterHours,
 		RegisterMax:             &input.RegisterMax,
+		PlatformDailyMax:        &input.PlatformDailyMax,
+		DailyRefreshTime:        &input.DailyRefreshTime,
 		EnableGroupBuy:          &input.EnableGroupBuy,
 		GroupBuyPrice:           input.GroupBuyPrice,
 		GroupBuyTargetCount:     input.GroupBuyTargetCount,
@@ -491,6 +510,8 @@ func mergeActivityProductPatch(ap *model.ActivityProduct, patch UpdateActivityPr
 		ActivityMax:             ap.ActivityMax,
 		RegisterHours:           ap.RegisterHours,
 		RegisterMax:             ap.RegisterMax,
+		PlatformDailyMax:        ap.PlatformDailyMax,
+		DailyRefreshTime:        ap.DailyRefreshTime,
 		EnableGroupBuy:          ap.EnableGroupBuy,
 		GroupBuyPrice:           ap.GroupBuyPrice,
 		GroupBuyTargetCount:     ap.GroupBuyTargetCount,
@@ -529,6 +550,12 @@ func mergeActivityProductPatch(ap *model.ActivityProduct, patch UpdateActivityPr
 	}
 	if patch.RegisterMax != nil {
 		merged.RegisterMax = *patch.RegisterMax
+	}
+	if patch.PlatformDailyMax != nil {
+		merged.PlatformDailyMax = *patch.PlatformDailyMax
+	}
+	if patch.DailyRefreshTime != nil {
+		merged.DailyRefreshTime = *patch.DailyRefreshTime
 	}
 	if patch.EnableGroupBuy != nil {
 		merged.EnableGroupBuy = *patch.EnableGroupBuy
@@ -1043,26 +1070,34 @@ func (s *ActivityService) checkUserLimits(db *gorm.DB, accountID uint64, ap *mod
 	return nil
 }
 
-func (s *ActivityService) CreditSoldInTx(tx *gorm.DB, activityProductID uint64, quantity uint32) error {
+func (s *ActivityService) CreditSoldInTx(tx *gorm.DB, activityProductID uint64, quantity uint32) (platformBucket *string, err error) {
 	if activityProductID == 0 {
-		return nil
+		return nil, nil
 	}
-	var ap model.ActivityProduct
-	if err := query.NotDeleted(tx).First(&ap, activityProductID).Error; err != nil {
-		return err
+	ap, err := lockActivityProduct(tx, activityProductID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	if _, err := ensurePlatformDailyBucketLocked(tx, ap, now); err != nil {
+		return nil, err
+	}
+	bucket, err := creditPlatformDailyLocked(tx, ap, quantity)
+	if err != nil {
+		return nil, err
 	}
 	if ap.ActivityStock > 0 {
-		result := tx.Model(&ap).
+		result := tx.Model(&model.ActivityProduct{}).
 			Where("id = ? AND sold_count + ? <= activity_stock", activityProductID, quantity).
 			Update("sold_count", gorm.Expr("sold_count + ?", quantity))
 		if result.Error != nil {
-			return result.Error
+			return nil, result.Error
 		}
 		if result.RowsAffected == 0 {
-			return ErrInsufficientStock
+			return nil, ErrInsufficientStock
 		}
 	}
-	return nil
+	return bucket, nil
 }
 
 func (s *ActivityService) RollbackSoldInTx(tx *gorm.DB, orderID uint64) error {
@@ -1083,6 +1118,55 @@ func (s *ActivityService) RollbackSoldInTx(tx *gorm.DB, orderID uint64) error {
 		if res.RowsAffected == 0 {
 			return fmt.Errorf("activity sold_count rollback failed for activity_product %d", *it.ActivityProductID)
 		}
+		if it.PlatformDailyBucket != nil && *it.PlatformDailyBucket != "" {
+			ap, err := lockActivityProduct(tx, *it.ActivityProductID)
+			if err != nil {
+				return err
+			}
+			if _, err := ensurePlatformDailyBucketLocked(tx, ap, time.Now()); err != nil {
+				return err
+			}
+			if err := rollbackPlatformDailyLocked(tx, ap, it.Quantity, *it.PlatformDailyBucket); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// RollbackPlatformDailyOnRefundInTx 背包退款时按件数释放平台日限（仅同桶）。
+func (s *ActivityService) RollbackPlatformDailyOnRefundInTx(tx *gorm.DB, orderID, productID uint64, quantity uint32) error {
+	if orderID == 0 || productID == 0 || quantity == 0 {
+		return nil
+	}
+	var items []model.OrderItem
+	if err := query.NotDeleted(tx).
+		Where("order_id = ? AND product_id = ? AND activity_product_id IS NOT NULL", orderID, productID).
+		Order("id ASC").
+		Find(&items).Error; err != nil {
+		return err
+	}
+	need := quantity
+	for i := range items {
+		it := &items[i]
+		if need == 0 || it.ActivityProductID == nil || it.PlatformDailyBucket == nil || *it.PlatformDailyBucket == "" {
+			continue
+		}
+		take := it.Quantity
+		if take > need {
+			take = need
+		}
+		ap, err := lockActivityProduct(tx, *it.ActivityProductID)
+		if err != nil {
+			return err
+		}
+		if _, err := ensurePlatformDailyBucketLocked(tx, ap, time.Now()); err != nil {
+			return err
+		}
+		if err := rollbackPlatformDailyLocked(tx, ap, take, *it.PlatformDailyBucket); err != nil {
+			return err
+		}
+		need -= take
 	}
 	return nil
 }
@@ -1101,6 +1185,12 @@ func validateActivityInput(input ActivityInput) error {
 func validateActivityProductInput(input ActivityProductInput) error {
 	if input.ProductID == 0 || input.ActivityPrice <= 0 {
 		return ErrInvalidProductArg
+	}
+	if input.PlatformDailyMax > 1_000_000 {
+		return fmt.Errorf("%w: platform_daily_max 过大", ErrInvalidProductArg)
+	}
+	if _, err := NormalizeDailyRefreshTime(input.DailyRefreshTime); err != nil {
+		return err
 	}
 	if input.EnableGroupBuy == 1 {
 		if input.GroupBuyPrice == nil || *input.GroupBuyPrice <= 0 {

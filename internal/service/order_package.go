@@ -222,7 +222,10 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 				First(&apLock, *activityProductID).Error; err != nil {
 				return err
 			}
-			if err := s.ActivitySvc.checkUserLimits(tx, accountID, actCtx.ActivityProduct, qty); err != nil {
+			if _, err := ensurePlatformDailyBucketLocked(tx, &apLock, now); err != nil {
+				return err
+			}
+			if err := s.ActivitySvc.checkUserLimits(tx, accountID, &apLock, qty); err != nil {
 				return err
 			}
 		}
@@ -308,8 +311,14 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		}
 
 		if s.ActivitySvc != nil && activityProductID != nil {
-			if err := s.ActivitySvc.CreditSoldInTx(tx, *activityProductID, qty); err != nil {
+			bucket, err := s.ActivitySvc.CreditSoldInTx(tx, *activityProductID, qty)
+			if err != nil {
 				return err
+			}
+			if bucket != nil {
+				if err := tx.Model(&pkgItem).Update("platform_daily_bucket", *bucket).Error; err != nil {
+					return err
+				}
 			}
 		}
 

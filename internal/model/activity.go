@@ -43,6 +43,10 @@ type ActivityProduct struct {
 	ActivityMax             uint32    `gorm:"not null;default:0" json:"activity_max"`
 	RegisterHours           uint32    `gorm:"not null;default:0" json:"register_hours"`
 	RegisterMax             uint32    `gorm:"not null;default:0" json:"register_max"`
+	PlatformDailyMax        uint32    `gorm:"not null;default:0" json:"platform_daily_max"`
+	DailyRefreshTime        string    `gorm:"type:time;not null;default:00:00:00" json:"daily_refresh_time"`
+	PlatformDailySold       uint32    `gorm:"not null;default:0" json:"platform_daily_sold"`
+	PlatformDailyBucket     string    `gorm:"size:32;not null;default:''" json:"platform_daily_bucket"`
 	EnableGroupBuy          uint8     `gorm:"not null;default:0" json:"enable_group_buy"`
 	GroupBuyPrice           *float64  `gorm:"type:decimal(10,2)" json:"group_buy_price,omitempty"`
 	GroupBuyTargetCount     *uint32   `json:"group_buy_target_count,omitempty"`

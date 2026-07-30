@@ -124,6 +124,17 @@ func computeActivityRemaining(
 	if ap.RegisterHours > 0 && ap.RegisterMax > 0 {
 		tighten(ap.RegisterMax, "register_max")
 	}
+	if ap.PlatformDailyMax > 0 {
+		sold := ap.PlatformDailySold
+		if PlatformDailyBucketKey(ap.DailyRefreshTime, now) != ap.PlatformDailyBucket {
+			sold = 0
+		}
+		var left uint32
+		if sold < ap.PlatformDailyMax {
+			left = ap.PlatformDailyMax - sold
+		}
+		tighten(left, "platform_daily")
+	}
 
 	if accountID == nil || *accountID == 0 {
 		return out, nil

@@ -115,6 +115,7 @@ type OrderItem struct {
 	ProductID          uint64    `gorm:"not null" json:"product_id"`
 	ActivityID         *uint64   `gorm:"column:activity_id" json:"activity_id,omitempty"`
 	ActivityProductID  *uint64   `gorm:"column:activity_product_id" json:"activity_product_id,omitempty"`
+	PlatformDailyBucket *string  `gorm:"column:platform_daily_bucket;size:32" json:"platform_daily_bucket,omitempty"`
 	PurchaseType       uint8     `gorm:"not null;default:1" json:"purchase_type"`
 	GroupBuyID     *uint64   `gorm:"column:group_buy_id" json:"group_buy_id,omitempty"`
 	GroupBuyTeamID *uint64   `gorm:"column:group_buy_team_id" json:"group_buy_team_id,omitempty"`
