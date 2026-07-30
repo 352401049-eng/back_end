@@ -739,8 +739,19 @@ func (s *TakeoutService) Reject(merchantID, takeoutID uint64, reason string) (*T
 		if err := restoreTakeoutStockInTx(tx, &to); err != nil {
 			return err
 		}
-		return query.NotDeleted(tx.Model(&model.TakeoutOrder{})).Where("id = ?", takeoutID).
-			Update("remark", reasonText).Error
+		res := query.NotDeleted(tx.Model(&model.TakeoutOrder{})).
+			Where("id = ? AND status IN ?", takeoutID, []uint8{model.TakeoutStatusPreparing, model.TakeoutStatusFulfilling}).
+			Updates(map[string]interface{}{
+				"status": model.TakeoutStatusCancelled,
+				"remark": reasonText,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrTakeoutStatusInvalid
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
