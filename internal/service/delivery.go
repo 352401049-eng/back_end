@@ -69,10 +69,11 @@ type DeliveryUsageLine struct {
 
 type DeliveryView struct {
 	model.DeliveryOrder
-	StatusText      string                 `json:"status_text"`
-	AddressSnapshot *model.AddressSnapshot `json:"address_snapshot,omitempty"`
-	UsageItems      []DeliveryUsageLine    `json:"usage_items,omitempty"`
-	VerifyCode      *string                `json:"verify_code,omitempty"`
+	StatusText           string                 `json:"status_text"`
+	AddressSnapshot      *model.AddressSnapshot `json:"address_snapshot,omitempty"`
+	UsageItems           []DeliveryUsageLine    `json:"usage_items,omitempty"`
+	VerifyCode           *string                `json:"verify_code,omitempty"`
+	DeliveryTimeRemark   string                 `json:"delivery_time_remark,omitempty"`
 }
 
 type DeliveryService struct {
@@ -846,6 +847,9 @@ func attachDeliveryUsageItems(db *gorm.DB, view *DeliveryView) {
 	if len(usages) == 0 {
 		return
 	}
+	if view.DeliveryTimeRemark == "" && usages[0].Remark != "" {
+		view.DeliveryTimeRemark = usages[0].Remark
+	}
 	lines := make([]DeliveryUsageLine, 0, len(usages))
 	for i := range usages {
 		u := usages[i]
@@ -877,6 +881,7 @@ func attachTakeoutDeliveryData(db *gorm.DB, view *DeliveryView) {
 		return
 	}
 	view.AddressSnapshot = to.AddressSnapshot
+	view.DeliveryTimeRemark = to.DeliveryTimeRemark
 
 	_, _, selLines := buildTakeoutSelectionDisplay(db, &to)
 	if len(selLines) == 0 {
