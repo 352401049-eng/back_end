@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -312,6 +313,9 @@ func allocateInventoryRefundItems(tx *gorm.DB, accountID, productID uint64, spec
 	if totalQty > invQty {
 		return nil, ErrInventoryInsufficient
 	}
+	if err := validateRefundAllocs(nets, invQty, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -349,6 +353,16 @@ func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec stri
 		if need > 0 {
 			return nil, fmt.Errorf("%w: 该来源可退数量不足", ErrInventoryRefundInvalid)
 		}
+		var inv model.UserInventory
+		invQty := quantity
+		if e := query.NotDeleted(tx).Select("quantity").
+			Where("account_id = ? AND product_id = ? AND spec = ?", accountID, productID, spec).
+			First(&inv).Error; e == nil {
+			invQty = inv.Quantity
+		}
+		if err := validateRefundAllocs(nets, invQty, out); err != nil {
+			return nil, err
+		}
 		return out, nil
 	}
 
@@ -378,6 +392,16 @@ func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec stri
 	if need > 0 {
 		return nil, fmt.Errorf("%w: 可退数量不足（可能部分已使用或余额不足）", ErrInventoryRefundInvalid)
 	}
+	var inv model.UserInventory
+	invQty := quantity
+	if e := query.NotDeleted(tx).Select("quantity").
+		Where("account_id = ? AND product_id = ? AND spec = ?", accountID, productID, spec).
+		First(&inv).Error; e == nil {
+		invQty = inv.Quantity
+	}
+	if err := validateRefundAllocs(nets, invQty, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -401,7 +425,18 @@ func orderNetBalances(db *gorm.DB, accountID, productID uint64, spec string) (ma
 		First(&inv).Error; err == nil {
 		invQty = inv.Quantity
 	}
-	reconcileNetBalancesToInventory(bal, orderSeq, invQty)
+	if trimmed := reconcileNetBalancesToInventory(bal, orderSeq, invQty); trimmed > 0 {
+		log.Printf("[inventory-attr] trimmed phantom=%d account=%d product=%d spec=%q bag=%d",
+			trimmed, accountID, productID, spec, invQty)
+	}
+	var total int32
+	for _, oid := range orderSeq {
+		total += bal[oid]
+	}
+	if total > int32(invQty) {
+		log.Printf("[inventory-attr] WARN account=%d product=%d spec=%q net_total=%d > bag=%d after reconcile",
+			accountID, productID, spec, total, invQty)
+	}
 	return bal, orderSeq, nil
 }
 
@@ -518,7 +553,8 @@ func orderNetBalancesFromLogs(logs []model.UserInventoryLog) (map[uint64]int32, 
 
 // reconcileNetBalancesToInventory 各来源净余额合计不得超过当前背包件数。
 // 超出部分按 FIFO 从最早订单削去（消化 use/cancel 错账导致的虚高旧单余额）。
-func reconcileNetBalancesToInventory(bal map[uint64]int32, orderSeq []uint64, invQty uint32) {
+// 返回被削去的虚高件数（>0 表示存在历史错账残留）。
+func reconcileNetBalancesToInventory(bal map[uint64]int32, orderSeq []uint64, invQty uint32) int32 {
 	var total int32
 	for _, oid := range orderSeq {
 		if bal[oid] < 0 {
@@ -533,8 +569,9 @@ func reconcileNetBalancesToInventory(bal map[uint64]int32, orderSeq []uint64, in
 	}
 	excess := total - int32(invQty)
 	if excess <= 0 {
-		return
+		return 0
 	}
+	trimmed := excess
 	for _, oid := range orderSeq {
 		if excess <= 0 {
 			break
@@ -549,6 +586,34 @@ func reconcileNetBalancesToInventory(bal map[uint64]int32, orderSeq []uint64, in
 		bal[oid] -= take
 		excess -= take
 	}
+	return trimmed
+}
+
+// validateRefundAllocs 退款落库前硬校验：件数不超过背包，且每笔来源净余额足够。
+func validateRefundAllocs(nets map[uint64]int32, invQty uint32, allocs []refundAlloc) error {
+	if len(allocs) == 0 {
+		return fmt.Errorf("%w: 无可退款来源订单，请联系客服", ErrInventoryRefundInvalid)
+	}
+	var sum uint32
+	seen := map[uint64]struct{}{}
+	for _, a := range allocs {
+		if a.OrderID == 0 || a.Quantity == 0 || a.Amount <= 0 {
+			return fmt.Errorf("%w: 退款分摊无效", ErrInventoryRefundInvalid)
+		}
+		if _, dup := seen[a.OrderID]; dup {
+			return fmt.Errorf("%w: 同一来源订单不可重复提交", ErrInventoryRefundInvalid)
+		}
+		seen[a.OrderID] = struct{}{}
+		if nets[a.OrderID] < int32(a.Quantity) {
+			return fmt.Errorf("%w: 来源订单 #%d 可退数量不足（已按背包校正，请刷新后重试）",
+				ErrInventoryRefundInvalid, a.OrderID)
+		}
+		sum += a.Quantity
+	}
+	if sum > invQty {
+		return ErrInventoryInsufficient
+	}
+	return nil
 }
 
 type orderRefundMeta struct {
