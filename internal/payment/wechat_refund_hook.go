@@ -28,7 +28,7 @@ type RefundJob struct {
 	PayAmount   float64
 	RefundAmt   float64
 	Reason      string
-	// 发起微信退款失败时回滚背包（背包退款路径写入）
+	// CreateRefund 失败时回滚事务内已扣的背包
 	RestoreAccountID uint64
 	RestoreProductID uint64
 	RestoreSpec      string
@@ -115,10 +115,11 @@ func dispatchWeChatRefund(job RefundJob) {
 		log.Printf("[wechat refund] order %s refund failed: %v", job.OrderNo, err)
 		releaseRefundPending(job.Provider, job.OrderID, job.RefundAmt)
 		restoreInventoryAfterRefundFail(job)
+		return
 	}
 }
 
-// AttachRestoreToLastRefundJob 给事务内最后一笔微信退款任务挂上背包回滚信息。
+// AttachRestoreToLastRefundJob 微信 CreateRefund 失败时回滚已扣背包。
 func AttachRestoreToLastRefundJob(tx *gorm.DB, accountID, productID uint64, spec string, qty uint32) {
 	ptr := refundJobsFromTx(tx)
 	if ptr == nil || len(*ptr) == 0 || qty == 0 {
@@ -136,38 +137,54 @@ func restoreInventoryAfterRefundFail(job RefundJob) {
 	if job.Provider == nil || job.Provider.DB == nil || job.RestoreAccountID == 0 || job.RestoreProductID == 0 || job.RestoreQty == 0 {
 		return
 	}
+	remark := "微信退款发起失败，回滚背包"
 	err := job.Provider.DB.Transaction(func(tx *gorm.DB) error {
 		var inv model.UserInventory
 		err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
-			Where("account_id = ? AND product_id = ? AND IFNULL(spec,'') = ?",
+			Where("account_id = ? AND product_id = ? AND spec = ?",
 				job.RestoreAccountID, job.RestoreProductID, job.RestoreSpec).
 			First(&inv).Error
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				inv = model.UserInventory{
-					AccountID: job.RestoreAccountID,
-					ProductID: job.RestoreProductID,
-					Spec:      job.RestoreSpec,
-					Quantity:  job.RestoreQty,
-				}
-				if job.OrderID > 0 {
-					oid := job.OrderID
-					inv.LastOrderID = &oid
-				}
-				return tx.Create(&inv).Error
+		before := uint32(0)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			inv = model.UserInventory{
+				AccountID: job.RestoreAccountID,
+				ProductID: job.RestoreProductID,
+				Spec:      job.RestoreSpec,
+				Quantity:  job.RestoreQty,
 			}
+			if job.OrderID > 0 {
+				oid := job.OrderID
+				inv.LastOrderID = &oid
+			}
+			if err := tx.Create(&inv).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		} else {
+			before = inv.Quantity
+			if err := tx.Model(&inv).Update("quantity", before+job.RestoreQty).Error; err != nil {
+				return err
+			}
+			inv.Quantity = before + job.RestoreQty
+		}
+		oid := job.OrderID
+		logRow := model.UserInventoryLog{
+			AccountID: job.RestoreAccountID, InventoryID: &inv.ID, ProductID: job.RestoreProductID,
+			Spec: job.RestoreSpec, OrderID: &oid, EventType: model.InventoryEventOrderCredit,
+			DeltaQty: int32(job.RestoreQty), BeforeQty: before, AfterQty: inv.Quantity, Remark: &remark,
+		}
+		if err := tx.Create(&logRow).Error; err != nil {
 			return err
 		}
-		return tx.Model(&inv).Update("quantity", gorm.Expr("quantity + ?", job.RestoreQty)).Error
+		// 冲回退款时加回的商品库存
+		return tx.Model(&model.Product{}).Where("id = ?", job.RestoreProductID).
+			Update("stock", gorm.Expr("CASE WHEN stock >= ? THEN stock - ? ELSE 0 END", job.RestoreQty, job.RestoreQty)).Error
 	})
 	if err != nil {
 		log.Printf("[wechat refund] restore inventory order %d product %d failed: %v",
 			job.OrderID, job.RestoreProductID, err)
-		return
 	}
-	// 退款失败：冲回此前加回的商品库存
-	_ = job.Provider.DB.Model(&model.Product{}).Where("id = ?", job.RestoreProductID).
-		Update("stock", gorm.Expr("CASE WHEN stock >= ? THEN stock - ? ELSE 0 END", job.RestoreQty, job.RestoreQty)).Error
 }
 
 // releaseRefundPending 微信退款发起失败时释放预留，避免卡死可退余额。

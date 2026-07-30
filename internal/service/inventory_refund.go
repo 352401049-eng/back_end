@@ -161,7 +161,7 @@ func (s *OrderService) RefundInventory(accountID, inventoryID uint64, quantity u
 				}
 				return err
 			}
-			// 微信退款若发起失败，需把本批扣减的背包加回
+			// 微信：事务内先扣背包；CreateRefund 失败时由 AttachRestore 回滚
 			payment.AttachRestoreToLastRefundJob(tx, accountID, inv.ProductID, inv.Spec, a.Quantity)
 			oid := a.OrderID
 			if err := s.InventorySvc.adjustQuantity(tx, accountID, inv.ProductID, inv.Spec,

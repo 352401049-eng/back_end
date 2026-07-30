@@ -1439,15 +1439,16 @@ func (s *OrderService) getOrderScoped(accountID, orderID uint64, merchantID *uin
 func toOrderView(o *model.Order) OrderView {
 	statusCode := model.OrderStatusCode(o.Status, o.MerchantReviewStage)
 	statusText := model.OrderStatusDisplayText(o.Status, o.MerchantReviewStage)
-	// 支付退款态覆盖履约展示（背包退款后订单可能仍为 PendingFulfill/approved）
-	switch o.PayStatus {
-	case model.PayStatusRefunded:
+	// 支付/退款金额优先覆盖履约文案（避免已退款仍显示「已入背包」）
+	switch {
+	case o.PayStatus == model.PayStatusRefunded ||
+		(o.PayAmount > 0 && o.RefundedAmount+0.0001 >= o.PayAmount && o.RefundPendingAmount < 0.0001):
 		statusCode = "refunded"
 		statusText = "已退款"
-	case model.PayStatusRefunding:
+	case o.PayStatus == model.PayStatusRefunding || o.RefundPendingAmount > 0.0001:
 		statusCode = "refunding"
 		statusText = "退款中"
-	case model.PayStatusPartialRefunded:
+	case o.PayStatus == model.PayStatusPartialRefunded || o.RefundedAmount > 0.0001:
 		statusCode = "partial_refunded"
 		statusText = "部分退款"
 	}
