@@ -454,6 +454,7 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 	r.PATCH("/categories/:id", ae.UpdateCategory)
 	r.DELETE("/categories/:id", ae.DeleteCategory)
 	r.GET("/deliveries", ae.ListDeliveries)
+	r.GET("/deliveries/exceptions", ae.ListDeliveryExceptions)
 	r.GET("/inventory-usages", ae.ListInventoryUsages)
 
 	r.GET("/rider/applications", h.ListRiderApplications)

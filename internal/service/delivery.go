@@ -74,6 +74,8 @@ type DeliveryView struct {
 	UsageItems           []DeliveryUsageLine    `json:"usage_items,omitempty"`
 	VerifyCode           *string                `json:"verify_code,omitempty"`
 	DeliveryTimeRemark   string                 `json:"delivery_time_remark,omitempty"`
+	RiderName            string                 `json:"rider_name,omitempty"`
+	RiderPhone           string                 `json:"rider_phone,omitempty"`
 }
 
 type DeliveryService struct {
@@ -769,6 +771,7 @@ func toDeliveryView(db *gorm.DB, d model.DeliveryOrder) DeliveryView {
 	if view.TakeoutOrderID != nil {
 		attachTakeoutDeliveryData(db, &view)
 	}
+	attachRiderContact(db, &view)
 	return view
 }
 
@@ -784,6 +787,31 @@ func toRiderDeliveryView(db *gorm.DB, d model.DeliveryOrder) DeliveryView {
 	view := toDeliveryView(db, d)
 	attachRiderVerifyCode(db, &view)
 	return view
+}
+
+func attachRiderContact(db *gorm.DB, view *DeliveryView) {
+	if db == nil || view == nil || view.RiderID == nil {
+		return
+	}
+	var acc model.Account
+	if err := query.NotDeleted(db).Select("id", "phone", "nickname").First(&acc, *view.RiderID).Error; err != nil {
+		return
+	}
+	if acc.Phone != nil {
+		view.RiderPhone = *acc.Phone
+	}
+	var app model.RiderApplication
+	err := query.NotDeleted(db).
+		Where("account_id = ? AND status = ?", *view.RiderID, model.RiderApplicationApproved).
+		Order("id DESC").First(&app).Error
+	if err == nil && app.RealName != "" {
+		view.RiderName = app.RealName
+	} else if acc.Nickname != nil {
+		view.RiderName = *acc.Nickname
+	}
+	if view.RiderPhone == "" && app.Phone != "" {
+		view.RiderPhone = app.Phone
+	}
 }
 
 // attachRiderVerifyCode 背包跑腿配送单在骑手接单后附带核销码；外卖单永不返回。
@@ -932,6 +960,31 @@ func (s *DeliveryService) ListForAdmin(merchantID *uint64, status *uint8, page, 
 		Preload("InventoryUsage", "is_deleted = ?", model.NotDeleted).
 		Preload("InventoryUsage.Product", "is_deleted = ?", model.NotDeleted).
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+		return nil, 0, err
+	}
+	return toDeliveryViews(s.DB, list), total, nil
+}
+
+func (s *DeliveryService) ListExceptions(page, pageSize int) ([]DeliveryView, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
+	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).
+		Where("status = ?", model.DeliveryException)
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.DeliveryOrder
+	if err := q.Order("updated_at DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
 	return toDeliveryViews(s.DB, list), total, nil

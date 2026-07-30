@@ -236,6 +236,25 @@ func (h *AdminExtraHandler) ListDeliveries(c *gin.Context) {
 	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
 }
 
+// ListDeliveryExceptions godoc
+// @Summary      异常配送单列表（管理端）
+// @Tags         管理端-配送
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page       query  int  false  "页码"
+// @Param        page_size  query  int  false  "每页条数"
+// @Success      200  {object}  response.Body{data=query.PageResult}
+// @Router       /admin/deliveries/exceptions [get]
+func (h *AdminExtraHandler) ListDeliveryExceptions(c *gin.Context) {
+	page, pageSize := parsePage(c)
+	list, total, err := h.DeliverySvc.ListExceptions(page, pageSize)
+	if err != nil {
+		response.InternalError(c, "获取异常配送单失败")
+		return
+	}
+	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
+}
+
 // ListAdminInventoryUsages godoc
 // @Summary      背包使用记录（管理端）
 // @Tags         管理端-背包
