@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -68,9 +69,10 @@ type DeliveryUsageLine struct {
 
 type DeliveryView struct {
 	model.DeliveryOrder
-	StatusText string              `json:"status_text"`
-	UsageItems []DeliveryUsageLine `json:"usage_items,omitempty"`
-	VerifyCode *string             `json:"verify_code,omitempty"`
+	StatusText      string                 `json:"status_text"`
+	AddressSnapshot *model.AddressSnapshot `json:"address_snapshot,omitempty"`
+	UsageItems      []DeliveryUsageLine    `json:"usage_items,omitempty"`
+	VerifyCode      *string                `json:"verify_code,omitempty"`
 }
 
 type DeliveryService struct {
@@ -213,7 +215,16 @@ func (s *DeliveryService) Accept(riderID, deliveryID uint64) (*DeliveryView, err
 				active = 1
 			}
 			if active == 0 && d.OrderID == nil {
-				return ErrDeliveryNotFound
+				if d.TakeoutOrderID == nil {
+					return ErrDeliveryNotFound
+				}
+				var to model.TakeoutOrder
+				if err := query.NotDeleted(tx).Select("status").First(&to, *d.TakeoutOrderID).Error; err != nil {
+					return ErrDeliveryNotFound
+				}
+				if to.Status == model.TakeoutStatusCancelled {
+					return ErrDeliveryNotFound
+				}
 			}
 		}
 		now := time.Now()
@@ -510,6 +521,12 @@ func (s *DeliveryService) ConfirmReceipt(accountID, deliveryID uint64) (*Deliver
 				return err
 			}
 		}
+		if d.TakeoutOrderID != nil {
+			if err := tx.Model(&model.TakeoutOrder{}).Where("id = ?", *d.TakeoutOrderID).
+				Update("status", model.TakeoutStatusCompleted).Error; err != nil {
+				return err
+			}
+		}
 		// ?????????????? usage???????
 		usageQ := tx.Model(&model.UserInventoryUsage{}).
 			Where("status = ?", model.InventoryUsagePendingShip)
@@ -574,6 +591,12 @@ func resolveDeliveryMerchantIDInTx(tx *gorm.DB, d *model.DeliveryOrder) uint64 {
 			return u.MerchantID
 		}
 	}
+	if d.TakeoutOrderID != nil {
+		var to model.TakeoutOrder
+		if err := tx.Select("merchant_id").First(&to, *d.TakeoutOrderID).Error; err == nil {
+			return to.MerchantID
+		}
+	}
 	return 0
 }
 
@@ -589,8 +612,9 @@ func (s *DeliveryService) userDeliveryQuery(accountID uint64) *gorm.DB {
 	return query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).Where(
 		`order_id IN (SELECT id FROM `+"`order`"+` WHERE account_id = ? AND is_deleted = 0)
 		OR inventory_usage_id IN (SELECT id FROM user_inventory_usage WHERE account_id = ? AND is_deleted = 0)
-		OR id IN (SELECT delivery_order_id FROM user_inventory_usage WHERE account_id = ? AND delivery_order_id IS NOT NULL AND is_deleted = 0)`,
-		accountID, accountID, accountID,
+		OR id IN (SELECT delivery_order_id FROM user_inventory_usage WHERE account_id = ? AND delivery_order_id IS NOT NULL AND is_deleted = 0)
+		OR takeout_order_id IN (SELECT id FROM takeout_order WHERE account_id = ? AND is_deleted = 0)`,
+		accountID, accountID, accountID, accountID,
 	)
 }
 
@@ -598,6 +622,13 @@ func (s *DeliveryService) assertDeliveryOwner(tx *gorm.DB, accountID uint64, d *
 	if d.OrderID != nil {
 		var order model.Order
 		if err := query.NotDeleted(tx).Where("id = ? AND account_id = ?", *d.OrderID, accountID).First(&order).Error; err != nil {
+			return ErrDeliveryForbidden
+		}
+		return nil
+	}
+	if d.TakeoutOrderID != nil {
+		var to model.TakeoutOrder
+		if err := query.NotDeleted(tx).Where("id = ? AND account_id = ?", *d.TakeoutOrderID, accountID).First(&to).Error; err != nil {
 			return ErrDeliveryForbidden
 		}
 		return nil
@@ -731,6 +762,9 @@ func toDeliveryView(db *gorm.DB, d model.DeliveryOrder) DeliveryView {
 		StatusText:    model.DeliveryStatusText(d.Status),
 	}
 	attachDeliveryUsageItems(db, &view)
+	if view.TakeoutOrderID != nil {
+		attachTakeoutDeliveryData(db, &view)
+	}
 	return view
 }
 
@@ -827,6 +861,68 @@ func attachDeliveryUsageItems(db *gorm.DB, view *DeliveryView) {
 		})
 	}
 	view.UsageItems = lines
+}
+
+func attachTakeoutDeliveryData(db *gorm.DB, view *DeliveryView) {
+	if db == nil || view == nil || view.TakeoutOrderID == nil {
+		return
+	}
+	var to model.TakeoutOrder
+	if err := query.NotDeleted(db).
+		Preload("Items", "is_deleted = ?", model.NotDeleted).
+		First(&to, *view.TakeoutOrderID).Error; err != nil {
+		return
+	}
+	view.AddressSnapshot = to.AddressSnapshot
+
+	var optSnap model.OptionSelectionSnapshot
+	if len(to.OptionSelections) > 0 {
+		_ = json.Unmarshal(to.OptionSelections, &optSnap)
+	}
+	optText := optSnap.SummaryText()
+
+	lines := make([]DeliveryUsageLine, 0, len(to.Items))
+	for i := range to.Items {
+		item := to.Items[i]
+		isPkg := false
+		var product model.Product
+		if err := query.NotDeleted(db).Select("item_type").First(&product, item.ProductID).Error; err == nil {
+			isPkg = product.ItemType == model.ProductItemTypePackage
+		}
+		lines = append(lines, DeliveryUsageLine{
+			ProductID:            item.ProductID,
+			ProductName:          item.ProductName,
+			Quantity:             item.Quantity,
+			IsPackage:            isPkg,
+			PackageSelectionText: takeoutItemPackageSummaryText(db, &to, &item),
+			OptionSelectionText:  optText,
+			OptionSelections:     optSnap,
+		})
+	}
+	if len(lines) > 0 {
+		view.UsageItems = lines
+	}
+}
+
+func takeoutItemPackageSummaryText(db *gorm.DB, to *model.TakeoutOrder, item *model.TakeoutOrderItem) string {
+	if db == nil || to == nil || item == nil || len(to.PackageSelections) == 0 {
+		return ""
+	}
+	units, err := decodeTakeoutPackageUnits(to.PackageSelections, item.Quantity)
+	if err != nil {
+		return ""
+	}
+	parts := make([]string, 0, 8)
+	for _, sels := range units {
+		lines, err := ResolvePackageSelections(db, item.ProductID, sels)
+		if err != nil {
+			continue
+		}
+		for _, ln := range lines {
+			parts = append(parts, fmt.Sprintf("%s×%d", ln.Product.Name, ln.Qty))
+		}
+	}
+	return strings.Join(parts, "、")
 }
 
 // ListForAdmin ??????????????

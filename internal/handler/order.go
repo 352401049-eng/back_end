@@ -268,6 +268,8 @@ func handleOrderError(c *gin.Context, err error) {
 		response.BadRequest(c, "不在新用户购买有效期内，请使用普通价下单")
 	case errors.Is(err, service.ErrActivityForbidden):
 		response.Fail(c, 403, 403, "活动不可用")
+	case errors.Is(err, service.ErrSoloPurchaseDisabled):
+		response.BadRequest(c, "请使用团购、外卖或活动购买")
 	case errors.Is(err, service.ErrAddressRequired):
 		response.BadRequest(c, "请选择收货地址")
 	case errors.Is(err, service.ErrInvalidDeliveryType):

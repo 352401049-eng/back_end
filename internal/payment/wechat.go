@@ -1041,5 +1041,47 @@ func (p *WeChatProvider) retrieveAndSettlePayments() (*NotifyResult, error) {
 			log.Printf("[wechat retrieve] 订单 %s 支付成功，已处理", o.OrderNo)
 		}
 	}
+	if err := p.retrieveAndSettleTakeoutPayments(); err != nil {
+		log.Printf("[wechat retrieve] 外卖单查单结算失败: %v", err)
+	}
 	return &NotifyResult{Paid: true, RawAck: `{"code":"SUCCESS"}`}, nil
+}
+
+// retrieveAndSettleTakeoutPayments 主动查单，恢复已付但未入账的外卖单。
+func (p *WeChatProvider) retrieveAndSettleTakeoutPayments() error {
+	if p.Client == nil {
+		return ErrNotConfigured
+	}
+	var takeouts []model.TakeoutOrder
+	if err := query.NotDeleted(p.DB).
+		Where("status = ? AND pay_status = ?", model.TakeoutStatusPendingPay, model.PayStatusUnpaid).
+		Find(&takeouts).Error; err != nil {
+		return err
+	}
+	for _, to := range takeouts {
+		tradeState, transactionID, err := p.Client.QueryOrderByOutTradeNo(to.OrderNo)
+		if err != nil {
+			log.Printf("[wechat retrieve] 查询外卖单 %s 失败: %v", to.OrderNo, err)
+			continue
+		}
+		if tradeState != "SUCCESS" {
+			continue
+		}
+		if err := p.DB.Transaction(func(tx *gorm.DB) error {
+			sub, err := p.upsertPaidTransaction(tx, to.OrderNo, transactionID, to.PayAmount, nil)
+			if err != nil {
+				return err
+			}
+			now := time.Now()
+			if err := p.markSubjectPaidInTx(tx, sub, now); err != nil {
+				return err
+			}
+			return p.invokeSubjectPaidCallback(tx, sub)
+		}); err != nil {
+			log.Printf("[wechat retrieve] 外卖单 %s 支付成功处理失败: %v", to.OrderNo, err)
+			continue
+		}
+		log.Printf("[wechat retrieve] 外卖单 %s 支付成功，已处理", to.OrderNo)
+	}
+	return nil
 }
