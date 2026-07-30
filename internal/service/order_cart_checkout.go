@@ -39,6 +39,13 @@ func (s *OrderService) CheckoutCart(accountID uint64, input CheckoutCartInput) (
 	if input.MerchantID == 0 {
 		return nil, fmt.Errorf("%w: 请指定商家", ErrInvalidProductArg)
 	}
+	if err := assertBagPurchaseAllowed(model.PurchaseTypeSolo, nil); err != nil {
+		return nil, err
+	}
+	if err := assertBagPickupOnly(input.DeliveryType); err != nil {
+		return nil, err
+	}
+	input.DeliveryType = model.DeliveryTypePickup
 	deliveryType, err := normalizeDeliveryType(input.DeliveryType)
 	if err != nil {
 		return nil, err

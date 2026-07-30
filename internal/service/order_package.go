@@ -72,9 +72,13 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 	if input.PurchaseType == 0 {
 		input.PurchaseType = model.PurchaseTypeSolo
 	}
-	if input.DeliveryType == 0 {
-		input.DeliveryType = model.DeliveryTypePickup
+	if err := assertBagPurchaseAllowed(input.PurchaseType, input.ActivityProductID); err != nil {
+		return nil, err
 	}
+	if err := assertBagPickupOnly(input.DeliveryType); err != nil {
+		return nil, err
+	}
+	input.DeliveryType = model.DeliveryTypePickup
 	deliveryType, err := normalizeDeliveryType(input.DeliveryType)
 	if err != nil {
 		return nil, err

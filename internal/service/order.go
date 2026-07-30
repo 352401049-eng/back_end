@@ -25,6 +25,7 @@ var (
 	ErrGroupBuyAlreadyJoined = errors.New("group buy already joined")
 	ErrAddressRequired       = errors.New("address required")
 	ErrInvalidDeliveryType   = errors.New("invalid delivery type")
+	ErrSoloPurchaseDisabled  = errors.New("solo purchase disabled")
 )
 
 type OrderService struct {
@@ -101,9 +102,13 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 	if input.PurchaseType == 0 {
 		input.PurchaseType = model.PurchaseTypeSolo
 	}
-	if input.DeliveryType == 0 {
-		input.DeliveryType = model.DeliveryTypePickup
+	if err := assertBagPurchaseAllowed(input.PurchaseType, input.ActivityProductID); err != nil {
+		return nil, err
 	}
+	if err := assertBagPickupOnly(input.DeliveryType); err != nil {
+		return nil, err
+	}
+	input.DeliveryType = model.DeliveryTypePickup
 	if _, err := normalizeDeliveryType(input.DeliveryType); err != nil {
 		return nil, err
 	}
@@ -1586,6 +1591,30 @@ func normalizeDeliveryType(deliveryType uint8) (uint8, error) {
 		return 0, ErrInvalidDeliveryType
 	}
 	return deliveryType, nil
+}
+
+func assertBagPurchaseAllowed(purchaseType uint8, activityProductID *uint64) error {
+	if activityProductID != nil && *activityProductID > 0 {
+		return nil
+	}
+	if purchaseType == model.PurchaseTypeGroup {
+		return nil
+	}
+	return fmt.Errorf("%w: 请使用团购、外卖或活动购买", ErrSoloPurchaseDisabled)
+}
+
+func assertBagPickupOnly(deliveryType uint8) error {
+	if deliveryType == 0 {
+		return nil
+	}
+	dt, err := normalizeDeliveryType(deliveryType)
+	if err != nil {
+		return err
+	}
+	if dt == model.DeliveryTypeDelivery {
+		return fmt.Errorf("%w: 入包订单不支持下单配送，请使用外卖或背包跑腿", ErrInvalidDeliveryType)
+	}
+	return nil
 }
 
 func (s *OrderService) attachVerifyCode(view *OrderView) {
