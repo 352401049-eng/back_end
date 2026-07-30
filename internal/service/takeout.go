@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
@@ -20,6 +21,7 @@ import (
 var (
 	ErrTakeoutNotFound      = errors.New("takeout order not found")
 	ErrTakeoutStatusInvalid = errors.New("takeout status invalid")
+	ErrTakeoutForbidden     = errors.New("takeout order forbidden")
 )
 
 type TakeoutService struct {
@@ -44,6 +46,7 @@ type TakeoutView struct {
 	model.TakeoutOrder
 	StatusText string `json:"status_text"`
 	StatusCode string `json:"status_code"`
+	PickupCode string `json:"pickup_code,omitempty"`
 }
 
 func computeTakeoutPayAmount(unitPrice float64, qty uint32, deliveryFee float64) float64 {
@@ -437,6 +440,17 @@ func (s *TakeoutService) expireOnePendingPayTakeout(takeoutID uint64) error {
 	})
 }
 
+func (s *TakeoutService) attachPickupCode(view *TakeoutView) {
+	if view == nil || view.DeliveryOrderID == nil {
+		return
+	}
+	var d model.DeliveryOrder
+	if err := query.NotDeleted(s.DB).Select("pickup_code").First(&d, *view.DeliveryOrderID).Error; err != nil {
+		return
+	}
+	view.PickupCode = d.PickupCode
+}
+
 func (s *TakeoutService) GetView(accountID, takeoutID uint64) (*TakeoutView, error) {
 	var to model.TakeoutOrder
 	q := query.NotDeleted(s.DB).Where("id = ?", takeoutID)
@@ -449,7 +463,25 @@ func (s *TakeoutService) GetView(accountID, takeoutID uint64) (*TakeoutView, err
 		}
 		return nil, err
 	}
-	return s.toView(&to), nil
+	view := s.toView(&to)
+	s.attachPickupCode(view)
+	return view, nil
+}
+
+func (s *TakeoutService) GetMerchantView(merchantID, takeoutID uint64) (*TakeoutView, error) {
+	var to model.TakeoutOrder
+	if err := query.NotDeleted(s.DB).
+		Where("id = ? AND merchant_id = ?", takeoutID, merchantID).
+		Preload("Items", "is_deleted = ?", model.NotDeleted).
+		First(&to).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTakeoutNotFound
+		}
+		return nil, err
+	}
+	view := s.toView(&to)
+	s.attachPickupCode(view)
+	return view, nil
 }
 
 func (s *TakeoutService) List(accountID uint64, page, pageSize int, status *uint8) ([]TakeoutView, int64, error) {
@@ -483,7 +515,235 @@ func (s *TakeoutService) List(accountID uint64, page, pageSize int, status *uint
 
 	out := make([]TakeoutView, 0, len(rows))
 	for i := range rows {
-		out = append(out, *s.toView(&rows[i]))
+		view := s.toView(&rows[i])
+		s.attachPickupCode(view)
+		out = append(out, *view)
 	}
 	return out, total, nil
+}
+
+func parseMerchantTakeoutStatusFilter(code string) (*uint8, error) {
+	switch strings.TrimSpace(strings.ToLower(code)) {
+	case "", "all":
+		return nil, nil
+	case "preparing":
+		v := model.TakeoutStatusPreparing
+		return &v, nil
+	case "fulfilling":
+		v := model.TakeoutStatusFulfilling
+		return &v, nil
+	case "completed":
+		v := model.TakeoutStatusCompleted
+		return &v, nil
+	case "cancelled":
+		v := model.TakeoutStatusCancelled
+		return &v, nil
+	default:
+		return nil, fmt.Errorf("%w: status 无效", ErrInvalidProductArg)
+	}
+}
+
+// ListForMerchant 商家外卖单列表（status=preparing 等字符串筛选）。
+func (s *TakeoutService) ListForMerchant(merchantID uint64, page, pageSize int, statusCode string) ([]TakeoutView, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
+	status, err := parseMerchantTakeoutStatusFilter(statusCode)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	q := query.NotDeleted(s.DB.Model(&model.TakeoutOrder{})).Where("merchant_id = ?", merchantID)
+	if status != nil {
+		q = q.Where("status = ?", *status)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var rows []model.TakeoutOrder
+	if err := q.Order("id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Preload("Items", "is_deleted = ?", model.NotDeleted).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	out := make([]TakeoutView, 0, len(rows))
+	for i := range rows {
+		view := s.toView(&rows[i])
+		s.attachPickupCode(view)
+		out = append(out, *view)
+	}
+	return out, total, nil
+}
+
+func restoreTakeoutStockInTx(tx *gorm.DB, takeout *model.TakeoutOrder) error {
+	var items []model.TakeoutOrderItem
+	if err := query.NotDeleted(tx).Where("takeout_order_id = ?", takeout.ID).Find(&items).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Quantity == 0 {
+			continue
+		}
+		if err := tx.Model(&model.Product{}).Where("id = ?", item.ProductID).
+			Update("stock", gorm.Expr("stock + ?", item.Quantity)).Error; err != nil {
+			return err
+		}
+		var product model.Product
+		if err := query.NotDeleted(tx).Select("id", "item_type").First(&product, item.ProductID).Error; err != nil {
+			return err
+		}
+		if product.ItemType != model.ProductItemTypePackage {
+			continue
+		}
+		units, err := decodeTakeoutPackageUnits(takeout.PackageSelections, item.Quantity)
+		if err != nil {
+			return err
+		}
+		for _, sels := range units {
+			lines, err := ResolvePackageSelections(tx, item.ProductID, sels)
+			if err != nil {
+				return err
+			}
+			for _, ln := range lines {
+				if err := tx.Model(&model.Product{}).Where("id = ?", ln.Product.ID).
+					Update("stock", gorm.Expr("stock + ?", ln.Qty)).Error; err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ConfirmPrepared 商家确认出餐：创建配送单（merchant_prepared=1）并推进到配送中。
+func (s *TakeoutService) ConfirmPrepared(merchantID, takeoutID uint64) (*TakeoutView, error) {
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var to model.TakeoutOrder
+		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&to, takeoutID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrTakeoutNotFound
+			}
+			return err
+		}
+		if to.MerchantID != merchantID {
+			return ErrTakeoutForbidden
+		}
+		if to.Status != model.TakeoutStatusPreparing || to.PayStatus != model.PayStatusPaid {
+			return ErrTakeoutStatusInvalid
+		}
+		if to.DeliveryOrderID != nil {
+			return ErrTakeoutStatusInvalid
+		}
+
+		now := time.Now()
+		tid := to.ID
+		d := model.DeliveryOrder{
+			TakeoutOrderID:   &tid,
+			Status:           model.DeliveryPendingAccept,
+			MerchantPrepared: 1,
+			PreparedAt:       &now,
+			PickupCode:       genPickupCode(tx, merchantID),
+			DeliveryFee:      to.DeliveryFee,
+			RiderEarnings:    to.RiderEarnings,
+		}
+		if err := tx.Create(&d).Error; err != nil {
+			return err
+		}
+		res := query.NotDeleted(tx.Model(&model.TakeoutOrder{})).
+			Where("id = ? AND status = ? AND pay_status = ?", takeoutID, model.TakeoutStatusPreparing, model.PayStatusPaid).
+			Updates(map[string]interface{}{
+				"status":            model.TakeoutStatusFulfilling,
+				"delivery_order_id": d.ID,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrTakeoutStatusInvalid
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetMerchantView(merchantID, takeoutID)
+}
+
+// Reject 商家拒单：配餐中全额退款并回滚库存；已出餐未接单可取消配送单后同样处理。
+func (s *TakeoutService) Reject(merchantID, takeoutID uint64, reason string) (*TakeoutView, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, fmt.Errorf("%w: 请填写拒绝原因", ErrTakeoutStatusInvalid)
+	}
+	reasonText := "商家拒单：" + reason
+
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var to model.TakeoutOrder
+		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&to, takeoutID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrTakeoutNotFound
+			}
+			return err
+		}
+		if to.MerchantID != merchantID {
+			return ErrTakeoutForbidden
+		}
+		if to.Status == model.TakeoutStatusCancelled {
+			return nil
+		}
+
+		switch to.Status {
+		case model.TakeoutStatusPreparing:
+			if to.PayStatus != model.PayStatusPaid {
+				return ErrTakeoutStatusInvalid
+			}
+		case model.TakeoutStatusFulfilling:
+			if to.DeliveryOrderID == nil {
+				return ErrTakeoutStatusInvalid
+			}
+			var d model.DeliveryOrder
+			if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+				First(&d, *to.DeliveryOrderID).Error; err != nil {
+				return err
+			}
+			if d.Status != model.DeliveryPendingAccept || d.RiderID != nil {
+				return ErrTakeoutStatusInvalid
+			}
+			if err := tx.Model(&d).Update("status", model.DeliveryCancelled).Error; err != nil {
+				return err
+			}
+		default:
+			return ErrTakeoutStatusInvalid
+		}
+
+		sub, err := payment.TakeoutSubjectFromID(tx, takeoutID, 0)
+		if err != nil {
+			return err
+		}
+		if err := s.paymentProvider().RefundSubjectAmountInTx(tx, sub, to.PayAmount, reasonText); err != nil {
+			return err
+		}
+		if err := restoreTakeoutStockInTx(tx, &to); err != nil {
+			return err
+		}
+		return query.NotDeleted(tx.Model(&model.TakeoutOrder{})).Where("id = ?", takeoutID).
+			Update("remark", reasonText).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetMerchantView(merchantID, takeoutID)
 }

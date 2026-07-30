@@ -13,7 +13,8 @@ import (
 )
 
 type TakeoutHandler struct {
-	TakeoutSvc *service.TakeoutService
+	TakeoutSvc  *service.TakeoutService
+	MerchantSvc *service.MerchantService
 }
 
 type CreateTakeoutRequest struct {
@@ -155,12 +156,109 @@ func (h *TakeoutHandler) Get(c *gin.Context) {
 	response.OK(c, view)
 }
 
+// MerchantListTakeouts godoc
+// @Summary      商家外卖订单列表
+// @Tags         商家端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        status  query  string  false  "preparing|fulfilling|completed|cancelled"
+// @Success      200     {object}  response.Body{data=query.PageResult}
+// @Router       /merchant/takeout-orders [get]
+func (h *TakeoutHandler) MerchantList(c *gin.Context) {
+	merchantID, err := resolveMerchantScope(c, h.MerchantSvc)
+	if err != nil {
+		return
+	}
+	var page query.Page
+	if err := c.ShouldBindQuery(&page); err != nil {
+		response.BadRequest(c, "分页参数无效")
+		return
+	}
+	pageNum, pageSize, _ := page.Normalize()
+	list, total, err := h.TakeoutSvc.ListForMerchant(*merchantID, pageNum, pageSize, c.Query("status"))
+	if err != nil {
+		handleTakeoutError(c, err)
+		return
+	}
+	response.OK(c, &query.PageResult{List: list, Total: total, Page: pageNum, PageSize: pageSize})
+}
+
+// MerchantPrepareTakeout godoc
+// @Summary      商家确认外卖出餐
+// @Tags         商家端
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "外卖单 ID"
+// @Success      200  {object}  response.Body{data=service.TakeoutView}
+// @Router       /merchant/takeout-orders/{id}/prepare [post]
+func (h *TakeoutHandler) MerchantPrepare(c *gin.Context) {
+	merchantID, err := resolveMerchantScope(c, h.MerchantSvc)
+	if err != nil {
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	view, err := h.TakeoutSvc.ConfirmPrepared(*merchantID, id)
+	if err != nil {
+		handleTakeoutError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+type RejectTakeoutRequest struct {
+	Reason string `json:"reason" binding:"required" example:"今日已打烊"`
+}
+
+// MerchantRejectTakeout godoc
+// @Summary      商家拒绝外卖订单
+// @Tags         商家端
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int  true  "外卖单 ID"
+// @Param        body  body  RejectTakeoutRequest  true  "拒绝原因"
+// @Success      200   {object}  response.Body{data=service.TakeoutView}
+// @Router       /merchant/takeout-orders/{id}/reject [post]
+func (h *TakeoutHandler) MerchantReject(c *gin.Context) {
+	merchantID, err := resolveMerchantScope(c, h.MerchantSvc)
+	if err != nil {
+		return
+	}
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	var req RejectTakeoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效: "+err.Error())
+		return
+	}
+	view, err := h.TakeoutSvc.Reject(*merchantID, id, req.Reason)
+	if err != nil {
+		handleTakeoutError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
 func handleTakeoutError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrTakeoutNotFound):
 		response.Fail(c, 404, 404, "外卖订单不存在")
+	case errors.Is(err, service.ErrTakeoutForbidden):
+		response.Fail(c, 403, 403, "无权操作该外卖订单")
 	case errors.Is(err, service.ErrTakeoutStatusInvalid):
-		response.BadRequest(c, "当前状态不允许此操作")
+		msg := err.Error()
+		if i := len(service.ErrTakeoutStatusInvalid.Error()); i+2 < len(msg) && msg[i:i+2] == ": " {
+			response.BadRequest(c, msg[i+2:])
+		} else {
+			response.BadRequest(c, "当前状态不允许此操作")
+		}
 	case errors.Is(err, service.ErrProductNotFound):
 		response.Fail(c, 404, 404, "商品不存在")
 	case errors.Is(err, service.ErrMerchantNotFound):

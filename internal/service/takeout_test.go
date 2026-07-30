@@ -39,6 +39,21 @@ func TestTakeoutStatusMeta(t *testing.T) {
 	}
 }
 
+func TestParseMerchantTakeoutStatusFilter(t *testing.T) {
+	st, err := parseMerchantTakeoutStatusFilter("preparing")
+	if err != nil || st == nil || *st != model.TakeoutStatusPreparing {
+		t.Fatalf("preparing: st=%v err=%v", st, err)
+	}
+	st, err = parseMerchantTakeoutStatusFilter("")
+	if err != nil || st != nil {
+		t.Fatalf("empty: st=%v err=%v", st, err)
+	}
+	_, err = parseMerchantTakeoutStatusFilter("bogus")
+	if err == nil {
+		t.Fatal("expected error for bogus status")
+	}
+}
+
 func TestDecodeTakeoutPackageUnits(t *testing.T) {
 	raw := []byte(`[{"package_selections":[{"group_id":1,"items":[{"product_id":2,"qty":1}]}]}]`)
 	units, err := decodeTakeoutPackageUnits(raw, 1)

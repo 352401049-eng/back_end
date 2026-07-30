@@ -39,8 +39,9 @@ func genPickupCode(tx *gorm.DB, merchantID uint64) string {
 		tx.Model(&model.DeliveryOrder{}).
 			Where("pickup_code = ? AND is_deleted = ? AND "+
 				"(EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.merchant_id = ?) OR "+
-				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?))",
-				candidate, model.NotDeleted, merchantID, merchantID).
+				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?) OR "+
+				"EXISTS (SELECT 1 FROM takeout_order t WHERE t.id = delivery_order.takeout_order_id AND t.is_deleted = 0 AND t.merchant_id = ?))",
+				candidate, model.NotDeleted, merchantID, merchantID, merchantID).
 			Count(&existing)
 		if existing == 0 {
 			return candidate

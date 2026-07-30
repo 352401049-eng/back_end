@@ -105,8 +105,8 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		InventorySvc: inventorySvc,
 		DeliverySvc:  deliverySvc,
 	}
-	takeoutHandler := &handler.TakeoutHandler{TakeoutSvc: takeoutSvc}
 	merchantSvc := &service.MerchantService{DB: db}
+	takeoutHandler := &handler.TakeoutHandler{TakeoutSvc: takeoutSvc, MerchantSvc: merchantSvc}
 	productSvc := &service.ProductService{DB: db, CategorySvc: categorySvc}
 	riderSvc := &service.RiderApplicationService{DB: db}
 	adminHandler := &handler.AdminHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, RiderSvc: riderSvc, EarningSvc: riderEarningSvc}
@@ -201,7 +201,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 		merchant := authorized.Group("/merchant")
 		merchant.Use(middleware.RequireAccountTypes(model.AccountTypeMerchant, model.AccountTypeAdmin))
-		registerMerchantRoutes(merchant, merchantHandler, merchantOrderHandler, couponHandler, announcementHandler, activityHandler, deliveryZoneHandler)
+		registerMerchantRoutes(merchant, merchantHandler, merchantOrderHandler, takeoutHandler, couponHandler, announcementHandler, activityHandler, deliveryZoneHandler)
 
 		admin := authorized.Group("/admin")
 		admin.Use(middleware.RequireAccountTypes(model.AccountTypeAdmin))
@@ -299,7 +299,7 @@ func startPendingPayExpireWorker(orderSvc *service.OrderService, takeoutSvc *ser
 	}()
 }
 
-func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *handler.MerchantOrderHandler, ch *handler.CouponHandler, ah *handler.AnnouncementHandler, act *handler.ActivityHandler, dz *handler.DeliveryZoneHandler) {
+func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *handler.MerchantOrderHandler, to *handler.TakeoutHandler, ch *handler.CouponHandler, ah *handler.AnnouncementHandler, act *handler.ActivityHandler, dz *handler.DeliveryZoneHandler) {
 	r.GET("/profile", h.GetProfile)
 	r.PATCH("/profile", h.UpdateProfile)
 	r.PATCH("/profile/images", h.UpdateShopImages)
@@ -312,6 +312,9 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.POST("/deliveries/:id/reject", mo.RejectDeliveryPrepare)
 	r.GET("/deliveries/preparing", mo.ListPreparingDeliveries)
 	r.GET("/deliveries/prepared", mo.ListPreparedDeliveries)
+	r.GET("/takeout-orders", to.MerchantList)
+	r.POST("/takeout-orders/:id/prepare", to.MerchantPrepare)
+	r.POST("/takeout-orders/:id/reject", to.MerchantReject)
 	r.GET("/dashboard", mo.Dashboard)
 	r.GET("/sales", mo.SalesReport)
 
