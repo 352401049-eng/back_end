@@ -144,7 +144,8 @@ func ResolveSubjectByOrderNo(db *gorm.DB, orderNo string) (PaySubject, error) {
 	}
 }
 
-// paymentTransactionOrderID 写入 payment_transaction.order_id 列（非 order 主体可为 0）。
+// paymentTransactionOrderID 写入 payment_transaction.order_id。
+// 入包订单写真实 ID；外卖/配送费写 0（依赖库侧已去掉 fk_pt_order）。
 func paymentTransactionOrderID(sub PaySubject) uint64 {
 	if sub.Type == model.PaySubjectOrder {
 		return sub.ID
