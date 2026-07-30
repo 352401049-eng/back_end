@@ -1,0 +1,124 @@
+package payment
+
+import (
+	"fmt"
+	"strings"
+
+	"yujixinjiang/backend/internal/model"
+	"yujixinjiang/backend/internal/query"
+
+	"gorm.io/gorm"
+)
+
+// PaySubject 支付主体：入包订单、外卖单、跑腿配送费等。
+type PaySubject struct {
+	Type      string // model.PaySubject*
+	ID        uint64
+	OrderNo   string
+	Amount    float64
+	AccountID uint64
+}
+
+func (s PaySubject) Validate() error {
+	if s.Type == "" || s.ID == 0 || s.OrderNo == "" || s.AccountID == 0 {
+		return ErrInvalidState
+	}
+	if s.Amount < 0 {
+		return fmt.Errorf("%w: amount invalid", ErrInvalidState)
+	}
+	return nil
+}
+
+// SubjectTypeFromOrderNo 按业务单号前缀推断支付主体类型。
+func SubjectTypeFromOrderNo(orderNo string) string {
+	switch {
+	case strings.HasPrefix(orderNo, "T"):
+		return model.PaySubjectTakeout
+	case strings.HasPrefix(orderNo, "F"):
+		return model.PaySubjectDeliveryFee
+	default:
+		return model.PaySubjectOrder
+	}
+}
+
+// OrderSubjectFromID 加载入包订单并构造 PaySubject。
+func OrderSubjectFromID(db *gorm.DB, orderID, accountID uint64) (PaySubject, error) {
+	var o model.Order
+	q := query.NotDeleted(db).Where("id = ?", orderID)
+	if accountID > 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&o).Error; err != nil {
+		return PaySubject{}, err
+	}
+	return PaySubject{
+		Type:      model.PaySubjectOrder,
+		ID:        o.ID,
+		OrderNo:   o.OrderNo,
+		Amount:    o.PayAmount,
+		AccountID: o.AccountID,
+	}, nil
+}
+
+// TakeoutSubjectFromID 加载外卖单并构造 PaySubject。
+func TakeoutSubjectFromID(db *gorm.DB, takeoutID, accountID uint64) (PaySubject, error) {
+	var to model.TakeoutOrder
+	q := query.NotDeleted(db).Where("id = ?", takeoutID)
+	if accountID > 0 {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if err := q.First(&to).Error; err != nil {
+		return PaySubject{}, err
+	}
+	return PaySubject{
+		Type:      model.PaySubjectTakeout,
+		ID:        to.ID,
+		OrderNo:   to.OrderNo,
+		Amount:    to.PayAmount,
+		AccountID: to.AccountID,
+	}, nil
+}
+
+// ResolveSubjectByOrderNo 用 out_trade_no 反查支付主体（微信回调/查单）。
+func ResolveSubjectByOrderNo(db *gorm.DB, orderNo string) (PaySubject, error) {
+	if orderNo == "" {
+		return PaySubject{}, ErrInvalidState
+	}
+	subType := SubjectTypeFromOrderNo(orderNo)
+	switch subType {
+	case model.PaySubjectTakeout:
+		var to model.TakeoutOrder
+		if err := query.NotDeleted(db).Where("order_no = ?", orderNo).First(&to).Error; err != nil {
+			return PaySubject{}, err
+		}
+		return PaySubject{
+			Type:      model.PaySubjectTakeout,
+			ID:        to.ID,
+			OrderNo:   to.OrderNo,
+			Amount:    to.PayAmount,
+			AccountID: to.AccountID,
+		}, nil
+	case model.PaySubjectDeliveryFee:
+		return PaySubject{}, fmt.Errorf("%w: delivery_fee subject lookup not wired yet", ErrNotSupported)
+	default:
+		var o model.Order
+		if err := query.NotDeleted(db).Where("order_no = ?", orderNo).First(&o).Error; err != nil {
+			return PaySubject{}, err
+		}
+		return PaySubject{
+			Type:      model.PaySubjectOrder,
+			ID:        o.ID,
+			OrderNo:   o.OrderNo,
+			Amount:    o.PayAmount,
+			AccountID: o.AccountID,
+		}, nil
+	}
+}
+
+// paymentTransactionOrderID 写入 payment_transaction.order_id 列（非 order 主体可为 0）。
+func paymentTransactionOrderID(sub PaySubject) uint64 {
+	if sub.Type == model.PaySubjectOrder {
+		return sub.ID
+	}
+	return 0
+}

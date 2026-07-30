@@ -167,6 +167,22 @@ func (s *OrderService) CreatePrepay(accountID, orderID uint64) (*payment.PrepayR
 	return s.paymentProvider().CreatePrepay(orderID, accountID)
 }
 
+// CreatePrepayForSubject 按支付主体预支付（外卖/跑腿等）。
+func (s *OrderService) CreatePrepayForSubject(sub payment.PaySubject) (*payment.PrepayResult, error) {
+	return s.paymentProvider().CreatePrepayForSubject(sub)
+}
+
+func (s *OrderService) SettleSubjectPaidInTx(tx *gorm.DB, sub payment.PaySubject, at time.Time) error {
+	p := s.paymentProvider()
+	if err := p.SettleSubjectPaidInTx(tx, sub, at); err != nil {
+		return err
+	}
+	if sub.Type == model.PaySubjectOrder && p.ImmediateSettle() {
+		return s.advanceAfterPaidInTx(tx, sub.ID)
+	}
+	return nil
+}
+
 // HandlePaymentNotify 支付渠道异步回调入口（微信桩预留）。
 func (s *OrderService) HandlePaymentNotify(headers map[string]string, body []byte) (*payment.NotifyResult, error) {
 	return s.paymentProvider().HandleNotify(headers, body)

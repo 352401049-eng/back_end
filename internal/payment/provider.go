@@ -18,14 +18,20 @@ type Provider interface {
 	Name() string
 	// ImmediateSettle 是否在下单事务内直接记已支付（Mock=true；微信=false）。
 	ImmediateSettle() bool
-	// SettlePaidInTx 在事务内将订单标记为已支付。
+	// SettlePaidInTx 在事务内将订单标记为已支付（入包订单包装器）。
 	SettlePaidInTx(tx *gorm.DB, orderID uint64, payAmount float64, at time.Time) error
+	// SettleSubjectPaidInTx 在事务内将支付主体标记为已支付。
+	SettleSubjectPaidInTx(tx *gorm.DB, sub PaySubject, at time.Time) error
 	// RefundInTx 在事务内将已支付订单标记为已退款（Mock 立即成功；微信后续接真实退款）。
 	RefundInTx(tx *gorm.DB, orderID uint64) error
 	// RefundAmountInTx 按金额部分/全额退款（元）。amount<=0 或 >=剩余应付则走全额逻辑。
 	RefundAmountInTx(tx *gorm.DB, orderID uint64, amount float64, reason string) error
-	// CreatePrepay 为未支付订单创建预支付参数。Mock 若已付则返回已结算；微信桩返回 ErrNotConfigured。
+	// RefundSubjectAmountInTx 按支付主体部分/全额退款。
+	RefundSubjectAmountInTx(tx *gorm.DB, sub PaySubject, amount float64, reason string) error
+	// CreatePrepay 为未支付入包订单创建预支付参数（包装器）。
 	CreatePrepay(orderID uint64, accountID uint64) (*PrepayResult, error)
+	// CreatePrepayForSubject 为支付主体创建预支付参数。
+	CreatePrepayForSubject(sub PaySubject) (*PrepayResult, error)
 	// HandleNotify 处理支付渠道异步回调。微信桩返回 ErrNotConfigured。
 	HandleNotify(headers map[string]string, body []byte) (*NotifyResult, error)
 }
@@ -40,8 +46,10 @@ type PrepayResult struct {
 }
 
 type NotifyResult struct {
-	OrderID uint64 `json:"order_id"`
-	OrderNo string `json:"order_no"`
-	Paid    bool   `json:"paid"`
-	RawAck  string `json:"raw_ack,omitempty"`
+	SubjectType string `json:"subject_type,omitempty"`
+	SubjectID   uint64 `json:"subject_id,omitempty"`
+	OrderID     uint64 `json:"order_id,omitempty"`
+	OrderNo     string `json:"order_no"`
+	Paid        bool   `json:"paid"`
+	RawAck      string `json:"raw_ack,omitempty"`
 }
