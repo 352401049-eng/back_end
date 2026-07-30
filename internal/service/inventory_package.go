@@ -248,7 +248,11 @@ func enrichUsageViewPackage(view *InventoryUsageView) {
 }
 
 func enrichUsageViewOptions(db *gorm.DB, view *InventoryUsageView) {
-	if view == nil || view.Product == nil {
+	if view == nil {
+		return
+	}
+	view.OptionSelectionText = view.OptionSelections.SummaryText()
+	if view.Product == nil {
 		return
 	}
 	var needs bool

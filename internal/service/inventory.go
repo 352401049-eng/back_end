@@ -63,6 +63,7 @@ type InventoryUsageView struct {
 	HasOptions               bool    `json:"has_options"`
 	PackageSelectStatusText  string  `json:"package_select_status_text,omitempty"`
 	PackageSelectionText     string  `json:"package_selection_text,omitempty"`
+	OptionSelectionText      string  `json:"option_selection_text,omitempty"`
 }
 
 func (s *InventoryService) CreditFromOrder(tx *gorm.DB, accountID, orderID uint64, items []model.OrderItem) error {

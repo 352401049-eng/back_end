@@ -55,12 +55,14 @@ type CompleteDeliveryInput struct {
 }
 
 type DeliveryUsageLine struct {
-	UsageID              uint64 `json:"usage_id"`
-	ProductID            uint64 `json:"product_id"`
-	ProductName          string `json:"product_name"`
-	Quantity             uint32 `json:"quantity"`
-	IsPackage            bool   `json:"is_package"`
-	PackageSelectionText string `json:"package_selection_text,omitempty"`
+	UsageID              uint64                         `json:"usage_id"`
+	ProductID            uint64                         `json:"product_id"`
+	ProductName          string                         `json:"product_name"`
+	Quantity             uint32                         `json:"quantity"`
+	IsPackage            bool                           `json:"is_package"`
+	PackageSelectionText string                         `json:"package_selection_text,omitempty"`
+	OptionSelectionText  string                         `json:"option_selection_text,omitempty"`
+	OptionSelections     model.OptionSelectionSnapshot  `json:"option_selections,omitempty"`
 }
 
 type DeliveryView struct {
@@ -752,6 +754,8 @@ func attachDeliveryUsageItems(db *gorm.DB, view *DeliveryView) {
 			UsageID: u.ID, ProductID: u.ProductID, ProductName: name,
 			Quantity: u.Quantity, IsPackage: isPkg,
 			PackageSelectionText: u.PackageSelections.SummaryText(),
+			OptionSelectionText:  u.OptionSelections.SummaryText(),
+			OptionSelections:     u.OptionSelections,
 		})
 	}
 	view.UsageItems = lines
