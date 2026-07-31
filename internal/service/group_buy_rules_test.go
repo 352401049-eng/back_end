@@ -90,11 +90,65 @@ func TestAssertActivityGroupBuyOnly(t *testing.T) {
 	}
 }
 
-func TestValidateTeamJoinLimitForcesDistinct(t *testing.T) {
-	if err := validateTeamJoinLimit(1, 0, 1); err == nil {
-		t.Fatal("expected error when same user rejoins with allow_repeat forced off")
+func TestValidateTeamJoinLimit(t *testing.T) {
+	tests := []struct {
+		name        string
+		existing    int64
+		allowRepeat uint8
+		maxJoins    uint32
+		wantErr     bool
+	}{
+		{"off first join ok", 0, 0, 1, false},
+		{"off second join reject", 1, 0, 1, true},
+		{"on unlimited ok", 5, 1, 0, false},
+		{"on under max ok", 1, 1, 3, false},
+		{"on at max reject", 3, 1, 3, true},
 	}
-	if err := validateTeamJoinLimit(0, 0, 1); err != nil {
-		t.Fatal(err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTeamJoinLimit(tc.existing, tc.allowRepeat, tc.maxJoins)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestGroupCompleteReady(t *testing.T) {
+	tests := []struct {
+		name     string
+		current  uint32
+		target   uint32
+		distinct uint32
+		allow    uint8
+		want     bool
+	}{
+		{"off needs distinct", 3, 3, 1, 0, false},
+		{"off distinct ok", 3, 3, 3, 0, true},
+		{"on count enough same user", 3, 3, 1, 1, true},
+		{"on count short", 2, 3, 2, 1, false},
+		{"below count", 1, 3, 1, 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := groupCompleteReady(tc.current, tc.target, tc.distinct, tc.allow)
+			if got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveGroupBuyRepeat(t *testing.T) {
+	p := model.Product{GroupBuyAllowRepeat: 1}
+	if a, m := resolveGroupBuyRepeat(p, nil); a != 1 || m != 0 {
+		t.Fatalf("product: allow=%d max=%d", a, m)
+	}
+	act := &ActivityGroupBuyConfig{GroupBuyAllowRepeat: 0, GroupBuyMaxJoinsPerUser: 2}
+	if a, m := resolveGroupBuyRepeat(p, act); a != 0 || m != 2 {
+		t.Fatalf("act overrides: allow=%d max=%d", a, m)
 	}
 }

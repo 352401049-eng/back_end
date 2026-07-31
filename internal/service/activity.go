@@ -317,9 +317,6 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 	}
 
 	maxJoins := input.GroupBuyMaxJoinsPerUser
-	if maxJoins == 0 {
-		maxJoins = 1
-	}
 	status := input.Status
 	if status == 0 {
 		status = 1
@@ -443,9 +440,6 @@ func (s *ActivityService) UpdateProductInActivity(activityID, apID uint64, patch
 	}
 	merged.DailyRefreshTime = rt
 	maxJoins := merged.GroupBuyMaxJoinsPerUser
-	if maxJoins == 0 {
-		maxJoins = 1
-	}
 	status := merged.Status
 	if status == 0 {
 		status = 1
@@ -454,6 +448,8 @@ func (s *ActivityService) UpdateProductInActivity(activityID, apID uint64, patch
 	if merged.EnableGroupBuy != 1 {
 		updates["group_buy_price"] = nil
 		updates["group_buy_target_count"] = nil
+		updates["group_buy_allow_repeat"] = 0
+		updates["group_buy_max_joins_per_user"] = 0
 	}
 	if err := s.DB.Model(ap).Updates(updates).Error; err != nil {
 		return nil, err
@@ -1019,9 +1015,6 @@ func (s *ActivityService) ResolveForOrder(accountID uint64, activityProductID ui
 			target = *ap.GroupBuyTargetCount
 		}
 		maxJoins := ap.GroupBuyMaxJoinsPerUser
-		if maxJoins == 0 {
-			maxJoins = 1
-		}
 		unitPrice = *ap.GroupBuyPrice
 		gbConfig = &ActivityGroupBuyConfig{
 			EnableGroupBuy:          1,

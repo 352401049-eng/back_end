@@ -407,7 +407,8 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, 
 		if err != nil {
 			return 0, err
 		}
-		if err := validateTeamJoinLimit(joinCount, 0, 1); err != nil {
+		allowRepeat, maxJoins := resolveGroupBuyRepeat(product, actGB)
+		if err := validateTeamJoinLimit(joinCount, allowRepeat, maxJoins); err != nil {
 			return 0, err
 		}
 		if err := tx.Model(&team).Update("current_count", gorm.Expr("current_count + 1")).Error; err != nil {
@@ -530,6 +531,23 @@ func ensureGroupBuyMember(tx *gorm.DB, teamID, orderID, accountID uint64, isLead
 	return tx.Create(&m).Error
 }
 
+func resolveGroupBuyRepeat(product model.Product, actGB *ActivityGroupBuyConfig) (uint8, uint32) {
+	if actGB != nil {
+		return actGB.GroupBuyAllowRepeat, actGB.GroupBuyMaxJoinsPerUser
+	}
+	return product.GroupBuyAllowRepeat, 0 // product 无 max_joins 列：开重复时 0=不限
+}
+
+func groupCompleteReady(currentCount, targetCount, distinctAccounts uint32, allowRepeat uint8) bool {
+	if currentCount < targetCount {
+		return false
+	}
+	if allowRepeat == 1 {
+		return true
+	}
+	return distinctAccounts >= targetCount
+}
+
 func validateTeamJoinLimit(existingJoins int64, allowRepeat uint8, maxJoins uint32) error {
 	if allowRepeat != 1 {
 		if existingJoins > 0 {
@@ -561,11 +579,16 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 		return nil
 	}
 
-	distinct, err := countDistinctTeamParticipants(tx, team.ID)
-	if err != nil {
-		return err
+	allowRepeat, _ := resolveGroupBuyRepeat(product, actGB)
+	var distinct uint32
+	if allowRepeat != 1 {
+		d, err := countDistinctTeamParticipants(tx, team.ID)
+		if err != nil {
+			return err
+		}
+		distinct = d
 	}
-	if distinct < team.TargetCount {
+	if !groupCompleteReady(team.CurrentCount, team.TargetCount, distinct, allowRepeat) {
 		return nil
 	}
 
@@ -1090,9 +1113,6 @@ func (s *OrderService) GetActivityGroupProgress(accountID, activityID, activityP
 		target = *ap.GroupBuyTargetCount
 	}
 	maxJoins := ap.GroupBuyMaxJoinsPerUser
-	if maxJoins == 0 {
-		maxJoins = 1
-	}
 	groupPrice := ap.ActivityPrice
 	if ap.GroupBuyPrice != nil {
 		groupPrice = *ap.GroupBuyPrice
@@ -1282,9 +1302,6 @@ func (s *OrderService) attachGroupBuyProgress(view *OrderView, accountID uint64)
 				target = *ap.GroupBuyTargetCount
 			}
 			maxJoins := ap.GroupBuyMaxJoinsPerUser
-			if maxJoins == 0 {
-				maxJoins = 1
-			}
 			actGB = &ActivityGroupBuyConfig{
 				EnableGroupBuy:          1,
 				GroupBuyPrice:           *ap.GroupBuyPrice,
