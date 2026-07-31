@@ -509,6 +509,7 @@ func buildUserDeliveryBadges(db *gorm.DB, accountID uint64) (*UserDeliveryBadges
 		return nil, err
 	}
 	if err := userDeliveryBaseQuery(db, accountID).Where("status IN ?", []int{
+		int(model.DeliveryPendingAdminReview),
 		int(model.DeliveryPendingAccept),
 		int(model.DeliveryAccepted), int(model.DeliveryPicking), int(model.DeliveryDelivering),
 	}).Count(&badges.Active).Error; err != nil {

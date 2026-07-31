@@ -170,11 +170,13 @@ func (s *DeliveryService) ListForUser(accountID uint64, scope string, page, page
 		})
 	case "active", "delivering":
 		q = q.Where("status IN ?", []int{
+			int(model.DeliveryPendingAdminReview),
 			int(model.DeliveryPendingAccept),
 			int(model.DeliveryAccepted), int(model.DeliveryPicking), int(model.DeliveryDelivering),
 		})
 	default:
 		q = q.Where("status IN ?", []int{
+			int(model.DeliveryPendingAdminReview),
 			int(model.DeliveryPendingAccept),
 			int(model.DeliveryAccepted), int(model.DeliveryPicking), int(model.DeliveryDelivering), int(model.DeliveryDelivered),
 		})
@@ -1339,6 +1341,45 @@ func (s *DeliveryService) ApproveBagDelivery(deliveryID uint64) (*DeliveryView, 
 	if err != nil {
 		return nil, err
 	}
+	return s.getViewByID(deliveryID)
+}
+
+func (s *DeliveryService) CancelPendingBagByUser(accountID, deliveryID uint64) (*DeliveryView, error) {
+	reasonText := "用户取消"
+	var jobs []payment.RefundJob
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
+		var d model.DeliveryOrder
+		if err := s.userDeliveryQuery(accountID).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", deliveryID).First(&d).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrDeliveryNotFound
+			}
+			return err
+		}
+		if !IsBagErrand(&d) || d.Status != model.DeliveryPendingAdminReview {
+			return fmt.Errorf("%w: 当前状态不可取消", ErrDeliveryStatusInvalid)
+		}
+		if err := s.assertDeliveryOwner(tx, accountID, &d); err != nil {
+			return err
+		}
+		if err := s.restoreDeliveryUsagesForCancelInTx(tx, &d, deliveryID, reasonText); err != nil {
+			return err
+		}
+		if s.DeliveryFeePaySvc != nil {
+			if err := s.DeliveryFeePaySvc.RefundForDeliveryOrderInTx(tx, deliveryID, "用户取消跑腿退配送费"); err != nil {
+				return err
+			}
+		}
+		return tx.Model(&d).Updates(map[string]interface{}{
+			"status":           model.DeliveryCancelled,
+			"exception_reason": reasonText,
+		}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	payment.DispatchRefundJobs(jobs)
 	return s.getViewByID(deliveryID)
 }
 
