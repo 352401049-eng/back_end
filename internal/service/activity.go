@@ -887,7 +887,7 @@ func buildActivityProductStoreView(act *model.Activity, ap *model.ActivityProduc
 	if p.CoverURL != "" {
 		cover = p.CoverURL
 	}
-	solo := PurchaseOption{
+	deal := PurchaseOption{
 		Available:    avail > 0,
 		Price:        ap.ActivityPrice,
 		CanUseCoupon: canCoupon,
@@ -917,7 +917,7 @@ func buildActivityProductStoreView(act *model.Activity, ap *model.ActivityProduc
 		CanGroupBuy:     canGroup,
 		CanUseCoupon:    canCoupon,
 		SaleOptions: ProductSaleOptions{
-			Solo:  solo,
+			Deal:  deal,
 			Group: group,
 		},
 		LimitLabels:  buildSeckillLimitLabels(ap),

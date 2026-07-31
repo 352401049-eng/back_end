@@ -60,7 +60,8 @@ type ProductListFilter struct {
 	CategoryID         *uint64
 	Status             *uint8
 	Keyword            string
-	EnableGroupBuyOnly bool
+	EnableGroupBuyOnly bool // 拼团列表：enable_group=1
+	EnableDealOnly     bool // 团购列表：enable_deal=1
 	AllowPickupOnly    bool
 	ExcludePackage     bool // 选品辅助：排除套餐
 	ItemType           *uint8
@@ -211,7 +212,10 @@ func (s *ProductService) List(page, pageSize int, filter ProductListFilter) ([]m
 		q = q.Where("name LIKE ?", "%"+filter.Keyword+"%")
 	}
 	if filter.EnableGroupBuyOnly {
-		q = q.Where("enable_group_buy = 1 AND group_buy_price IS NOT NULL AND group_buy_target_count >= 2")
+		q = q.Where("enable_group = 1 AND group_buy_price IS NOT NULL AND group_buy_target_count >= 2")
+	}
+	if filter.EnableDealOnly {
+		q = q.Where("enable_deal = 1 AND price > 0")
 	}
 	if filter.AllowPickupOnly {
 		q = q.Where("allow_pickup = 1")

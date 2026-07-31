@@ -20,9 +20,9 @@ type GroupPurchaseOption struct {
 	AllowRepeatJoin     uint8   `json:"allow_repeat_join"`
 }
 
-// ProductSaleOptions 单独购买 / 拼团购买的展示与下单参考。
+// ProductSaleOptions 团购 / 拼团购买的展示与下单参考。
 type ProductSaleOptions struct {
-	Solo  PurchaseOption      `json:"solo"`
+	Deal  PurchaseOption      `json:"deal"`
 	Group GroupPurchaseOption `json:"group"`
 }
 
@@ -84,20 +84,25 @@ func (s *ProductService) loadActiveGroupBuys(productIDs []uint64) map[uint64]mod
 
 func buildProductStoreView(p model.Product, gb *model.GroupBuy) ProductStoreView {
 	canCoupon := p.EnableCoupon == 1
-	groupConfigured := p.EnableGroupBuy == 1 &&
+	groupConfigured := p.EnableGroup == 1 &&
 		p.GroupBuyTargetCount != nil && *p.GroupBuyTargetCount >= 2 &&
-		p.GroupBuyPrice != nil && *p.GroupBuyPrice > 0 && *p.GroupBuyPrice < p.Price
+		p.GroupBuyPrice != nil && *p.GroupBuyPrice > 0 &&
+		(p.EnableDeal != 1 || *p.GroupBuyPrice < p.Price)
 
 	var groupBuyID *uint64
 	groupPrice := p.Price
+	if groupConfigured {
+		groupPrice = *p.GroupBuyPrice
+	}
 	if gb != nil && groupConfigured {
 		groupBuyID = &gb.ID
 		groupPrice = gb.GroupPrice
 	}
 	groupAvailable := groupConfigured && gb != nil
+	dealAvailable := p.EnableDeal == 1
 
-	solo := PurchaseOption{
-		Available:    true,
+	deal := PurchaseOption{
+		Available:    dealAvailable,
 		Price:        p.Price,
 		CanUseCoupon: canCoupon,
 	}
@@ -118,7 +123,7 @@ func buildProductStoreView(p model.Product, gb *model.GroupBuy) ProductStoreView
 		CanUseCoupon: canCoupon,
 		GroupBuyID:   groupBuyID,
 		SaleOptions: ProductSaleOptions{
-			Solo:  solo,
+			Deal:  deal,
 			Group: group,
 		},
 	}

@@ -112,6 +112,8 @@ func (h *StoreHandler) GetMerchant(c *gin.Context) {
 // @Param        page_size    query  int     false  "每页条数"
 // @Param        category_id  query  int     false  "分类 ID"
 // @Param        keyword      query  string  false  "商品名"
+// @Param        deal         query  bool    false  "仅团购商品（enable_deal=1）"
+// @Param        group_buy    query  bool    false  "仅拼团商品（enable_group=1）"
 // @Success      200  {object}  response.Body{data=query.PageResult{list=[]service.ProductStoreView}}
 // @Failure      404  {object}  response.Body
 // @Router       /merchants/{id}/products [get]
@@ -134,6 +136,8 @@ func (h *StoreHandler) ListMerchantProducts(c *gin.Context) {
 // @Param        page_size    query  int     false  "每页条数"
 // @Param        category_id  query  int     false  "分类 ID"
 // @Param        keyword      query  string  false  "商品名"
+// @Param        deal         query  bool    false  "仅团购商品（enable_deal=1）"
+// @Param        group_buy    query  bool    false  "仅拼团商品（enable_group=1）"
 // @Success      200  {object}  response.Body{data=query.PageResult{list=[]service.ProductStoreView}}
 // @Failure      400  {object}  response.Body
 // @Failure      404  {object}  response.Body
@@ -157,6 +161,9 @@ func (h *StoreHandler) listMerchantProducts(c *gin.Context, merchantID uint64) {
 	filter := service.ProductListFilter{Keyword: c.Query("keyword")}
 	if c.Query("group_buy") == "1" {
 		filter.EnableGroupBuyOnly = true
+	}
+	if c.Query("deal") == "1" {
+		filter.EnableDealOnly = true
 	}
 	if c.Query("pickup") == "1" {
 		filter.AllowPickupOnly = true
