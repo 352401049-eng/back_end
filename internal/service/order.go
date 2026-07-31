@@ -282,12 +282,9 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			addrSnap = AddressSnapshotFromUserAddress(&addr)
 		}
 
-		// 直购单需等待支付，记录支付超时时间；拼团单不依赖支付前置（沿用历史语义）
-		var payExpireAt *time.Time
-		if status == model.OrderStatusPendingPay {
-			expireAt := now.Add(time.Duration(s.payTimeoutMinutes()) * time.Minute)
-			payExpireAt = &expireAt
-		}
+		// 直购与拼团均需先支付：记录支付超时。成团推进只计已支付订单。
+		expireAt := now.Add(time.Duration(s.payTimeoutMinutes()) * time.Minute)
+		payExpireAt := &expireAt
 
 		order = model.Order{
 			OrderNo:             orderNo,
@@ -575,20 +572,22 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 		// 已被并发置为 Success/Failed，直接返回
 		return nil
 	}
-	if team.CurrentCount < team.TargetCount {
-		return nil
-	}
 
+	// 成团门槛只计「已支付」的待成团单，避免未付款参团直接入包
+	paidCount, err := countPaidPendingGroupOnTeam(tx, team.ID)
+	if err != nil {
+		return err
+	}
 	allowRepeat, _ := resolveGroupBuyRepeat(product, actGB)
 	var distinct uint32
 	if allowRepeat != 1 {
-		d, err := countDistinctTeamParticipants(tx, team.ID)
+		d, err := countDistinctPaidPendingGroupOnTeam(tx, team.ID)
 		if err != nil {
 			return err
 		}
 		distinct = d
 	}
-	if !groupCompleteReady(team.CurrentCount, team.TargetCount, distinct, allowRepeat) {
+	if !groupCompleteReady(paidCount, team.TargetCount, distinct, allowRepeat) {
 		return nil
 	}
 
@@ -606,19 +605,25 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 		// 已被并发成团，无需重复推进订单
 		return nil
 	}
+	// 只推进已支付的待成团单；未支付的仍留在 PendingGroup，等付款后再走支付回调成团推进
 	if err := tx.Model(&model.Order{}).
-		Where("status = ? AND id IN (SELECT order_id FROM order_item WHERE group_buy_team_id = ? AND is_deleted = 0)", model.OrderStatusPendingGroup, team.ID).
+		Where("status = ? AND pay_status = ? AND id IN (SELECT order_id FROM order_item WHERE group_buy_team_id = ? AND is_deleted = 0)",
+			model.OrderStatusPendingGroup, model.PayStatusPaid, team.ID).
 		Updates(map[string]interface{}{
 			"status":                model.OrderStatusPendingFulfill,
 			"merchant_review_stage": model.MerchantReviewPending,
 		}).Error; err != nil {
 		return err
 	}
-	// 成团后对开启自动审核的商家逐单入背包
+	// 成团后对开启自动审核的商家逐单入背包（仅已推进的已付单）
 	var orderIDs []uint64
-	if err := tx.Table("order_item").
-		Where("group_buy_team_id = ? AND is_deleted = 0", team.ID).
-		Distinct("order_id").Pluck("order_id", &orderIDs).Error; err != nil {
+	if err := tx.Raw(`
+		SELECT DISTINCT oi.order_id
+		FROM order_item oi
+		INNER JOIN `+"`order`"+` o ON o.id = oi.order_id AND o.is_deleted = 0
+		WHERE oi.group_buy_team_id = ? AND oi.is_deleted = 0
+		  AND o.pay_status = ? AND o.status = ?
+	`, team.ID, model.PayStatusPaid, model.OrderStatusPendingFulfill).Scan(&orderIDs).Error; err != nil {
 		return err
 	}
 	for _, oid := range orderIDs {
@@ -627,6 +632,55 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 		}
 	}
 	return nil
+}
+
+// tryCompleteGroupForOrderInTx 拼团单支付成功后，按该单所属团尝试成团。
+func (s *OrderService) tryCompleteGroupForOrderInTx(tx *gorm.DB, orderID uint64) error {
+	var order model.Order
+	if err := query.NotDeleted(tx).First(&order, orderID).Error; err != nil {
+		return err
+	}
+	if order.Status != model.OrderStatusPendingGroup || order.PayStatus != model.PayStatusPaid {
+		return nil
+	}
+	var item model.OrderItem
+	if err := query.NotDeleted(tx).
+		Where("order_id = ? AND group_buy_team_id IS NOT NULL AND group_buy_team_id > 0", orderID).
+		First(&item).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if item.GroupBuyTeamID == nil || *item.GroupBuyTeamID == 0 {
+		return nil
+	}
+	var product model.Product
+	if err := query.NotDeleted(tx).First(&product, item.ProductID).Error; err != nil {
+		return err
+	}
+	var actGB *ActivityGroupBuyConfig
+	if item.ActivityProductID != nil {
+		var ap model.ActivityProduct
+		if err := query.NotDeleted(tx).First(&ap, *item.ActivityProductID).Error; err == nil && ap.EnableGroupBuy == 1 {
+			target := uint32(2)
+			if ap.GroupBuyTargetCount != nil && *ap.GroupBuyTargetCount >= 2 {
+				target = *ap.GroupBuyTargetCount
+			}
+			price := ap.ActivityPrice
+			if ap.GroupBuyPrice != nil {
+				price = *ap.GroupBuyPrice
+			}
+			actGB = &ActivityGroupBuyConfig{
+				EnableGroupBuy:          1,
+				GroupBuyPrice:           price,
+				GroupBuyTargetCount:     target,
+				GroupBuyAllowRepeat:     ap.GroupBuyAllowRepeat,
+				GroupBuyMaxJoinsPerUser: ap.GroupBuyMaxJoinsPerUser,
+			}
+		}
+	}
+	return s.tryCompleteGroup(tx, item.GroupBuyTeamID, product, actGB)
 }
 
 func (s *OrderService) Cancel(accountID, orderID uint64) error {
@@ -1465,6 +1519,31 @@ func countDistinctTeamParticipants(db *gorm.DB, teamID uint64) (uint32, error) {
 		INNER JOIN `+"`order`"+` o ON o.id = oi.order_id AND o.is_deleted = 0
 		WHERE oi.group_buy_team_id = ? AND oi.is_deleted = 0 AND o.status = ?
 	`, teamID, model.OrderStatusPendingGroup).Scan(&distinct).Error
+	return uint32(distinct), err
+}
+
+// countPaidPendingGroupOnTeam 已支付且仍待成团的参团笔数（同账号多笔各计一次）。
+func countPaidPendingGroupOnTeam(db *gorm.DB, teamID uint64) (uint32, error) {
+	var n int64
+	err := db.Raw(`
+		SELECT COUNT(*)
+		FROM order_item oi
+		INNER JOIN `+"`order`"+` o ON o.id = oi.order_id AND o.is_deleted = 0
+		WHERE oi.group_buy_team_id = ? AND oi.is_deleted = 0
+		  AND o.status = ? AND o.pay_status = ?
+	`, teamID, model.OrderStatusPendingGroup, model.PayStatusPaid).Scan(&n).Error
+	return uint32(n), err
+}
+
+func countDistinctPaidPendingGroupOnTeam(db *gorm.DB, teamID uint64) (uint32, error) {
+	var distinct int64
+	err := db.Raw(`
+		SELECT COUNT(DISTINCT o.account_id)
+		FROM order_item oi
+		INNER JOIN `+"`order`"+` o ON o.id = oi.order_id AND o.is_deleted = 0
+		WHERE oi.group_buy_team_id = ? AND oi.is_deleted = 0
+		  AND o.status = ? AND o.pay_status = ?
+	`, teamID, model.OrderStatusPendingGroup, model.PayStatusPaid).Scan(&distinct).Error
 	return uint32(distinct), err
 }
 

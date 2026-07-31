@@ -261,12 +261,9 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 			addrSnap = AddressSnapshotFromUserAddress(&addr)
 		}
 
-		// 直购单需等待支付，记录支付超时时间；拼团单不依赖支付前置
-		var payExpireAt *time.Time
-		if status == model.OrderStatusPendingPay {
-			expireAt := now.Add(time.Duration(s.payTimeoutMinutes()) * time.Minute)
-			payExpireAt = &expireAt
-		}
+		// 直购与拼团均需先支付：记录支付超时。成团推进只计已支付订单。
+		expireAt := now.Add(time.Duration(s.payTimeoutMinutes()) * time.Minute)
+		payExpireAt := &expireAt
 
 		pkgID := pkg.ID
 		order = model.Order{

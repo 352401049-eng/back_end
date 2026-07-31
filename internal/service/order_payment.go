@@ -34,6 +34,7 @@ func (s *OrderService) advanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
 }
 
 // AdvanceAfterPaidInTx 供支付渠道（微信回调）注入调用。
+// 直购 PendingPay → 待履约；拼团 PendingGroup 保持待成团，按已支付人数尝试成团。
 func (s *OrderService) AdvanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
 	res := tx.Model(&model.Order{}).
 		Where("id = ? AND status = ?", orderID, model.OrderStatusPendingPay).
@@ -45,10 +46,14 @@ func (s *OrderService) AdvanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
 	if res.Error != nil {
 		return res.Error
 	}
-	if res.RowsAffected == 0 {
-		// 可能已是 PendingFulfill（幂等回调），仍尝试自动审核
+	if res.RowsAffected > 0 {
 		return s.maybeAutoApproveInTx(tx, orderID)
 	}
+	// 拼团单支付成功：尝试成团并推进已付成员
+	if err := s.tryCompleteGroupForOrderInTx(tx, orderID); err != nil {
+		return err
+	}
+	// 团已成功时本单可能刚被推进为待履约，补一次自动审核
 	return s.maybeAutoApproveInTx(tx, orderID)
 }
 
@@ -295,11 +300,13 @@ func (s *OrderService) payTimeoutMinutes() int {
 }
 
 // ExpireStalePendingPayOrders 关闭超时未支付的订单：回滚库存/券/销量 + 退款 + 置 Closed。
-// 单个订单失败只记入 firstErr，不中断同批次其余订单。
+// 含直购 PendingPay 与拼团 PendingGroup 未付款。
 func (s *OrderService) ExpireStalePendingPayOrders(now time.Time) (int, error) {
 	var orders []model.Order
 	if err := query.NotDeleted(s.DB).
-		Where("status = ? AND pay_expire_at IS NOT NULL AND pay_expire_at < ?", model.OrderStatusPendingPay, now).
+		Where("status IN ? AND pay_status = ? AND pay_expire_at IS NOT NULL AND pay_expire_at < ?",
+			[]uint8{model.OrderStatusPendingPay, model.OrderStatusPendingGroup},
+			model.PayStatusUnpaid, now).
 		Limit(100).
 		Find(&orders).Error; err != nil {
 		return 0, err
@@ -327,7 +334,7 @@ func (s *OrderService) expireOnePendingPayOrder(orderID uint64) error {
 			First(&order, orderID).Error; err != nil {
 			return err
 		}
-		if order.Status != model.OrderStatusPendingPay {
+		if order.Status != model.OrderStatusPendingPay && order.Status != model.OrderStatusPendingGroup {
 			return nil
 		}
 		// 已支付则不关单（回调可能已先到，容错）
@@ -343,6 +350,9 @@ func (s *OrderService) expireOnePendingPayOrder(orderID uint64) error {
 		isPackageParent := order.PackageProductID != nil && order.ParentOrderID == nil && order.MerchantID == 0
 		if order.ParentOrderID != nil {
 			return nil
+		}
+		if err := rollbackGroupTeamForOrder(tx, orderID); err != nil {
+			return err
 		}
 		if s.CouponSvc != nil {
 			if err := s.CouponSvc.ReleaseByOrderInTx(tx, &order); err != nil {
