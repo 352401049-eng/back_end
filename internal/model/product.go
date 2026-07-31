@@ -19,6 +19,12 @@ type Product struct {
 	Price          float64   `gorm:"type:decimal(10,2);not null" json:"price"`
 	OriginalPrice  *float64  `gorm:"column:original_price;type:decimal(10,2)" json:"original_price,omitempty"`
 	Stock          uint32    `gorm:"not null;default:0" json:"stock"`
+	EnableDeal     uint8     `gorm:"column:enable_deal;not null;default:1" json:"enable_deal"`
+	EnableGroup    uint8     `gorm:"column:enable_group;not null;default:0" json:"enable_group"`
+	EnableTakeout  uint8     `gorm:"column:enable_takeout;not null;default:0" json:"enable_takeout"`
+	DealStock      uint32    `gorm:"column:deal_stock;not null;default:0" json:"deal_stock"`
+	GroupStock     uint32    `gorm:"column:group_stock;not null;default:0" json:"group_stock"`
+	TakeoutStock   uint32    `gorm:"column:takeout_stock;not null;default:0" json:"takeout_stock"`
 	SalesCount     uint32    `gorm:"not null;default:0" json:"sales_count"`
 	IsHot               uint8     `gorm:"not null;default:0" json:"is_hot"`
 	EnableGroupBuy      uint8     `gorm:"not null;default:0" json:"enable_group_buy"`
