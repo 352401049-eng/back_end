@@ -1334,7 +1334,7 @@ func (s *DeliveryService) ApproveBagDelivery(deliveryID uint64) (*DeliveryView, 
 			return ErrDeliveryNotFound
 		}
 		if !IsBagErrand(&d) || d.Status != model.DeliveryPendingAdminReview {
-			return fmt.Errorf("%w: 当前状态不可审核通过", ErrDeliveryNotFound)
+			return fmt.Errorf("%w: 当前状态不可审核通过", ErrDeliveryStatusInvalid)
 		}
 		return tx.Model(&d).Update("status", model.DeliveryPendingAccept).Error
 	})
@@ -1350,18 +1350,18 @@ func (s *DeliveryService) CancelPendingBagByUser(accountID, deliveryID uint64) (
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		payment.AttachRefundCollector(tx, &jobs)
 		var d model.DeliveryOrder
-		if err := s.userDeliveryQuery(accountID).Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ?", deliveryID).First(&d).Error; err != nil {
+		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&d, deliveryID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrDeliveryNotFound
 			}
 			return err
 		}
-		if !IsBagErrand(&d) || d.Status != model.DeliveryPendingAdminReview {
-			return fmt.Errorf("%w: 当前状态不可取消", ErrDeliveryStatusInvalid)
-		}
 		if err := s.assertDeliveryOwner(tx, accountID, &d); err != nil {
 			return err
+		}
+		if !IsBagErrand(&d) || d.Status != model.DeliveryPendingAdminReview {
+			return fmt.Errorf("%w: 当前状态不可取消", ErrDeliveryStatusInvalid)
 		}
 		if err := s.restoreDeliveryUsagesForCancelInTx(tx, &d, deliveryID, reasonText); err != nil {
 			return err
@@ -1397,7 +1397,7 @@ func (s *DeliveryService) RejectBagDelivery(deliveryID uint64, reasonKey, remark
 			return ErrDeliveryNotFound
 		}
 		if !IsBagErrand(&d) || d.Status != model.DeliveryPendingAdminReview {
-			return fmt.Errorf("%w: 当前状态不可拒绝", ErrDeliveryNotFound)
+			return fmt.Errorf("%w: 当前状态不可拒绝", ErrDeliveryStatusInvalid)
 		}
 		if err := s.restoreDeliveryUsagesForCancelInTx(tx, &d, deliveryID, reasonText); err != nil {
 			return err
