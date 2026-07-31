@@ -9,8 +9,9 @@ const (
 	DeliveryDelivering    uint8 = 3
 	DeliveryDelivered     uint8 = 4
 	DeliveryConfirmed     uint8 = 5
-	DeliveryCancelled     uint8 = 6
-	DeliveryException     uint8 = 7
+	DeliveryCancelled          uint8 = 6
+	DeliveryException          uint8 = 7
+	DeliveryPendingAdminReview uint8 = 8
 )
 
 type DeliveryOrder struct {
@@ -59,6 +60,8 @@ func DeliveryStatusText(status uint8) string {
 		return "已取消"
 	case DeliveryException:
 		return "配送异常"
+	case DeliveryPendingAdminReview:
+		return "待平台审核"
 	default:
 		return "未知"
 	}

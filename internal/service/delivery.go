@@ -1269,3 +1269,24 @@ func (s *DeliveryService) ListExceptions(page, pageSize int) ([]DeliveryView, in
 	}
 	return toDeliveryViews(s.DB, list), total, nil
 }
+
+func FormatBagAdminRejectReason(reasonKey, remark string) (string, error) {
+	label := map[string]string{
+		"unclear_address": "地址不清",
+		"out_of_zone":     "超区",
+		"unreachable":     "联系不上",
+		"other":           "其它",
+	}[reasonKey]
+	if label == "" {
+		return "", fmt.Errorf("%w: 请选择拒绝原因", ErrInventoryUsageInvalid)
+	}
+	remark = strings.TrimSpace(remark)
+	if reasonKey == "other" && remark == "" {
+		return "", fmt.Errorf("%w: 选择其它时请填写备注", ErrInventoryUsageInvalid)
+	}
+	out := "平台拒绝：" + label
+	if remark != "" {
+		out += "｜" + remark
+	}
+	return out, nil
+}
