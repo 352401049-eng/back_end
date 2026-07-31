@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"yujixinjiang/backend/internal/model"
+	"yujixinjiang/backend/internal/payment"
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
@@ -393,7 +394,9 @@ func (s *InventoryService) RequestCancelUsage(accountID, usageID uint64, reason 
 		}
 		return nil, err
 	}
-	if delivery.Status == model.DeliveryPendingAccept {
+	// 待平台审核 / 待骑手接单：均可直接取消并退配送费回包（勿进商家取消审批）
+	if delivery.Status == model.DeliveryPendingAccept ||
+		delivery.Status == model.DeliveryPendingAdminReview {
 		return s.finalizeCancelUsage(accountID, &usage, reason)
 	}
 	if delivery.Status == model.DeliveryCancelled || delivery.Status == model.DeliveryConfirmed {
@@ -447,7 +450,9 @@ func (s *InventoryService) MerchantReviewCancelUsage(merchantID, usageID uint64,
 }
 
 func (s *InventoryService) finalizeCancelUsage(accountID uint64, usage *model.UserInventoryUsage, reason *string) (*InventoryUsageView, error) {
+	var jobs []payment.RefundJob
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
 		var inv model.UserInventory
 		if err := query.NotDeleted(tx).First(&inv, usage.InventoryID).Error; err != nil {
 			return err
@@ -487,9 +492,19 @@ func (s *InventoryService) finalizeCancelUsage(accountID uint64, usage *model.Us
 					}
 				}
 			} else if errors.Is(errNext, gorm.ErrRecordNotFound) {
+				deliveryUpdates := map[string]interface{}{
+					"status": model.DeliveryCancelled,
+				}
+				var d model.DeliveryOrder
+				if err := query.NotDeleted(tx).Select("id", "status", "exception_reason").
+					First(&d, *usage.DeliveryOrderID).Error; err == nil &&
+					d.Status == model.DeliveryPendingAdminReview &&
+					(d.ExceptionReason == nil || *d.ExceptionReason == "") {
+					deliveryUpdates["exception_reason"] = "用户取消"
+				}
 				if err := tx.Model(&model.DeliveryOrder{}).
 					Where("id = ? AND status NOT IN ?", *usage.DeliveryOrderID, []int{int(model.DeliveryConfirmed), int(model.DeliveryCancelled)}).
-					Update("status", model.DeliveryCancelled).Error; err != nil {
+					Updates(deliveryUpdates).Error; err != nil {
 					return err
 				}
 				if s.DeliveryFeePaySvc != nil {
@@ -511,6 +526,7 @@ func (s *InventoryService) finalizeCancelUsage(accountID uint64, usage *model.Us
 	if err != nil {
 		return nil, err
 	}
+	payment.DispatchRefundJobs(jobs)
 	return s.GetUsageView(accountID, usage.ID)
 }
 
