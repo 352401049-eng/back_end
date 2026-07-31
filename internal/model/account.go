@@ -10,6 +10,22 @@ const (
 	AccountTypeRider uint8 = 4
 )
 
+const (
+	AccountStatusDisabled uint8 = 0 // 拉黑/禁用：不可登录与使用
+	AccountStatusActive   uint8 = 1 // 正常
+)
+
+func AccountStatusText(status uint8) string {
+	switch status {
+	case AccountStatusActive:
+		return "正常"
+	case AccountStatusDisabled:
+		return "已拉黑"
+	default:
+		return "未知"
+	}
+}
+
 type Account struct {
 	ID           uint64     `gorm:"primaryKey" json:"id"`
 	Type         uint8      `gorm:"not null" json:"type"`

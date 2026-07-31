@@ -65,7 +65,7 @@ func RequireAuth(jwtSecret string, db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		if account.Status != 1 {
+		if account.Status != model.AccountStatusActive {
 			response.Fail(c, 403, 403, "账号已被禁用")
 			c.Abort()
 			return
@@ -128,7 +128,7 @@ func OptionalAuth(jwtSecret string, db *gorm.DB) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if account.Status != 1 || account.Type != uint8(accountType) {
+		if account.Status != model.AccountStatusActive || account.Type != uint8(accountType) {
 			c.Next()
 			return
 		}

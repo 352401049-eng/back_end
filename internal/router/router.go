@@ -452,6 +452,7 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 	r.GET("/verification-records", ad.ListVerificationRecords)
 
 	r.GET("/users", ae.ListUsers)
+	r.PATCH("/users/:id/status", ae.SetUserStatus)
 	r.GET("/categories", ae.ListCategories)
 	r.POST("/categories", ae.CreateCategory)
 	r.GET("/categories/:id", ae.GetCategory)

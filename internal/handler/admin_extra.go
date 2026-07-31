@@ -41,7 +41,7 @@ type UpdateCategoryRequest struct {
 // @Security     BearerAuth
 // @Param        page       query  int     false  "页码"
 // @Param        page_size  query  int     false  "每页条数"
-// @Param        keyword    query  string  false  "昵称/手机号"
+// @Param        keyword    query  string  false  "昵称/手机/ID"
 // @Success      200  {object}  response.Body{data=query.PageResult}
 // @Router       /admin/users [get]
 func (h *AdminExtraHandler) ListUsers(c *gin.Context) {
@@ -51,7 +51,44 @@ func (h *AdminExtraHandler) ListUsers(c *gin.Context) {
 		response.InternalError(c, "获取用户列表失败")
 		return
 	}
-	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
+	response.OK(c, query.PageResult{List: service.ToAdminUserViews(list), Total: total, Page: page, PageSize: pageSize})
+}
+
+type SetUserStatusRequest struct {
+	Status uint8 `json:"status"`
+}
+
+// SetUserStatus godoc
+// @Summary      拉黑/解除拉黑用户
+// @Tags         管理端-用户
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int  true  "用户账号 ID"
+// @Param        body  body  SetUserStatusRequest  true  "status: 0拉黑 1正常"
+// @Success      200   {object}  response.Body
+// @Router       /admin/users/{id}/status [patch]
+func (h *AdminExtraHandler) SetUserStatus(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		response.BadRequest(c, "用户 ID 无效")
+		return
+	}
+	var req SetUserStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	view, err := h.UserSvc.SetUserStatusForAdmin(id, req.Status)
+	if err != nil {
+		if errors.Is(err, service.ErrAccountNotFound) {
+			response.Fail(c, 404, 404, "用户不存在")
+			return
+		}
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.OK(c, view)
 }
 
 // ListAdminCategories godoc

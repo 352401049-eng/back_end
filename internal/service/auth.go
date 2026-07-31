@@ -67,7 +67,7 @@ func (s *AuthService) loginByOpenID(openid string, unionid *string) (*LoginResul
 			Type:        model.AccountTypeUser,
 			OpenID:      &oid,
 			Nickname:    &nick,
-			Status:      1,
+			Status:      model.AccountStatusActive,
 			LastLoginAt: &now,
 		}
 		if unionid != nil && *unionid != "" {
@@ -80,7 +80,7 @@ func (s *AuthService) loginByOpenID(openid string, unionid *string) (*LoginResul
 	} else if result.Error != nil {
 		return nil, fmt.Errorf("查询用户失败: %w", result.Error)
 	} else {
-		if account.Status != 1 {
+		if account.Status != model.AccountStatusActive {
 			return nil, ErrAccountDisabled
 		}
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -133,7 +134,7 @@ func (s *UserService) ListUsersForAdmin(page, pageSize int, keyword string) ([]m
 	keyword = strings.TrimSpace(keyword)
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		q = q.Where("nickname LIKE ? OR phone LIKE ?", like, like)
+		q = q.Where("nickname LIKE ? OR phone LIKE ? OR CAST(id AS CHAR) LIKE ?", like, like, like)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -144,6 +145,57 @@ func (s *UserService) ListUsersForAdmin(page, pageSize int, keyword string) ([]m
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// AdminUserView 管理端用户展示。
+type AdminUserView struct {
+	model.Account
+	StatusText string `json:"status_text"`
+	GenderText string `json:"gender_text"`
+}
+
+func toAdminUserView(a model.Account) AdminUserView {
+	gender := "未知"
+	switch a.Gender {
+	case 1:
+		gender = "男"
+	case 2:
+		gender = "女"
+	}
+	return AdminUserView{
+		Account:    a,
+		StatusText: model.AccountStatusText(a.Status),
+		GenderText: gender,
+	}
+}
+
+func ToAdminUserViews(list []model.Account) []AdminUserView {
+	out := make([]AdminUserView, 0, len(list))
+	for i := range list {
+		out = append(out, toAdminUserView(list[i]))
+	}
+	return out
+}
+
+// SetUserStatusForAdmin 拉黑(0) / 解除拉黑(1)。仅普通用户。
+func (s *UserService) SetUserStatusForAdmin(accountID uint64, status uint8) (*AdminUserView, error) {
+	if status != model.AccountStatusActive && status != model.AccountStatusDisabled {
+		return nil, fmt.Errorf("status 仅支持 0（拉黑）或 1（正常）")
+	}
+	var acc model.Account
+	if err := query.NotDeleted(s.DB).Where("id = ? AND type = ?", accountID, model.AccountTypeUser).
+		First(&acc).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAccountNotFound
+		}
+		return nil, err
+	}
+	if err := s.DB.Model(&acc).Update("status", status).Error; err != nil {
+		return nil, err
+	}
+	acc.Status = status
+	view := toAdminUserView(acc)
+	return &view, nil
 }
 
 func (s *UserService) ListOrders(accountID uint64, page query.Page, status *uint8, statusCode string) (*query.PageResult, error) {
