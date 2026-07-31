@@ -16,10 +16,11 @@ import (
 )
 
 var (
-	ErrDeliveryNotFound      = errors.New("delivery order not found")
-	ErrDeliveryTaken         = errors.New("delivery order already taken")
-	ErrDeliveryForbidden     = errors.New("delivery order forbidden")
-	ErrDeliveryStatusInvalid = errors.New("delivery status invalid")
+	ErrDeliveryNotFound           = errors.New("delivery order not found")
+	ErrDeliveryTaken              = errors.New("delivery order already taken")
+	ErrDeliveryForbidden          = errors.New("delivery order forbidden")
+	ErrDeliveryStatusInvalid      = errors.New("delivery status invalid")
+	ErrBagErrandStartNotAllowed   = errors.New("bag errand start not allowed before verify")
 )
 
 // genPickupCode ?? 4 ???????????????????????
@@ -268,8 +269,13 @@ func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, erro
 		}
 		return nil, err
 	}
-	if d.Status != model.DeliveryAccepted || d.MerchantPrepared != 1 {
-		// ?????????????????pending ??????
+	if IsBagErrand(&d) {
+		return nil, ErrBagErrandStartNotAllowed
+	}
+	if d.Status != model.DeliveryAccepted {
+		return nil, ErrDeliveryStatusInvalid
+	}
+	if d.MerchantPrepared != 1 {
 		return nil, ErrDeliveryStatusInvalid
 	}
 	now := time.Now()

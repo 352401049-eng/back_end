@@ -136,6 +136,8 @@ func handleDeliveryError(c *gin.Context, err error) {
 		response.Fail(c, 404, 404, "配送单不存在")
 	case errors.Is(err, service.ErrDeliveryForbidden):
 		response.Fail(c, 403, 403, "无权操作该配送单")
+	case errors.Is(err, service.ErrBagErrandStartNotAllowed):
+		response.BadRequest(c, "跑腿单请先到店核销后再配送")
 	case errors.Is(err, service.ErrDeliveryStatusInvalid):
 		response.BadRequest(c, "当前状态不允许此操作")
 	case errors.Is(err, service.ErrDeliveryTaken):

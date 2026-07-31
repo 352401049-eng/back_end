@@ -218,7 +218,7 @@ func (s *VerificationService) buildVerifyResolveResult(db *gorm.DB, vc *model.Ve
 			if !IsBagErrand(&d) || d.RiderID == nil {
 				return nil, ErrVerifyRiderRequired
 			}
-			if d.Status != model.DeliveryAccepted && d.Status != model.DeliveryPicking {
+			if d.Status != model.DeliveryAccepted && d.Status != model.DeliveryPicking && d.Status != model.DeliveryDelivering {
 				return nil, ErrVerifyCodeUsed
 			}
 		default:
