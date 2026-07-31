@@ -238,9 +238,12 @@ func (s *DeliveryFeePayService) MarkPaidInTx(tx *gorm.DB, feeOrderID uint64, at 
 		return fmt.Errorf("%w: invalid payload", ErrDeliveryFeeStatusInvalid)
 	}
 
-	invSvc := s.inventorySvc()
-	invSvc.DB = tx
-	result, err := invSvc.UseBatch(feeOrder.AccountID, UseBatchInput{
+	// 必须用副本挂 tx，禁止改写共享 InventorySvc.DB；否则事务提交后全局背包查询会报
+	// "sql: transaction has already been committed or rolled back"。
+	base := s.inventorySvc()
+	invOnTx := *base
+	invOnTx.DB = tx
+	result, err := invOnTx.UseBatch(feeOrder.AccountID, UseBatchInput{
 		Items:                      payload.Items,
 		DeliveryType:               model.DeliveryTypeDelivery,
 		AddressID:                    &payload.AddressID,

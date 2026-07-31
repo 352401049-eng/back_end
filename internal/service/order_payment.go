@@ -305,7 +305,7 @@ func (s *OrderService) ExpireStalePendingPayOrders(now time.Time) (int, error) {
 	var orders []model.Order
 	if err := query.NotDeleted(s.DB).
 		Where("status IN ? AND pay_status = ? AND pay_expire_at IS NOT NULL AND pay_expire_at < ?",
-			[]uint8{model.OrderStatusPendingPay, model.OrderStatusPendingGroup},
+			[]int{int(model.OrderStatusPendingPay), int(model.OrderStatusPendingGroup)},
 			model.PayStatusUnpaid, now).
 		Limit(100).
 		Find(&orders).Error; err != nil {

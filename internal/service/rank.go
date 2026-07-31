@@ -15,20 +15,22 @@ const rankListLimit = 50
 
 // RankHotGroupItem 热拼榜：进行中的团。
 type RankHotGroupItem struct {
-	TeamID        uint64    `json:"team_id"`
-	GroupBuyID    uint64    `json:"group_buy_id"`
-	ProductID     uint64    `json:"product_id"`
-	MerchantID    uint64    `json:"merchant_id"`
-	ProductName   string    `json:"product_name"`
-	ProductCover  string    `json:"product_cover"`
-	GroupPrice    float64   `json:"group_price"`
-	OriginalPrice float64   `json:"original_price"`
-	TargetCount   uint32    `json:"target_count"`
-	CurrentCount  uint32    `json:"current_count"`
-	NeedCount     uint32    `json:"need_count"`
-	Progress      float64   `json:"progress"`
-	ExpireAt      time.Time `json:"expire_at"`
-	MemberNames   []string  `json:"member_names"`
+	TeamID            uint64    `json:"team_id"`
+	GroupBuyID        uint64    `json:"group_buy_id"`
+	ProductID         uint64    `json:"product_id"`
+	MerchantID        uint64    `json:"merchant_id"`
+	ProductName       string    `json:"product_name"`
+	ProductCover      string    `json:"product_cover"`
+	GroupPrice        float64   `json:"group_price"`
+	OriginalPrice     float64   `json:"original_price"`
+	TargetCount       uint32    `json:"target_count"`
+	CurrentCount      uint32    `json:"current_count"`
+	NeedCount         uint32    `json:"need_count"`
+	Progress          float64   `json:"progress"`
+	ExpireAt          time.Time `json:"expire_at"`
+	MemberNames       []string  `json:"member_names"`
+	ActivityID        *uint64   `json:"activity_id,omitempty"`
+	ActivityProductID *uint64   `json:"activity_product_id,omitempty"`
 }
 
 // RankSalesItem 热销榜：按销量。
@@ -68,18 +70,20 @@ func (s *RankService) freshDB() *gorm.DB {
 }
 
 type hotGroupRow struct {
-	TeamID        uint64
-	GroupBuyID    uint64
-	ProductID     uint64
-	MerchantID    uint64
-	ProductName   string
-	ProductCover  string
-	GroupPrice    float64
-	ProductPrice  float64
-	OriginalPrice *float64
-	TargetCount   uint32
-	CurrentCount  uint32
-	ExpireAt      time.Time
+	TeamID            uint64
+	GroupBuyID        uint64
+	ProductID         uint64
+	MerchantID        uint64
+	ProductName       string
+	ProductCover      string
+	GroupPrice        float64
+	ProductPrice      float64
+	OriginalPrice     *float64
+	TargetCount       uint32
+	CurrentCount      uint32
+	ExpireAt          time.Time
+	ActivityID        *uint64
+	ActivityProductID *uint64
 }
 
 // ListHotGroups 进行中的拼团。
@@ -90,21 +94,23 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 	}
 
 	type rawRow struct {
-		TeamID       uint64
-		GroupBuyID   uint64
-		ProductID    uint64
-		MerchantID   uint64
-		ProductName  string
-		ProductCover string
-		UnitPrice    float64
-		ProductPrice float64
-		OrigPrice    *float64
-		GroupPrice   *float64
-		TargetCount  *uint32
-		ProdTarget   *uint32
-		AccountID    uint64
-		ExpireAt     *time.Time
-		CreatedAt    time.Time
+		TeamID            uint64
+		GroupBuyID        uint64
+		ProductID         uint64
+		MerchantID        uint64
+		ProductName       string
+		ProductCover      string
+		UnitPrice         float64
+		ProductPrice      float64
+		OrigPrice         *float64
+		GroupPrice        *float64
+		TargetCount       *uint32
+		ProdTarget        *uint32
+		AccountID         uint64
+		ExpireAt          *time.Time
+		CreatedAt         time.Time
+		ActivityID        *uint64
+		ActivityProductID *uint64
 	}
 
 	var raw []rawRow
@@ -123,7 +129,9 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 			p.group_buy_target_count AS prod_target,
 			o.account_id,
 			t.expire_at,
-			o.created_at`).
+			o.created_at,
+			oi.activity_id,
+			oi.activity_product_id`).
 		Joins("JOIN `order` AS o ON o.id = oi.order_id AND o.is_deleted = 0 AND o.status = ?", model.OrderStatusPendingGroup).
 		Joins("JOIN product AS p ON p.id = oi.product_id AND p.is_deleted = 0").
 		Joins("LEFT JOIN group_buy_team AS t ON t.id = oi.group_buy_team_id AND t.is_deleted = 0").
@@ -135,7 +143,7 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 	}
 
 	type agg struct {
-		row     hotGroupRow
+		row      hotGroupRow
 		accounts map[uint64]struct{}
 	}
 	byKey := map[string]*agg{}
@@ -175,6 +183,7 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 					GroupPrice: price, ProductPrice: r.ProductPrice,
 					OriginalPrice: r.OrigPrice, TargetCount: target,
 					ExpireAt: expire,
+					ActivityID: r.ActivityID, ActivityProductID: r.ActivityProductID,
 				},
 				accounts: map[uint64]struct{}{},
 			}
@@ -185,6 +194,10 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 		// 保留更新的过期时间（更晚的）
 		if r.ExpireAt != nil && r.ExpireAt.After(a.row.ExpireAt) {
 			a.row.ExpireAt = *r.ExpireAt
+		}
+		if a.row.ActivityID == nil && r.ActivityID != nil {
+			a.row.ActivityID = r.ActivityID
+			a.row.ActivityProductID = r.ActivityProductID
 		}
 	}
 
@@ -245,6 +258,7 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 			TargetCount: r.TargetCount, CurrentCount: r.CurrentCount,
 			NeedCount: need, Progress: progress, ExpireAt: r.ExpireAt,
 			MemberNames: namesByTeam[r.TeamID],
+			ActivityID: r.ActivityID, ActivityProductID: r.ActivityProductID,
 		})
 	}
 	return out, nil
