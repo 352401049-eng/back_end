@@ -185,7 +185,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 			deliveryFee = merchant.DeliveryFee
 			now := time.Now()
 			d := model.DeliveryOrder{
-				Status:           model.DeliveryPendingAccept,
+				Status:           model.DeliveryPendingAdminReview,
 				MerchantPrepared: 1,
 				PreparedAt:       &now,
 				PickupCode:       genPickupCode(tx, merchantID),

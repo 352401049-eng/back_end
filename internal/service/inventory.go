@@ -330,7 +330,7 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			now := time.Now()
 			d := model.DeliveryOrder{
 				InventoryUsageID: &usage.ID,
-				Status:           model.DeliveryPendingAccept,
+				Status:           model.DeliveryPendingAdminReview,
 				MerchantPrepared: 1,
 				PreparedAt:       &now,
 				PickupCode:       genPickupCode(tx, usage.MerchantID),
