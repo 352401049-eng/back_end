@@ -154,7 +154,7 @@ func (s *DashboardService) Merchant(merchantID uint64) (*MerchantDashboard, erro
 		model.NotDeleted, merchantID, model.OrderStatusPendingFulfill, model.MerchantReviewPendingUse,
 	).Count(&d.PendingUseReview)
 
-	// 备餐中：订单路径（Order.status=Preparing）+ 背包路径（delivery_order.merchant_prepared=0）+ 外卖配餐中
+	// 备餐中：订单路径（Order.status=Preparing）+ 订单轨配送备餐 + 外卖配餐中（不含背包跑腿）
 	s.freshDB().Model(&model.Order{}).Where(
 		"is_deleted = ? AND merchant_id = ? AND status = ?",
 		model.NotDeleted, merchantID, model.OrderStatusPreparing,
@@ -162,7 +162,8 @@ func (s *DashboardService) Merchant(merchantID uint64) (*MerchantDashboard, erro
 	var deliveryPreparing int64
 	s.freshDB().Model(&model.DeliveryOrder{}).Where(
 		"delivery_order.is_deleted = ? AND delivery_order.status = ? AND delivery_order.merchant_prepared = 0 AND "+
-			"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?)",
+			"delivery_order.order_id IS NOT NULL AND delivery_order.inventory_usage_id IS NULL AND "+
+			"EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.merchant_id = ?)",
 		model.NotDeleted, model.DeliveryPendingAccept, merchantID,
 	).Count(&deliveryPreparing)
 	d.PendingPreparingCount += deliveryPreparing

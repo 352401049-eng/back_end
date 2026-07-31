@@ -695,6 +695,7 @@ func (s *DeliveryService) listDeliveriesForMerchant(merchantID uint64, page, pag
 
 	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).
 		Where("status = ? AND merchant_prepared = ?", model.DeliveryPendingAccept, merchantPrepared).
+		Where("NOT (inventory_usage_id IS NOT NULL AND takeout_order_id IS NULL)").
 		Where(
 			"EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.merchant_id = ?) OR "+
 				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?) OR "+
