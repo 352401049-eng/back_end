@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"yujixinjiang/backend/internal/model"
 	"yujixinjiang/backend/internal/query"
@@ -182,9 +183,11 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 				return ErrMerchantNotFound
 			}
 			deliveryFee = merchant.DeliveryFee
+			now := time.Now()
 			d := model.DeliveryOrder{
 				Status:           model.DeliveryPendingAccept,
-				MerchantPrepared: 0,
+				MerchantPrepared: 1,
+				PreparedAt:       &now,
 				PickupCode:       genPickupCode(tx, merchantID),
 				DeliveryFee:      deliveryFee,
 				RiderEarnings:    merchant.RiderEarnings,

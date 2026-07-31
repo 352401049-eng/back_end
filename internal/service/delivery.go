@@ -84,6 +84,11 @@ type DeliveryService struct {
 	DeliveryFeePaySvc *DeliveryFeePayService
 }
 
+// IsBagErrand 背包跑腿：有 usage、非外卖主单。
+func IsBagErrand(d *model.DeliveryOrder) bool {
+	return d != nil && d.InventoryUsageID != nil && d.TakeoutOrderID == nil
+}
+
 func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageSize int) ([]DeliveryView, int64, error) {
 	if page < 1 {
 		page = 1
@@ -96,8 +101,10 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{}))
 	switch scope {
 	case "pending":
-		// ??????????????????merchant_prepared=0)??????
-		q = q.Where("status = ? AND rider_id IS NULL AND merchant_prepared = 1", model.DeliveryPendingAccept)
+		q = q.Where(
+			"status = ? AND rider_id IS NULL AND (merchant_prepared = 1 OR (inventory_usage_id IS NOT NULL AND takeout_order_id IS NULL))",
+			model.DeliveryPendingAccept,
+		)
 	case "active":
 		q = q.Where("rider_id = ? AND status IN ?", riderID, []int{
 			int(model.DeliveryAccepted), int(model.DeliveryPicking), int(model.DeliveryDelivering),
@@ -107,7 +114,10 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 			int(model.DeliveryDelivered), int(model.DeliveryConfirmed),
 		})
 	default:
-		q = q.Where("status = ? AND merchant_prepared = 1", model.DeliveryPendingAccept)
+		q = q.Where(
+			"status = ? AND rider_id IS NULL AND (merchant_prepared = 1 OR (inventory_usage_id IS NOT NULL AND takeout_order_id IS NULL))",
+			model.DeliveryPendingAccept,
+		)
 	}
 
 	var total int64
@@ -194,11 +204,14 @@ func (s *DeliveryService) GetForUser(accountID, deliveryID uint64) (*DeliveryVie
 func (s *DeliveryService) Accept(riderID, deliveryID uint64) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := query.NotDeleted(tx).Where("id = ? AND status = ? AND merchant_prepared = 1", deliveryID, model.DeliveryPendingAccept).First(&d).Error; err != nil {
+		if err := query.NotDeleted(tx).Where("id = ? AND status = ? AND rider_id IS NULL", deliveryID, model.DeliveryPendingAccept).First(&d).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrDeliveryNotFound
 			}
 			return err
+		}
+		if !IsBagErrand(&d) && d.MerchantPrepared != 1 {
+			return ErrDeliveryNotFound
 		}
 		if d.InventoryUsageID != nil || d.OrderID == nil {
 			// ???????? usage ?????? usage ???????????????

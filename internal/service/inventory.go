@@ -327,10 +327,12 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			}
 			deliveryFee = merchant.DeliveryFee
 			riderEarnings = merchant.RiderEarnings
+			now := time.Now()
 			d := model.DeliveryOrder{
 				InventoryUsageID: &usage.ID,
 				Status:           model.DeliveryPendingAccept,
-				MerchantPrepared: 0, // 备餐中，商家确认出餐后置 1，骑手才可见
+				MerchantPrepared: 1,
+				PreparedAt:       &now,
 				PickupCode:       genPickupCode(tx, usage.MerchantID),
 				DeliveryFee:      deliveryFee,
 				RiderEarnings:    riderEarnings,
