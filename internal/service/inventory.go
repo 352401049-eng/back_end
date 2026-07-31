@@ -685,49 +685,84 @@ func (s *InventoryService) CompleteUsageByVerify(tx *gorm.DB, usageID uint64, pa
 	}
 	var resolvedPackageUnits [][]PackageSelectionInput
 	if usage.Product != nil && usage.Product.ItemType == model.ProductItemTypePackage {
-		// 套餐必须先选配再核销完成：不允许进入 pending
 		if len(packageUnits) == 0 {
-			return ErrPackageSelectionRequired
+			if usage.PackageSelectStatus == model.PackageSelectUserSet || usage.PackageSelectStatus == model.PackageSelectDone {
+				if usage.PackageSelectStatus == model.PackageSelectUserSet {
+					updates["package_select_status"] = model.PackageSelectDone
+				}
+			} else {
+				return ErrPackageSelectionRequired
+			}
+		} else {
+			units, err := normalizePackageUnits(packageUnits, nil, usage.Quantity)
+			if err != nil {
+				return err
+			}
+			resolvedPackageUnits = units
+			snap, err := applyPackageUnitsInTx(tx, usage.ProductID, usage.Quantity, units)
+			if err != nil {
+				return err
+			}
+			raw, err := json.Marshal(snap)
+			if err != nil {
+				return err
+			}
+			updates["package_selections"] = json.RawMessage(raw)
+			updates["package_select_status"] = model.PackageSelectDone
 		}
-		units, err := normalizePackageUnits(packageUnits, nil, usage.Quantity)
-		if err != nil {
-			return err
-		}
-		resolvedPackageUnits = units
-		snap, err := applyPackageUnitsInTx(tx, usage.ProductID, usage.Quantity, units)
-		if err != nil {
-			return err
-		}
-		raw, err := json.Marshal(snap)
-		if err != nil {
-			return err
-		}
-		updates["package_selections"] = json.RawMessage(raw)
-		updates["package_select_status"] = model.PackageSelectDone
 	}
 
-	optSnap, optStatus, err := applyOptionSelectionsForVerify(
-		tx, usage.Product, usage.ProductID, usage.Quantity, resolvedPackageUnits, optionSelections,
-	)
-	if err != nil {
-		return err
-	}
-	// Always write status so Pending→None clears when options were removed after usage creation.
-	updates["option_select_status"] = optStatus
-	if optStatus == model.OptionSelectNone {
-		updates["option_selections"] = nil
+	if usage.OptionSelectStatus == model.OptionSelectDone && len(optionSelections) == 0 {
+		// 跑腿下单时已选配，核销不再覆盖
 	} else {
-		raw, err := json.Marshal(optSnap)
+		optSnap, optStatus, err := applyOptionSelectionsForVerify(
+			tx, usage.Product, usage.ProductID, usage.Quantity, resolvedPackageUnits, optionSelections,
+		)
 		if err != nil {
 			return err
 		}
-		updates["option_selections"] = json.RawMessage(raw)
+		// Always write status so Pending→None clears when options were removed after usage creation.
+		updates["option_select_status"] = optStatus
+		if optStatus == model.OptionSelectNone {
+			updates["option_selections"] = nil
+		} else {
+			raw, err := json.Marshal(optSnap)
+			if err != nil {
+				return err
+			}
+			updates["option_selections"] = json.RawMessage(raw)
+		}
 	}
 	// 用纯 Model 更新，避免 Preload 的 Product 触发关联 upsert；
 	// map Updates 不会走字段 serializer:json，须自行 JSON 编码。
-	return query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
-		Where("id = ? AND status = ?", usageID, model.InventoryUsagePendingVerify).
-		Updates(updates).Error
+	result := query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
+		Where("id = ? AND status IN ?", usageID,
+			[]int{int(model.InventoryUsagePendingVerify), int(model.InventoryUsagePendingShip)}).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if usage.DeliveryOrderID == nil {
+		return nil
+	}
+	var d model.DeliveryOrder
+	if err := query.NotDeleted(tx).First(&d, *usage.DeliveryOrderID).Error; err != nil {
+		return err
+	}
+	if !IsBagErrand(&d) || d.RiderID == nil {
+		return nil
+	}
+	if d.Status != model.DeliveryAccepted && d.Status != model.DeliveryPicking {
+		return nil
+	}
+	now := time.Now()
+	return tx.Model(&d).Updates(map[string]interface{}{
+		"status":     model.DeliveryDelivering,
+		"started_at": now,
+	}).Error
 }
 
 // deductInventoryUseFIFO 按来源订单 FIFO 扣减背包，并在 use 流水上写入 order_id，

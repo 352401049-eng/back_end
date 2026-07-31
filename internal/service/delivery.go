@@ -546,7 +546,7 @@ func (s *DeliveryService) ConfirmReceipt(accountID, deliveryID uint64) (*Deliver
 				return err
 			}
 		}
-		// ?????????????? usage???????
+		// 核销已完成 usage 时跳过；仅待发货 usage 推进为已完成
 		usageQ := tx.Model(&model.UserInventoryUsage{}).
 			Where("status = ?", model.InventoryUsagePendingShip)
 		if d.InventoryUsageID != nil {

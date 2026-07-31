@@ -17,6 +17,7 @@ var (
 	ErrVerifyCodeUsed          = errors.New("verification code already used")
 	ErrVerifyCodeExpired       = errors.New("verification code expired")
 	ErrVerifyMerchantMismatch  = errors.New("verification merchant mismatch")
+	ErrVerifyRiderRequired     = errors.New("verification rider required")
 )
 
 type VerificationService struct {
@@ -134,7 +135,7 @@ func (s *VerificationService) Verify(merchantID, operatorID uint64, code string,
 		if errors.Is(err, ErrVerifyMerchantMismatch) {
 			return nil, ErrVerifyMerchantMismatch
 		}
-		if errors.Is(err, ErrVerifyCodeNotFound) || errors.Is(err, ErrVerifyCodeUsed) || errors.Is(err, ErrVerifyCodeExpired) {
+		if errors.Is(err, ErrVerifyCodeNotFound) || errors.Is(err, ErrVerifyCodeUsed) || errors.Is(err, ErrVerifyCodeExpired) || errors.Is(err, ErrVerifyRiderRequired) {
 			return nil, err
 		}
 		if errors.Is(err, ErrPackageSelectionRequired) || errors.Is(err, ErrOptionRequired) || errors.Is(err, ErrOptionInvalid) || errors.Is(err, ErrInsufficientStock) || errors.Is(err, ErrInvalidProductArg) {
@@ -203,7 +204,24 @@ func (s *VerificationService) buildVerifyResolveResult(db *gorm.DB, vc *model.Ve
 			}
 			return nil, err
 		}
-		if usage.Status != model.InventoryUsagePendingVerify {
+		switch usage.Status {
+		case model.InventoryUsagePendingVerify:
+			// 自取待核销
+		case model.InventoryUsagePendingShip:
+			if usage.DeliveryOrderID == nil {
+				return nil, ErrVerifyCodeUsed
+			}
+			var d model.DeliveryOrder
+			if err := query.NotDeleted(db).First(&d, *usage.DeliveryOrderID).Error; err != nil {
+				return nil, ErrVerifyCodeUsed
+			}
+			if !IsBagErrand(&d) || d.RiderID == nil {
+				return nil, ErrVerifyRiderRequired
+			}
+			if d.Status != model.DeliveryAccepted && d.Status != model.DeliveryPicking {
+				return nil, ErrVerifyCodeUsed
+			}
+		default:
 			return nil, ErrVerifyCodeUsed
 		}
 		var product model.Product

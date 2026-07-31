@@ -540,6 +540,8 @@ func handleVerifyError(c *gin.Context, err error) {
 		response.BadRequest(c, "核销码已过期")
 	case errors.Is(err, service.ErrVerifyMerchantMismatch):
 		response.Fail(c, 403, 403, "非本店商品，无法核销")
+	case errors.Is(err, service.ErrVerifyRiderRequired):
+		response.BadRequest(c, "请等待骑手接单后再核销")
 	case errors.Is(err, service.ErrPackageSelectionRequired):
 		response.BadRequest(c, "套餐请先完成选配再核销")
 	case errors.Is(err, service.ErrOptionRequired):
