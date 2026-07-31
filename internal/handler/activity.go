@@ -682,7 +682,7 @@ func handleActivityError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrProductNotFound):
 		response.Fail(c, 404, 404, "商品不存在")
 	case errors.Is(err, service.ErrInvalidProductArg):
-		response.BadRequest(c, "活动商品参数无效：请确认 activity_price>0；开启拼团时须填写 group_buy_price（小于活动价）和 group_buy_target_count（≥2）")
+		response.BadRequest(c, "活动商品参数无效：请确认 activity_price>0；开启拼团时须填写 group_buy_price（>0）和 group_buy_target_count（≥2）")
 	case errors.Is(err, service.ErrActivityProductDuplicate):
 		response.BadRequest(c, "该商品已在活动中，请直接编辑")
 	default:

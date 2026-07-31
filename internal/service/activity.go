@@ -336,6 +336,7 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 		return s.GetActivityProduct(existing.ID, merchantID)
 	}
 
+	input = normalizeActivityProductGroupBuyInput(input)
 	ap := model.ActivityProduct{
 		ActivityID: activityID, ProductID: input.ProductID,
 		ActivityPrice: input.ActivityPrice, ActivityStock: input.ActivityStock,
@@ -399,7 +400,21 @@ func isMySQLDuplicateKey(err error) bool {
 	return errors.As(err, &me) && me.Number == 1062
 }
 
+func normalizeActivityProductGroupBuyInput(input ActivityProductInput) ActivityProductInput {
+	if input.EnableGroupBuy != 1 {
+		input.GroupBuyPrice = nil
+		input.GroupBuyTargetCount = nil
+		input.GroupBuyAllowRepeat = 0
+		input.GroupBuyMaxJoinsPerUser = 0
+	}
+	return input
+}
+
 func activityProductUpdates(input ActivityProductInput, maxJoins uint32, status uint8) map[string]interface{} {
+	input = normalizeActivityProductGroupBuyInput(input)
+	if input.EnableGroupBuy != 1 {
+		maxJoins = 0
+	}
 	return map[string]interface{}{
 		"activity_price": input.ActivityPrice, "activity_stock": input.ActivityStock,
 		"per_user_max_qty": input.PerUserMaxQty, "per_user_max_orders": input.PerUserMaxOrders,
@@ -445,12 +460,6 @@ func (s *ActivityService) UpdateProductInActivity(activityID, apID uint64, patch
 		status = 1
 	}
 	updates := activityProductUpdates(merged, maxJoins, status)
-	if merged.EnableGroupBuy != 1 {
-		updates["group_buy_price"] = nil
-		updates["group_buy_target_count"] = nil
-		updates["group_buy_allow_repeat"] = 0
-		updates["group_buy_max_joins_per_user"] = 0
-	}
 	if err := s.DB.Model(ap).Updates(updates).Error; err != nil {
 		return nil, err
 	}
@@ -748,7 +757,7 @@ func toActivityProductItemView(act *model.Activity, ap *model.ActivityProduct) A
 
 func activityProductCanGroupBuy(ap *model.ActivityProduct) bool {
 	return ap.EnableGroupBuy == 1 && ap.GroupBuyPrice != nil && *ap.GroupBuyPrice > 0 &&
-		ap.GroupBuyTargetCount != nil && *ap.GroupBuyTargetCount >= 2 && *ap.GroupBuyPrice < ap.ActivityPrice
+		ap.GroupBuyTargetCount != nil && *ap.GroupBuyTargetCount >= 2
 }
 
 func (s *ActivityService) countGroupBuyProductsByActivity(activityIDs []uint64, publicOnly bool) map[uint64]int64 {
@@ -760,8 +769,7 @@ func (s *ActivityService) countGroupBuyProductsByActivity(activityIDs []uint64, 
 		Select("activity_id, COUNT(*) AS cnt").
 		Where("activity_id IN ?", activityIDs).
 		Where("enable_group_buy = 1").
-		Where("group_buy_price IS NOT NULL AND group_buy_target_count >= 2").
-		Where("group_buy_price < activity_price")
+		Where("group_buy_price IS NOT NULL AND group_buy_price > 0 AND group_buy_target_count >= 2")
 	if publicOnly {
 		q = q.Joins("JOIN product ON product.id = activity_product.product_id AND product.is_deleted = ? AND product.status = ?",
 			model.NotDeleted, model.ProductStatusOn).
@@ -1190,9 +1198,6 @@ func validateActivityProductInput(input ActivityProductInput) error {
 			return ErrInvalidProductArg
 		}
 		if input.GroupBuyTargetCount == nil || *input.GroupBuyTargetCount < 2 {
-			return ErrInvalidProductArg
-		}
-		if *input.GroupBuyPrice >= input.ActivityPrice {
 			return ErrInvalidProductArg
 		}
 	}
