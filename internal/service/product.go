@@ -28,6 +28,12 @@ type ProductInput struct {
 	Price               float64
 	OriginalPrice  *float64
 	Stock          uint32
+	EnableDeal     uint8
+	EnableGroup    uint8
+	EnableTakeout  uint8
+	DealStock      uint32
+	GroupStock     uint32
+	TakeoutStock   uint32
 	IsHot               uint8
 	EnableGroupBuy      uint8
 	EnableCoupon        uint8
@@ -106,19 +112,20 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		Images:              input.Images,
 		Price:               input.Price,
 		OriginalPrice:       input.OriginalPrice,
-		Stock:               input.Stock,
 		IsHot:               input.IsHot,
-		EnableGroupBuy:      input.EnableGroupBuy,
-		EnableCoupon:        normalizeEnableCoupon(input.EnableCoupon),
-		AllowPickup:         normalizeAllowPickup(input.AllowPickup),
-		AllowDelivery:       normalizeAllowDelivery(input.AllowDelivery),
 		GroupBuyTargetCount: input.GroupBuyTargetCount,
 		GroupBuyPrice:       input.GroupBuyPrice,
 		GroupBuyAllowRepeat: normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
+		EnableCoupon:        normalizeEnableCoupon(input.EnableCoupon),
+		AllowPickup:         normalizeAllowPickup(input.AllowPickup),
 		ItemType:            input.ItemType,
 		Status:              input.Status,
 	}
-	if product.EnableGroupBuy != 1 {
+	applyProductChannels(&product, input, nil, true)
+	if err := validateProductChannels(&product); err != nil {
+		return nil, err
+	}
+	if product.EnableGroup != 1 {
 		product.GroupBuyTargetCount = nil
 		product.GroupBuyPrice = nil
 		product.GroupBuyAllowRepeat = 0
@@ -286,19 +293,46 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		"images":                 toJSONColumn(images),
 		"price":                  input.Price,
 		"original_price":         input.OriginalPrice,
-		"stock":                  input.Stock,
 		"is_hot":                 input.IsHot,
-		"enable_group_buy":       input.EnableGroupBuy,
-		"enable_coupon":          normalizeEnableCoupon(input.EnableCoupon),
-		"allow_pickup":           normalizeAllowPickup(input.AllowPickup),
-		"allow_delivery":         normalizeAllowDelivery(input.AllowDelivery),
 		"group_buy_target_count": input.GroupBuyTargetCount,
 		"group_buy_price":        input.GroupBuyPrice,
 		"group_buy_allow_repeat": normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
+		"enable_coupon":          normalizeEnableCoupon(input.EnableCoupon),
+		"allow_pickup":           normalizeAllowPickup(input.AllowPickup),
 		"item_type":              input.ItemType,
 		"status":                 input.Status,
 	}
-	if input.EnableGroupBuy != 1 {
+	updated := *product
+	updated.MerchantID = merchantID
+	updated.CategoryID = categoryID
+	updated.Name = input.Name
+	updated.Description = input.Description
+	updated.CoverURL = cover
+	updated.Images = images
+	updated.Price = input.Price
+	updated.OriginalPrice = input.OriginalPrice
+	updated.IsHot = input.IsHot
+	updated.GroupBuyTargetCount = input.GroupBuyTargetCount
+	updated.GroupBuyPrice = input.GroupBuyPrice
+	updated.GroupBuyAllowRepeat = normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat)
+	updated.EnableCoupon = normalizeEnableCoupon(input.EnableCoupon)
+	updated.AllowPickup = normalizeAllowPickup(input.AllowPickup)
+	updated.ItemType = input.ItemType
+	updated.Status = input.Status
+	applyProductChannels(&updated, input, product, false)
+	if err := validateProductChannels(&updated); err != nil {
+		return nil, err
+	}
+	updates["enable_deal"] = updated.EnableDeal
+	updates["enable_group"] = updated.EnableGroup
+	updates["enable_takeout"] = updated.EnableTakeout
+	updates["deal_stock"] = updated.DealStock
+	updates["group_stock"] = updated.GroupStock
+	updates["takeout_stock"] = updated.TakeoutStock
+	updates["stock"] = updated.Stock
+	updates["enable_group_buy"] = updated.EnableGroupBuy
+	updates["allow_delivery"] = updated.AllowDelivery
+	if updated.EnableGroup != 1 {
 		updates["group_buy_target_count"] = nil
 		updates["group_buy_price"] = nil
 		updates["group_buy_allow_repeat"] = 0
@@ -326,14 +360,21 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	if err != nil {
 		return nil, err
 	}
-	product.EnableGroupBuy = input.EnableGroupBuy
-	product.EnableCoupon = normalizeEnableCoupon(input.EnableCoupon)
-	product.AllowPickup = normalizeAllowPickup(input.AllowPickup)
-	product.AllowDelivery = normalizeAllowDelivery(input.AllowDelivery)
+	product.EnableGroupBuy = updated.EnableGroupBuy
+	product.EnableCoupon = updated.EnableCoupon
+	product.AllowPickup = updated.AllowPickup
+	product.AllowDelivery = updated.AllowDelivery
+	product.EnableDeal = updated.EnableDeal
+	product.EnableGroup = updated.EnableGroup
+	product.EnableTakeout = updated.EnableTakeout
+	product.DealStock = updated.DealStock
+	product.GroupStock = updated.GroupStock
+	product.TakeoutStock = updated.TakeoutStock
+	product.Stock = updated.Stock
 	product.GroupBuyTargetCount = input.GroupBuyTargetCount
 	product.GroupBuyPrice = input.GroupBuyPrice
 	product.GroupBuyAllowRepeat = normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat)
-	if input.EnableGroupBuy != 1 {
+	if updated.EnableGroup != 1 {
 		product.GroupBuyTargetCount = nil
 		product.GroupBuyPrice = nil
 		product.GroupBuyAllowRepeat = 0
@@ -610,7 +651,99 @@ func (s *ProductService) validateInput(input ProductInput) error {
 	if input.GroupBuyAllowRepeat != 0 && input.GroupBuyAllowRepeat != 1 {
 		return ErrInvalidProductArg
 	}
-	return validateGroupBuyConfig(input)
+	return nil
+}
+
+func validateProductChannels(p *model.Product) error {
+	if p.EnableDeal != 1 && p.EnableGroup != 1 && p.EnableTakeout != 1 {
+		return ErrInvalidProductArg
+	}
+	if p.EnableDeal == 1 && p.Price <= 0 {
+		return ErrInvalidProductArg
+	}
+	if p.EnableGroup == 1 {
+		if p.GroupBuyTargetCount == nil || *p.GroupBuyTargetCount < 2 {
+			return ErrInvalidProductArg
+		}
+		if p.GroupBuyPrice == nil || *p.GroupBuyPrice <= 0 {
+			return ErrInvalidProductArg
+		}
+		if p.EnableDeal == 1 && *p.GroupBuyPrice >= p.Price {
+			return ErrInvalidProductArg
+		}
+	}
+	if p.EnableTakeout == 1 {
+		if p.OriginalPrice == nil || *p.OriginalPrice <= 0 {
+			return ErrInvalidProductArg
+		}
+	}
+	return nil
+}
+
+func applyProductChannels(p *model.Product, input ProductInput, existing *model.Product, isCreate bool) {
+	var enableDeal, enableGroup, enableTakeout uint8
+	dealStock := input.DealStock
+	groupStock := input.GroupStock
+	takeoutStock := input.TakeoutStock
+
+	if isCreate {
+		enableDeal = input.EnableDeal
+		enableGroup = input.EnableGroup
+		enableTakeout = input.EnableTakeout
+		if enableGroup == 0 && input.EnableGroupBuy == 1 {
+			enableGroup = 1
+		}
+		if enableDeal == 0 && enableGroup == 0 && enableTakeout == 0 {
+			enableDeal = 1
+		}
+		if dealStock == 0 {
+			dealStock = input.Stock
+		}
+	} else if existing != nil {
+		usingNewFields := input.EnableDeal != 0 || input.EnableGroup != 0 || input.EnableTakeout != 0
+		if usingNewFields {
+			enableDeal = input.EnableDeal
+			enableGroup = input.EnableGroup
+			enableTakeout = input.EnableTakeout
+		} else {
+			enableDeal = existing.EnableDeal
+			enableGroup = input.EnableGroupBuy
+			enableTakeout = input.AllowDelivery
+		}
+		if dealStock == 0 {
+			dealStock = input.Stock
+		}
+		if dealStock == 0 {
+			dealStock = existing.DealStock
+		}
+		if groupStock == 0 {
+			groupStock = existing.GroupStock
+		}
+		if takeoutStock == 0 {
+			takeoutStock = existing.TakeoutStock
+		}
+	}
+
+	p.EnableDeal = normalizeChannelFlag(enableDeal)
+	p.EnableGroup = normalizeChannelFlag(enableGroup)
+	p.EnableTakeout = normalizeChannelFlag(enableTakeout)
+	p.DealStock = dealStock
+	p.GroupStock = groupStock
+	p.TakeoutStock = takeoutStock
+	syncProductChannelLegacy(p)
+}
+
+func syncProductChannelLegacy(p *model.Product) {
+	p.EnableGroupBuy = p.EnableGroup
+	p.AllowDelivery = p.EnableTakeout
+	p.Stock = p.DealStock
+}
+
+func normalizeChannelFlag(v uint8) uint8 {
+	if v == 1 {
+		return 1
+	}
+	return 0
 }
 
 // GetDetailView 商品详情（含套餐分组）。
