@@ -1041,24 +1041,32 @@ func cancelPendingRiderEarningsInTx(tx *gorm.DB, deliveryID uint64) error {
 }
 
 func (s *DeliveryService) restoreDeliveryUsagesForCancelInTx(tx *gorm.DB, d *model.DeliveryOrder, deliveryID uint64, reasonText string) error {
+	// 含 Completed：跑腿到店核销后 usage 已完成，管理员取消异常仍须回包（AdminResolveCancel 文档约定）。
+	restorable := []int{
+		int(model.InventoryUsagePendingShip),
+		int(model.InventoryUsageCancelPending),
+		int(model.InventoryUsageCompleted),
+	}
 	var usages []model.UserInventoryUsage
 	if err := query.NotDeleted(tx).
-		Where("delivery_order_id = ? AND status IN ?", deliveryID,
-			[]int{int(model.InventoryUsagePendingShip), int(model.InventoryUsageCancelPending)}).
+		Where("delivery_order_id = ? AND status IN ?", deliveryID, restorable).
 		Find(&usages).Error; err != nil {
 		return err
 	}
 	if len(usages) == 0 && d.InventoryUsageID != nil {
 		var u model.UserInventoryUsage
 		if err := query.NotDeleted(tx).First(&u, *d.InventoryUsageID).Error; err == nil {
-			if u.Status == model.InventoryUsagePendingShip || u.Status == model.InventoryUsageCancelPending {
+			switch u.Status {
+			case model.InventoryUsagePendingShip, model.InventoryUsageCancelPending, model.InventoryUsageCompleted:
 				usages = append(usages, u)
 			}
 		}
 	}
 	for i := range usages {
 		u := usages[i]
-		if u.Status != model.InventoryUsagePendingShip && u.Status != model.InventoryUsageCancelPending {
+		switch u.Status {
+		case model.InventoryUsagePendingShip, model.InventoryUsageCancelPending, model.InventoryUsageCompleted:
+		default:
 			continue
 		}
 		if s.InventorySvc == nil {
