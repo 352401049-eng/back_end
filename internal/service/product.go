@@ -608,7 +608,11 @@ func (s *ProductService) UpdateStock(id uint64, stock uint32, scopeMerchantID *u
 	if _, err := s.GetByID(id, scopeMerchantID); err != nil {
 		return nil, err
 	}
-	if err := s.DB.Model(&model.Product{}).Where("id = ?", id).Update("stock", stock).Error; err != nil {
+	// 快捷改库存同步团购通道库存（下单扣 deal_stock，stock 为兼容字段）
+	if err := s.DB.Model(&model.Product{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"stock":      stock,
+		"deal_stock": stock,
+	}).Error; err != nil {
 		return nil, err
 	}
 	return s.GetByID(id, scopeMerchantID)
@@ -623,7 +627,12 @@ func (s *ProductService) validateInput(input ProductInput) error {
 	if !isPackage && input.CategoryID == 0 && strings.TrimSpace(input.CategoryName) == "" {
 		return ErrInvalidProductArg
 	}
-	if input.Price <= 0 {
+	// 仅团购通道开启时强制团购价；纯拼团/外卖由 validateProductChannels 校验
+	dealOn := input.EnableDeal == 1
+	if input.EnableDeal == 0 && input.EnableGroup == 0 && input.EnableTakeout == 0 {
+		dealOn = true // 未传通道字段时默认团购开（与 applyProductChannels 一致）
+	}
+	if dealOn && input.Price <= 0 {
 		return ErrInvalidProductArg
 	}
 	if input.ItemType != 0 &&
