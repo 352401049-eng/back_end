@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"yujixinjiang/backend/internal/query"
 	"yujixinjiang/backend/internal/response"
@@ -336,6 +337,95 @@ func (h *AdminExtraHandler) AdminResolveDeliveryReassign(c *gin.Context) {
 // @Router       /admin/deliveries/{id}/resolve-cancel [post]
 func (h *AdminExtraHandler) AdminResolveDeliveryCancel(c *gin.Context) {
 	adminResolveDelivery(c, h.DeliverySvc.AdminResolveCancel)
+}
+
+type AdminRejectBagDeliveryRequest struct {
+	ReasonKey string `json:"reason_key" binding:"required"`
+	Remark    string `json:"remark"`
+}
+
+// ListPendingBagDeliveries godoc
+// @Summary      待审核背包跑腿配送单（管理端）
+// @Tags         管理端-配送
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page       query  int  false  "页码"
+// @Param        page_size  query  int  false  "每页条数"
+// @Success      200  {object}  response.Body{data=query.PageResult}
+// @Router       /admin/bag-deliveries/pending [get]
+func (h *AdminExtraHandler) ListPendingBagDeliveries(c *gin.Context) {
+	page, pageSize := parsePage(c)
+	list, total, err := h.DeliverySvc.ListPendingBagReviews(page, pageSize)
+	if err != nil {
+		response.InternalError(c, "获取待审核跑腿单失败")
+		return
+	}
+	response.OK(c, query.PageResult{List: list, Total: total, Page: page, PageSize: pageSize})
+}
+
+// ApproveBagDelivery godoc
+// @Summary      通过背包跑腿配送审核（管理端）
+// @Tags         管理端-配送
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path  int  true  "配送单 ID"
+// @Success      200  {object}  response.Body
+// @Router       /admin/bag-deliveries/{id}/approve [post]
+func (h *AdminExtraHandler) ApproveBagDelivery(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "配送单 ID 无效")
+		return
+	}
+	view, err := h.DeliverySvc.ApproveBagDelivery(id)
+	if err != nil {
+		handleBagAdminDeliveryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+// RejectBagDelivery godoc
+// @Summary      拒绝背包跑腿配送审核（管理端）
+// @Tags         管理端-配送
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int                              true  "配送单 ID"
+// @Param        body  body  AdminRejectBagDeliveryRequest    true  "拒绝原因"
+// @Success      200  {object}  response.Body
+// @Router       /admin/bag-deliveries/{id}/reject [post]
+func (h *AdminExtraHandler) RejectBagDelivery(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "配送单 ID 无效")
+		return
+	}
+	var req AdminRejectBagDeliveryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请求参数无效")
+		return
+	}
+	view, err := h.DeliverySvc.RejectBagDelivery(id, req.ReasonKey, req.Remark)
+	if err != nil {
+		handleBagAdminDeliveryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+func handleBagAdminDeliveryError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrInventoryUsageInvalid):
+		msg := err.Error()
+		if i := strings.Index(msg, ": "); i >= 0 && i+2 < len(msg) {
+			response.BadRequest(c, msg[i+2:])
+			return
+		}
+		response.BadRequest(c, "拒绝原因无效")
+	default:
+		handleDeliveryError(c, err)
+	}
 }
 
 func adminResolveDelivery(c *gin.Context, resolve func(uint64, string) (*service.DeliveryView, error)) {

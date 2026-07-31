@@ -47,8 +47,9 @@ type AdminDashboard struct {
 	OrderCount           int64              `json:"order_count"`
 	CompletedOrderCount  int64              `json:"completed_order_count"`
 	VerificationCount    int64              `json:"verification_count"`
-	PendingRiderApps            int64              `json:"pending_rider_apps"`
-	PendingDeliveryExceptions   int64              `json:"pending_delivery_exceptions"`
+	PendingRiderApps              int64              `json:"pending_rider_apps"`
+	PendingDeliveryExceptions     int64              `json:"pending_delivery_exceptions"`
+	PendingBagDeliveryReviews     int64              `json:"pending_bag_delivery_reviews"`
 	MerchantCount               int64              `json:"merchant_count"`
 	ProductCount         int64              `json:"product_count"`
 	LowStockProductCount int64              `json:"low_stock_product_count"`
@@ -119,6 +120,10 @@ func (s *DashboardService) Admin() (*AdminDashboard, error) {
 	s.freshDB().Model(&model.DeliveryOrder{}).
 		Where("is_deleted = ? AND status = ?", model.NotDeleted, model.DeliveryException).
 		Count(&d.PendingDeliveryExceptions)
+	s.freshDB().Model(&model.DeliveryOrder{}).
+		Where("is_deleted = ? AND status = ? AND inventory_usage_id IS NOT NULL AND takeout_order_id IS NULL",
+			model.NotDeleted, model.DeliveryPendingAdminReview).
+		Count(&d.PendingBagDeliveryReviews)
 	s.freshDB().Model(&model.MerchantProfile{}).Where("is_deleted = ?", model.NotDeleted).Count(&d.MerchantCount)
 	s.freshDB().Model(&model.Product{}).Where("is_deleted = ?", model.NotDeleted).Count(&d.ProductCount)
 	s.freshDB().Model(&model.Product{}).Where("is_deleted = ? AND stock <= ?", model.NotDeleted, 10).Count(&d.LowStockProductCount)

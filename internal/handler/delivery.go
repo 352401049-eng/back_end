@@ -130,6 +130,34 @@ func (h *UserHandler) ConfirmOrderReceipt(c *gin.Context) {
 	response.OK(c, view)
 }
 
+// CancelUserDelivery godoc
+// @Summary      取消待审核背包跑腿配送
+// @Description  仅待平台审核（status=8）的背包跑腿单可取消
+// @Tags         用户-配送
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path  int  true  "配送单 ID"
+// @Success      200  {object}  response.Body{data=service.DeliveryView}
+// @Router       /user/deliveries/{id}/cancel [post]
+func (h *UserHandler) CancelUserDelivery(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	view, err := h.DeliverySvc.CancelPendingBagByUser(accountID, id)
+	if err != nil {
+		handleDeliveryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
 func handleDeliveryError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrDeliveryNotFound):
