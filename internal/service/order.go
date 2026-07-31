@@ -167,12 +167,16 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		if product.ItemType == model.ProductItemTypePackage {
 			return nil, fmt.Errorf("%w: 套餐请使用套餐下单接口", ErrInvalidProductArg)
 		}
-		if product.Stock < input.Quantity {
+		ch := purchaseTypeToChannel(input.PurchaseType)
+		if err := assertProductChannelPurchasable(product, ch); err != nil {
+			return nil, err
+		}
+		if productChannelStock(product, ch) < input.Quantity {
 			return nil, ErrInsufficientStock
 		}
 		unitPrice = product.Price
 		if input.PurchaseType == model.PurchaseTypeGroup {
-			if product.EnableGroupBuy != 1 || product.GroupBuyPrice == nil {
+			if product.GroupBuyPrice == nil {
 				return nil, ErrGroupBuyInvalid
 			}
 			unitPrice = *product.GroupBuyPrice
@@ -203,8 +207,11 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		}
 	}
 
-	if actCtx == nil && product.Stock < input.Quantity {
-		return nil, ErrInsufficientStock
+	if actCtx == nil {
+		ch := purchaseTypeToChannel(input.PurchaseType)
+		if productChannelStock(product, ch) < input.Quantity {
+			return nil, ErrInsufficientStock
+		}
 	}
 
 	var groupBuyID *uint64
@@ -345,7 +352,7 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			return err
 		}
 
-		if err := deductProductStockInTx(tx, product.ID, input.Quantity); err != nil {
+		if err := deductChannelStockInTx(tx, product.ID, input.Quantity, purchaseTypeToChannel(input.PurchaseType)); err != nil {
 			return err
 		}
 
@@ -1837,13 +1844,12 @@ func assertActivityGroupBuyOnly(purchaseType uint8, actCtx *ActivityOrderContext
 }
 
 func assertBagPurchaseAllowed(purchaseType uint8, activityProductID *uint64) error {
+	_ = purchaseType
 	if activityProductID != nil && *activityProductID > 0 {
 		return nil
 	}
-	if purchaseType == model.PurchaseTypeGroup {
-		return nil
-	}
-	return fmt.Errorf("%w: 请使用团购、外卖或活动购买", ErrSoloPurchaseDisabled)
+	// Non-activity bag orders use deal/group channels; enable_* checked per product.
+	return nil
 }
 
 func assertBagPickupOnly(deliveryType uint8) error {
@@ -1963,14 +1969,102 @@ func filterOutPackageProductItems(tx *gorm.DB, orderID uint64, items []model.Ord
 	return selectInventoryCreditItems(tx, orderID, items)
 }
 
-// deductProductStockInTx 下单时扣减商品库存（需 stock >= quantity）。
-func deductProductStockInTx(tx *gorm.DB, productID uint64, quantity uint32) error {
+const (
+	productChannelDeal    = "deal"
+	productChannelGroup   = "group"
+	productChannelTakeout = "takeout"
+)
+
+func purchaseTypeToChannel(purchaseType uint8) string {
+	if purchaseType == model.PurchaseTypeGroup {
+		return productChannelGroup
+	}
+	return productChannelDeal
+}
+
+func productChannelColumns(channel string) (enableCol, stockCol string, syncLegacyStock bool, ok bool) {
+	switch channel {
+	case productChannelDeal:
+		return "enable_deal", "deal_stock", true, true
+	case productChannelGroup:
+		return "enable_group", "group_stock", false, true
+	case productChannelTakeout:
+		return "enable_takeout", "takeout_stock", false, true
+	default:
+		return "", "", false, false
+	}
+}
+
+func productChannelStock(p model.Product, channel string) uint32 {
+	switch channel {
+	case productChannelDeal:
+		return p.DealStock
+	case productChannelGroup:
+		return p.GroupStock
+	case productChannelTakeout:
+		return p.TakeoutStock
+	default:
+		return 0
+	}
+}
+
+func productChannelEnabled(p model.Product, channel string) bool {
+	switch channel {
+	case productChannelDeal:
+		return p.EnableDeal == 1
+	case productChannelGroup:
+		return p.EnableGroup == 1
+	case productChannelTakeout:
+		return p.EnableTakeout == 1
+	default:
+		return false
+	}
+}
+
+func assertProductChannelPurchasable(p model.Product, channel string) error {
+	if productChannelEnabled(p, channel) {
+		return nil
+	}
+	switch channel {
+	case productChannelGroup:
+		return ErrGroupBuyInvalid
+	case productChannelTakeout:
+		return ErrDeliveryNotAllowed
+	default:
+		return fmt.Errorf("%w: 该商品未开启团购", ErrSoloPurchaseDisabled)
+	}
+}
+
+func takeoutGoodsUnitPrice(p model.Product) (float64, error) {
+	if err := assertProductChannelPurchasable(p, productChannelTakeout); err != nil {
+		return 0, err
+	}
+	if p.OriginalPrice == nil || *p.OriginalPrice <= 0 {
+		return 0, fmt.Errorf("%w: 外卖需设置原价", ErrInvalidProductArg)
+	}
+	return *p.OriginalPrice, nil
+}
+
+// deductChannelStockInTx 按购买通道扣减库存（deal/group/takeout）。
+func deductChannelStockInTx(tx *gorm.DB, productID uint64, quantity uint32, channel string) error {
 	if quantity == 0 {
 		return nil
 	}
-	result := query.NotDeleted(tx.Model(&model.Product{})).
-		Where("id = ? AND stock >= ?", productID, quantity).
-		Update("stock", gorm.Expr("stock - ?", quantity))
+	enableCol, stockCol, syncLegacy, ok := productChannelColumns(channel)
+	if !ok {
+		return fmt.Errorf("%w: invalid stock channel", ErrInvalidProductArg)
+	}
+	base := query.NotDeleted(tx.Model(&model.Product{})).
+		Where("id = ? AND "+enableCol+" = 1 AND "+stockCol+" >= ?", productID, quantity)
+	var result *gorm.DB
+	if syncLegacy {
+		result = base.Updates(map[string]interface{}{
+			stockCol: gorm.Expr(stockCol+" - ?", quantity),
+			"stock":  gorm.Expr("stock - ?", quantity),
+		})
+	} else {
+		result = base.Update(stockCol, gorm.Expr(stockCol+" - ?", quantity))
+	}
 	if result.Error != nil {
 		return result.Error
 	}
@@ -1978,6 +2072,24 @@ func deductProductStockInTx(tx *gorm.DB, productID uint64, quantity uint32) erro
 		return ErrInsufficientStock
 	}
 	return nil
+}
+
+func restoreChannelStockInTx(tx *gorm.DB, productID uint64, quantity uint32, channel string) error {
+	if quantity == 0 {
+		return nil
+	}
+	_, stockCol, syncLegacy, ok := productChannelColumns(channel)
+	if !ok {
+		return fmt.Errorf("%w: invalid stock channel", ErrInvalidProductArg)
+	}
+	base := tx.Model(&model.Product{}).Where("id = ?", productID)
+	if syncLegacy {
+		return base.Updates(map[string]interface{}{
+			stockCol: gorm.Expr(stockCol+" + ?", quantity),
+			"stock":  gorm.Expr("stock + ?", quantity),
+		}).Error
+	}
+	return base.Update(stockCol, gorm.Expr(stockCol+" + ?", quantity)).Error
 }
 
 // restoreProductStockForOrder 取消/拒单时回退订单商品库存。
@@ -1990,8 +2102,7 @@ func restoreProductStockForOrder(tx *gorm.DB, orderID uint64) error {
 		if it.Quantity == 0 {
 			continue
 		}
-		if err := tx.Model(&model.Product{}).Where("id = ?", it.ProductID).
-			Update("stock", gorm.Expr("stock + ?", it.Quantity)).Error; err != nil {
+		if err := restoreChannelStockInTx(tx, it.ProductID, it.Quantity, purchaseTypeToChannel(it.PurchaseType)); err != nil {
 			return err
 		}
 	}

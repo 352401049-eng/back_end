@@ -287,7 +287,10 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 	if err := validateFulfillmentFlags(product, model.DeliveryTypeDelivery); err != nil {
 		return nil, err
 	}
-	if product.Stock < in.Quantity {
+	if err := assertProductChannelPurchasable(product, productChannelTakeout); err != nil {
+		return nil, err
+	}
+	if product.TakeoutStock < in.Quantity {
 		return nil, ErrInsufficientStock
 	}
 
@@ -331,7 +334,7 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 		if err != nil {
 			return nil, err
 		}
-		if err := validatePackageUnitsStock(s.DB, product.ID, pkgUnits); err != nil {
+		if err := validatePackageUnitsStock(s.DB, product.ID, pkgUnits, productChannelTakeout); err != nil {
 			return nil, err
 		}
 		stored := make([]PackageUnitInput, len(pkgUnits))
@@ -374,7 +377,10 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 		}
 	}
 
-	unitPrice := product.Price
+	unitPrice, err := takeoutGoodsUnitPrice(product)
+	if err != nil {
+		return nil, err
+	}
 	goodsAmount := roundMoney(unitPrice * float64(in.Quantity))
 	deliveryFee := roundMoney(mp.DeliveryFee)
 	payAmount := computeTakeoutPayAmount(unitPrice, in.Quantity, deliveryFee)
@@ -398,7 +404,7 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 	expireAt := now.Add(time.Duration(s.payTimeoutMinutes()) * time.Minute)
 
 	var takeout model.TakeoutOrder
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		takeout = model.TakeoutOrder{
 			OrderNo:            genTakeoutOrderNo(),
 			AccountID:          accountID,
@@ -781,8 +787,7 @@ func restoreTakeoutStockInTx(tx *gorm.DB, takeout *model.TakeoutOrder) error {
 		if item.Quantity == 0 {
 			continue
 		}
-		if err := tx.Model(&model.Product{}).Where("id = ?", item.ProductID).
-			Update("stock", gorm.Expr("stock + ?", item.Quantity)).Error; err != nil {
+		if err := restoreChannelStockInTx(tx, item.ProductID, item.Quantity, productChannelTakeout); err != nil {
 			return err
 		}
 		var product model.Product
@@ -802,8 +807,7 @@ func restoreTakeoutStockInTx(tx *gorm.DB, takeout *model.TakeoutOrder) error {
 				return err
 			}
 			for _, ln := range lines {
-				if err := tx.Model(&model.Product{}).Where("id = ?", ln.Product.ID).
-					Update("stock", gorm.Expr("stock + ?", ln.Qty)).Error; err != nil {
+				if err := restoreChannelStockInTx(tx, ln.Product.ID, ln.Qty, productChannelTakeout); err != nil {
 					return err
 				}
 			}
@@ -818,7 +822,7 @@ func deductTakeoutStockInTx(tx *gorm.DB, takeout *model.TakeoutOrder) error {
 		return err
 	}
 	for _, item := range items {
-		if err := deductProductStockInTx(tx, item.ProductID, item.Quantity); err != nil {
+		if err := deductChannelStockInTx(tx, item.ProductID, item.Quantity, productChannelTakeout); err != nil {
 			return err
 		}
 		var product model.Product
@@ -838,7 +842,7 @@ func deductTakeoutStockInTx(tx *gorm.DB, takeout *model.TakeoutOrder) error {
 				return err
 			}
 			for _, ln := range lines {
-				if err := deductProductStockInTx(tx, ln.Product.ID, ln.Qty); err != nil {
+				if err := deductChannelStockInTx(tx, ln.Product.ID, ln.Qty, productChannelTakeout); err != nil {
 					return err
 				}
 			}

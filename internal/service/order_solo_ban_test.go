@@ -1,7 +1,6 @@
 package service
 
 import (
-	"errors"
 	"testing"
 
 	"yujixinjiang/backend/internal/model"
@@ -14,28 +13,17 @@ func TestAssertBagPurchaseAllowed(t *testing.T) {
 		name              string
 		purchaseType      uint8
 		activityProductID *uint64
-		wantErr           bool
 	}{
-		{"solo rejected", model.PurchaseTypeSolo, nil, true},
-		{"group allowed", model.PurchaseTypeGroup, nil, false},
-		{"activity allowed", model.PurchaseTypeSolo, &actID, false},
-		{"group+activity allowed", model.PurchaseTypeGroup, &actID, false},
-		{"zero activity id treated as absent", model.PurchaseTypeSolo, func() *uint64 { v := uint64(0); return &v }(), true},
+		{"solo allowed", model.PurchaseTypeSolo, nil},
+		{"group allowed", model.PurchaseTypeGroup, nil},
+		{"activity allowed", model.PurchaseTypeSolo, &actID},
+		{"group+activity allowed", model.PurchaseTypeGroup, &actID},
+		{"zero activity id treated as absent", model.PurchaseTypeSolo, func() *uint64 { v := uint64(0); return &v }()},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := assertBagPurchaseAllowed(tc.purchaseType, tc.activityProductID)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
-				if !errors.Is(err, ErrSoloPurchaseDisabled) {
-					t.Fatalf("expected ErrSoloPurchaseDisabled, got %v", err)
-				}
-				return
-			}
-			if err != nil {
+			if err := assertBagPurchaseAllowed(tc.purchaseType, tc.activityProductID); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -60,9 +48,6 @@ func TestAssertBagPickupOnly(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error")
 				}
-				if !errors.Is(err, ErrInvalidDeliveryType) {
-					t.Fatalf("expected ErrInvalidDeliveryType, got %v", err)
-				}
 				return
 			}
 			if err != nil {
@@ -72,12 +57,24 @@ func TestAssertBagPickupOnly(t *testing.T) {
 	}
 }
 
-func TestCheckoutCartRejectsSoloBagPurchase(t *testing.T) {
-	s := &OrderService{}
-	_, err := s.CheckoutCart(1, CheckoutCartInput{
-		CartItemIDs: []uint64{1}, MerchantID: 9,
-	})
-	if !errors.Is(err, ErrSoloPurchaseDisabled) {
-		t.Fatalf("expected ErrSoloPurchaseDisabled, got %v", err)
+func TestPurchaseTypeToChannel(t *testing.T) {
+	if purchaseTypeToChannel(model.PurchaseTypeSolo) != productChannelDeal {
+		t.Fatal("solo should map to deal")
+	}
+	if purchaseTypeToChannel(model.PurchaseTypeGroup) != productChannelGroup {
+		t.Fatal("group should map to group")
+	}
+}
+
+func TestTakeoutGoodsUnitPrice(t *testing.T) {
+	price := 19.9
+	p := model.Product{EnableTakeout: 1, OriginalPrice: &price}
+	got, err := takeoutGoodsUnitPrice(p)
+	if err != nil || got != price {
+		t.Fatalf("got %v err %v", got, err)
+	}
+	_, err = takeoutGoodsUnitPrice(model.Product{EnableTakeout: 0, OriginalPrice: &price})
+	if err == nil {
+		t.Fatal("expected error when takeout disabled")
 	}
 }

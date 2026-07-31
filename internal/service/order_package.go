@@ -139,12 +139,16 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		}
 		unitPrice = pkg.Price
 		if input.PurchaseType == model.PurchaseTypeGroup {
-			if pkg.EnableGroupBuy != 1 || pkg.GroupBuyPrice == nil {
+			if pkg.GroupBuyPrice == nil {
 				return nil, ErrGroupBuyInvalid
 			}
 			unitPrice = *pkg.GroupBuyPrice
 		} else {
 			input.GroupBuyTeamID = nil
+		}
+		ch := purchaseTypeToChannel(input.PurchaseType)
+		if err := assertProductChannelPurchasable(pkg, ch); err != nil {
+			return nil, err
 		}
 	}
 
@@ -187,8 +191,11 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 	if len(groups) == 0 {
 		return nil, fmt.Errorf("%w: 套餐未配置分组", ErrInvalidProductArg)
 	}
-	if actCtx == nil && pkg.Stock < input.Quantity {
-		return nil, ErrInsufficientStock
+	if actCtx == nil {
+		ch := purchaseTypeToChannel(input.PurchaseType)
+		if productChannelStock(pkg, ch) < input.Quantity {
+			return nil, ErrInsufficientStock
+		}
 	}
 
 	qty := input.Quantity
@@ -318,7 +325,7 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		if err := tx.Create(&pkgItem).Error; err != nil {
 			return err
 		}
-		if err := deductProductStockInTx(tx, pkg.ID, qty); err != nil {
+		if err := deductChannelStockInTx(tx, pkg.ID, qty, purchaseTypeToChannel(input.PurchaseType)); err != nil {
 			return err
 		}
 

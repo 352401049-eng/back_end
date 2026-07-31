@@ -23,8 +23,8 @@ type PackageUnitInput struct {
 	PackageSelections []PackageSelectionInput `json:"package_selections"`
 }
 
-// validatePackageUnitsStock 汇总多份套餐组件需求并校验库存（组件需求 = 各份选配 qty 之和）。
-func validatePackageUnitsStock(db *gorm.DB, packageProductID uint64, units [][]PackageSelectionInput) error {
+// validatePackageUnitsStock 汇总多份套餐组件需求并校验通道库存。
+func validatePackageUnitsStock(db *gorm.DB, packageProductID uint64, units [][]PackageSelectionInput, channel string) error {
 	need := map[uint64]uint32{}
 	for _, sels := range units {
 		lines, err := ResolvePackageSelections(db, packageProductID, sels)
@@ -46,12 +46,12 @@ func validatePackageUnitsStock(db *gorm.DB, packageProductID uint64, units [][]P
 		ids = append(ids, id)
 	}
 	var products []model.Product
-	if err := query.NotDeleted(db).Select("id", "stock").Where("id IN ?", ids).Find(&products).Error; err != nil {
+	if err := query.NotDeleted(db).Select("id", "deal_stock", "group_stock", "takeout_stock").Where("id IN ?", ids).Find(&products).Error; err != nil {
 		return err
 	}
 	stockByID := make(map[uint64]uint32, len(products))
 	for _, p := range products {
-		stockByID[p.ID] = p.Stock
+		stockByID[p.ID] = productChannelStock(p, channel)
 	}
 	for id, qty := range need {
 		if stockByID[id] < qty {
@@ -103,7 +103,7 @@ func applyPackageUnitsInTx(tx *gorm.DB, productID uint64, quantity uint32, units
 			return nil, ErrPackageSelectionRequired
 		}
 		for _, ln := range lines {
-			if err := deductProductStockInTx(tx, ln.Product.ID, ln.Qty); err != nil {
+			if err := deductChannelStockInTx(tx, ln.Product.ID, ln.Qty, productChannelDeal); err != nil {
 				return nil, err
 			}
 		}
@@ -228,7 +228,7 @@ func (s *InventoryService) applyPackageSelectionsForDelivery(
 	}
 	for _, ln := range lines {
 		qty := ln.Qty * quantity
-		if err := deductProductStockInTx(tx, ln.Product.ID, qty); err != nil {
+		if err := deductChannelStockInTx(tx, ln.Product.ID, qty, productChannelDeal); err != nil {
 			return nil, 0, err
 		}
 	}
@@ -256,8 +256,7 @@ func restorePackageComponentStock(tx *gorm.DB, usage *model.UserInventoryUsage) 
 			if rollbackQty == 0 {
 				continue
 			}
-			if err := tx.Model(&model.Product{}).Where("id = ?", it.ProductID).
-				Update("stock", gorm.Expr("stock + ?", rollbackQty)).Error; err != nil {
+			if err := restoreChannelStockInTx(tx, it.ProductID, rollbackQty, productChannelDeal); err != nil {
 				return err
 			}
 		}

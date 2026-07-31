@@ -124,11 +124,17 @@ func (s *TakeoutService) CreateFromCart(accountID uint64, in CartCheckoutTakeout
 		if product.ItemType == model.ProductItemTypePackage {
 			return nil, fmt.Errorf("%w: 购物车结算暂不支持套餐商品，请在商品详情页下单", ErrInvalidProductArg)
 		}
-		if product.Stock < cart.Quantity {
+		if product.TakeoutStock < cart.Quantity {
 			return nil, ErrInsufficientStock
 		}
+		if err := assertProductChannelPurchasable(product, productChannelTakeout); err != nil {
+			return nil, err
+		}
 
-		unit := product.Price
+		unit, err := takeoutGoodsUnitPrice(product)
+		if err != nil {
+			return nil, err
+		}
 		sub := roundMoney(unit * float64(cart.Quantity))
 		goodsAmount = roundMoney(goodsAmount + sub)
 		lines = append(lines, cartTakeoutLine{
@@ -201,12 +207,19 @@ func (s *TakeoutService) CreateFromCart(accountID uint64, in CartCheckoutTakeout
 			if p.Status != model.ProductStatusOn || p.MerchantID != in.MerchantID {
 				return ErrProductNotFound
 			}
-			if p.Stock < lines[i].Cart.Quantity {
+			if p.TakeoutStock < lines[i].Cart.Quantity {
 				return ErrInsufficientStock
 			}
+			if err := assertProductChannelPurchasable(p, productChannelTakeout); err != nil {
+				return err
+			}
 			lines[i].Product = p
-			lines[i].UnitPrice = p.Price
-			lines[i].Subtotal = roundMoney(p.Price * float64(lines[i].Cart.Quantity))
+			unit, err := takeoutGoodsUnitPrice(p)
+			if err != nil {
+				return err
+			}
+			lines[i].UnitPrice = unit
+			lines[i].Subtotal = roundMoney(unit * float64(lines[i].Cart.Quantity))
 		}
 		recalc := 0.0
 		for _, ln := range lines {

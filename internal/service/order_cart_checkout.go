@@ -100,8 +100,11 @@ func (s *OrderService) CheckoutCart(accountID uint64, input CheckoutCartInput) (
 				return nil, err
 			}
 		}
-		if product.Stock < cart.Quantity {
+		if product.DealStock < cart.Quantity {
 			return nil, ErrInsufficientStock
+		}
+		if err := assertProductChannelPurchasable(product, productChannelDeal); err != nil {
+			return nil, err
 		}
 		unit := product.Price
 		sub := roundMoney(unit * float64(cart.Quantity))
@@ -152,8 +155,11 @@ func (s *OrderService) CheckoutCart(accountID uint64, input CheckoutCartInput) (
 			if p.Status != model.ProductStatusOn || p.MerchantID != input.MerchantID {
 				return ErrProductNotFound
 			}
-			if p.Stock < lines[i].Cart.Quantity {
+			if p.DealStock < lines[i].Cart.Quantity {
 				return ErrInsufficientStock
+			}
+			if err := assertProductChannelPurchasable(p, productChannelDeal); err != nil {
+				return err
 			}
 			lines[i].Product = p
 			lines[i].UnitPrice = p.Price
@@ -224,7 +230,7 @@ func (s *OrderService) CheckoutCart(accountID uint64, input CheckoutCartInput) (
 			if err := tx.Create(&item).Error; err != nil {
 				return err
 			}
-			if err := deductProductStockInTx(tx, ln.Product.ID, ln.Cart.Quantity); err != nil {
+			if err := deductChannelStockInTx(tx, ln.Product.ID, ln.Cart.Quantity, productChannelDeal); err != nil {
 				return err
 			}
 			if err := query.SoftDelete(tx, &model.CartItem{}, "id = ? AND account_id = ?", ln.Cart.ID, accountID).Error; err != nil {
