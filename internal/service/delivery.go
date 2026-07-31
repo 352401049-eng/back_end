@@ -79,6 +79,16 @@ type DeliveryView struct {
 	RiderPhone           string                 `json:"rider_phone,omitempty"`
 }
 
+type BagDeliveryReviewView struct {
+	DeliveryView
+	AccountID    uint64 `json:"account_id"`
+	Nickname     string `json:"nickname,omitempty"`
+	AccountPhone string `json:"account_phone,omitempty"`
+	ContactPhone string `json:"contact_phone,omitempty"`
+	ContactName  string `json:"contact_name,omitempty"`
+	MerchantName string `json:"merchant_name,omitempty"`
+}
+
 type DeliveryService struct {
 	DB                *gorm.DB
 	InventorySvc      *InventoryService
@@ -1237,6 +1247,129 @@ func (s *DeliveryService) AdminResolveCancel(deliveryID uint64, remark string) (
 		}
 		revertLinkedOrderOnDeliveryCancelInTx(tx, d.OrderID, reasonText)
 		return cancelPendingRiderEarningsInTx(tx, deliveryID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	payment.DispatchRefundJobs(jobs)
+	return s.getViewByID(deliveryID)
+}
+
+func enrichBagReviewView(db *gorm.DB, d model.DeliveryOrder) BagDeliveryReviewView {
+	base := toDeliveryView(db, d)
+	out := BagDeliveryReviewView{DeliveryView: base}
+	var usage model.UserInventoryUsage
+	if d.InventoryUsageID != nil {
+		_ = query.NotDeleted(db).Preload("MerchantProfile").First(&usage, *d.InventoryUsageID).Error
+	}
+	if usage.ID != 0 {
+		out.AccountID = usage.AccountID
+		if usage.AddressSnapshot != nil {
+			out.ContactPhone = usage.AddressSnapshot.ContactPhone
+			out.ContactName = usage.AddressSnapshot.ContactName
+		}
+		if usage.MerchantProfile != nil {
+			out.MerchantName = usage.MerchantProfile.ShopName
+		}
+	}
+	var acc model.Account
+	if out.AccountID != 0 {
+		if err := query.NotDeleted(db).Select("id", "phone", "nickname").First(&acc, out.AccountID).Error; err == nil {
+			if acc.Phone != nil {
+				out.AccountPhone = *acc.Phone
+			}
+			if acc.Nickname != nil {
+				out.Nickname = *acc.Nickname
+			}
+		}
+	}
+	return out
+}
+
+func (s *DeliveryService) ListPendingBagReviews(page, pageSize int) ([]BagDeliveryReviewView, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
+	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).
+		Where("status = ? AND inventory_usage_id IS NOT NULL AND takeout_order_id IS NULL",
+			model.DeliveryPendingAdminReview)
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.DeliveryOrder
+	if err := q.Order("updated_at DESC, id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&list).Error; err != nil {
+		return nil, 0, err
+	}
+	out := make([]BagDeliveryReviewView, 0, len(list))
+	for i := range list {
+		out = append(out, enrichBagReviewView(s.DB, list[i]))
+	}
+	return out, total, nil
+}
+
+func (s *DeliveryService) CountPendingBagReviews() (int64, error) {
+	var n int64
+	err := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).
+		Where("status = ? AND inventory_usage_id IS NOT NULL AND takeout_order_id IS NULL",
+			model.DeliveryPendingAdminReview).Count(&n).Error
+	return n, err
+}
+
+func (s *DeliveryService) ApproveBagDelivery(deliveryID uint64) (*DeliveryView, error) {
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var d model.DeliveryOrder
+		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&d, deliveryID).Error; err != nil {
+			return ErrDeliveryNotFound
+		}
+		if !IsBagErrand(&d) || d.Status != model.DeliveryPendingAdminReview {
+			return fmt.Errorf("%w: 当前状态不可审核通过", ErrDeliveryNotFound)
+		}
+		return tx.Model(&d).Update("status", model.DeliveryPendingAccept).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.getViewByID(deliveryID)
+}
+
+func (s *DeliveryService) RejectBagDelivery(deliveryID uint64, reasonKey, remark string) (*DeliveryView, error) {
+	reasonText, err := FormatBagAdminRejectReason(reasonKey, remark)
+	if err != nil {
+		return nil, err
+	}
+	var jobs []payment.RefundJob
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		payment.AttachRefundCollector(tx, &jobs)
+		var d model.DeliveryOrder
+		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&d, deliveryID).Error; err != nil {
+			return ErrDeliveryNotFound
+		}
+		if !IsBagErrand(&d) || d.Status != model.DeliveryPendingAdminReview {
+			return fmt.Errorf("%w: 当前状态不可拒绝", ErrDeliveryNotFound)
+		}
+		if err := s.restoreDeliveryUsagesForCancelInTx(tx, &d, deliveryID, reasonText); err != nil {
+			return err
+		}
+		if s.DeliveryFeePaySvc != nil {
+			if err := s.DeliveryFeePaySvc.RefundForDeliveryOrderInTx(tx, deliveryID, "平台拒绝跑腿退配送费"); err != nil {
+				return err
+			}
+		}
+		return tx.Model(&d).Updates(map[string]interface{}{
+			"status":           model.DeliveryCancelled,
+			"exception_reason": reasonText,
+		}).Error
 	})
 	if err != nil {
 		return nil, err

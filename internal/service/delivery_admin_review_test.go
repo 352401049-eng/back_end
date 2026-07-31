@@ -12,6 +12,23 @@ func TestDeliveryStatusText_PendingAdminReview(t *testing.T) {
 	}
 }
 
+func TestIsBagErrand(t *testing.T) {
+	usageID := uint64(10)
+	takeoutID := uint64(20)
+	if !IsBagErrand(&model.DeliveryOrder{InventoryUsageID: &usageID, TakeoutOrderID: nil}) {
+		t.Fatal("expected bag errand")
+	}
+	if IsBagErrand(&model.DeliveryOrder{InventoryUsageID: nil, TakeoutOrderID: nil}) {
+		t.Fatal("expected not bag errand without usage")
+	}
+	if IsBagErrand(&model.DeliveryOrder{InventoryUsageID: &usageID, TakeoutOrderID: &takeoutID}) {
+		t.Fatal("expected not bag errand with takeout")
+	}
+	if IsBagErrand(nil) {
+		t.Fatal("expected not bag errand for nil")
+	}
+}
+
 func TestFormatBagAdminRejectReason(t *testing.T) {
 	tests := []struct {
 		key, remark, want string
