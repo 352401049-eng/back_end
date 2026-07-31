@@ -26,9 +26,9 @@ func (GroupBuyTeam) TableName() string { return "group_buy_team" }
 
 type GroupBuyMember struct {
 	ID        uint64    `gorm:"primaryKey" json:"id"`
-	TeamID    uint64    `gorm:"not null" json:"team_id"`
-	OrderID   uint64    `gorm:"not null" json:"order_id"`
-	AccountID uint64    `gorm:"not null" json:"account_id"`
+	TeamID    uint64    `gorm:"not null;uniqueIndex:uk_team_order" json:"team_id"`
+	OrderID   uint64    `gorm:"not null;uniqueIndex:uk_team_order" json:"order_id"`
+	AccountID uint64    `gorm:"not null;index:idx_team_account" json:"account_id"`
 	IsLeader  uint8     `gorm:"not null;default:0" json:"is_leader"`
 	JoinedAt  time.Time `json:"joined_at"`
 	SoftDelete
