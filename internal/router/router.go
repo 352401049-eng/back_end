@@ -101,7 +101,6 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	}
 	startGroupExpireWorker(orderSvc)
 	startPendingPayExpireWorker(orderSvc, takeoutSvc, deliveryFeePaySvc)
-	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc}
 	paymentHandler := &handler.PaymentHandler{OrderSvc: orderSvc}
 	deliverySvc := &service.DeliveryService{DB: db, InventorySvc: inventorySvc, DeliveryFeePaySvc: deliveryFeePaySvc}
 	riderEarningSvc := &service.RiderEarningService{DB: db}
@@ -123,6 +122,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	takeoutHandler := &handler.TakeoutHandler{TakeoutSvc: takeoutSvc, MerchantSvc: merchantSvc}
 	deliveryFeeHandler := &handler.DeliveryFeeHandler{Svc: deliveryFeePaySvc}
 	productSvc := &service.ProductService{DB: db, CategorySvc: categorySvc}
+	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc, ProductSvc: productSvc}
 	riderSvc := &service.RiderApplicationService{DB: db}
 	adminHandler := &handler.AdminHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, RiderSvc: riderSvc, EarningSvc: riderEarningSvc}
 	merchantHandler := &handler.MerchantHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, CategorySvc: categorySvc, OrderSvc: orderSvc}

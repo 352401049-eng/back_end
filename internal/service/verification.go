@@ -23,6 +23,17 @@ var (
 type VerificationService struct {
 	DB           *gorm.DB
 	InventorySvc *InventoryService
+	ProductSvc   *ProductService
+}
+
+func (s *VerificationService) assertMerchantCanVerify(productID, merchantID uint64) error {
+	if s.ProductSvc == nil {
+		return ErrVerifyMerchantMismatch
+	}
+	if err := s.ProductSvc.AssertMerchantApplicable(productID, merchantID); err != nil {
+		return ErrVerifyMerchantMismatch
+	}
+	return nil
 }
 
 // InvalidateVerificationRecordsForUsage 使用记录被回退/取消时作废关联核销记录，
@@ -77,8 +88,8 @@ func (s *VerificationService) LookupByCode(merchantID uint64, code string) (*Ver
 	if err != nil {
 		return nil, err
 	}
-	if resolved.merchantID != merchantID {
-		return nil, ErrVerifyMerchantMismatch
+	if err := s.assertMerchantCanVerify(resolved.product.ID, merchantID); err != nil {
+		return nil, err
 	}
 	return toVerifyPreviewView(resolved), nil
 }
@@ -86,16 +97,21 @@ func (s *VerificationService) LookupByCode(merchantID uint64, code string) (*Ver
 // Verify 一次性核销：整单/整次使用记录完成，不支持部分数量。
 // 套餐须传 packageUnits（份数=quantity），选配与核销在同一事务完成；未选配则不核销。
 func (s *VerificationService) Verify(merchantID, operatorID uint64, code string, packageUnits []PackageUnitInput, optionSelections []OptionSelectionUnitInput) (*model.VerificationRecord, error) {
+	preview, err := s.resolveVerifyCode(code, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.assertMerchantCanVerify(preview.product.ID, merchantID); err != nil {
+		return nil, err
+	}
+
 	var vc model.VerificationCode
 	var record model.VerificationRecord
 
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		resolved, err := s.resolveVerifyCodeInTx(tx, code, true)
 		if err != nil {
 			return err
-		}
-		if resolved.merchantID != merchantID {
-			return ErrVerifyMerchantMismatch
 		}
 		vc = resolved.vc
 
@@ -115,7 +131,7 @@ func (s *VerificationService) Verify(merchantID, operatorID uint64, code string,
 			if err := query.NotDeleted(tx).First(&usage, *resolved.usageID).Error; err != nil {
 				return ErrVerifyCodeNotFound
 			}
-			if usage.MerchantID != merchantID || usage.ProductID != resolved.product.ID {
+			if usage.ProductID != resolved.product.ID {
 				return ErrVerifyMerchantMismatch
 			}
 			if usage.SourceOrderID != nil {
@@ -128,18 +144,25 @@ func (s *VerificationService) Verify(merchantID, operatorID uint64, code string,
 			if err := tx.Create(&record).Error; err != nil {
 				return err
 			}
+			if err := query.NotDeleted(tx.Model(&model.UserInventoryUsage{})).
+				Where("id = ?", usage.ID).
+				Update("usage_merchant_id", merchantID).Error; err != nil {
+				return err
+			}
 			if s.InventorySvc != nil {
 				return s.InventorySvc.CompleteUsageByVerify(tx, usage.ID, packageUnits, optionSelections)
 			}
-			return tx.Model(&usage).Update("status", model.InventoryUsageCompleted).Error
+			return tx.Model(&usage).Updates(map[string]interface{}{
+				"status":            model.InventoryUsageCompleted,
+				"usage_merchant_id": merchantID,
+			}).Error
 		}
 
 		if resolved.orderID == nil {
 			return ErrVerifyCodeNotFound
 		}
 		var order model.Order
-		if err := query.NotDeleted(tx).Where("id = ? AND merchant_id = ?", *resolved.orderID, merchantID).
-			First(&order).Error; err != nil {
+		if err := query.NotDeleted(tx).First(&order, *resolved.orderID).Error; err != nil {
 			return ErrVerifyMerchantMismatch
 		}
 		record = model.VerificationRecord{
