@@ -136,3 +136,69 @@ func TestGetOnShelfAllowsApplicableMerchant(t *testing.T) {
 		t.Fatalf("got product id %d, want %d", got.ID, p.ID)
 	}
 }
+
+func TestGetByIDAllowsApplicableMerchant(t *testing.T) {
+	db := setupApplicableProductTestDB(t)
+	seedOpenMerchant(db, 1, "店A")
+	seedOpenMerchant(db, 2, "店B")
+	p := seedOnShelfProduct(db, 1, "跨店商品")
+
+	svc := &ProductService{DB: db}
+	if err := svc.ReplaceApplicableMerchants(nil, p.ID, 1, []uint64{1, 2}); err != nil {
+		t.Fatalf("replace applicable: %v", err)
+	}
+
+	scope := uint64(2)
+	got, err := svc.GetByID(p.ID, &scope)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+	if got.ID != p.ID {
+		t.Fatalf("got product id %d, want %d", got.ID, p.ID)
+	}
+}
+
+func TestUpdateStatusForbiddenForApplicableOnly(t *testing.T) {
+	db := setupApplicableProductTestDB(t)
+	seedOpenMerchant(db, 1, "店A")
+	seedOpenMerchant(db, 2, "店B")
+	p := seedOnShelfProduct(db, 1, "跨店商品")
+
+	svc := &ProductService{DB: db}
+	if err := svc.ReplaceApplicableMerchants(nil, p.ID, 1, []uint64{1, 2}); err != nil {
+		t.Fatalf("replace applicable: %v", err)
+	}
+
+	scope := uint64(2)
+	_, err := svc.UpdateStatus(p.ID, model.ProductStatusOff, &scope)
+	if err == nil {
+		t.Fatal("expected forbidden when applicable-only merchant mutates status")
+	}
+	if !errors.Is(err, ErrProductForbidden) {
+		t.Fatalf("expected product forbidden, got %v", err)
+	}
+}
+
+func TestUpdateApplicableMerchantIDsViaReplace(t *testing.T) {
+	db := setupApplicableProductTestDB(t)
+	seedOpenMerchant(db, 1, "店A")
+	seedOpenMerchant(db, 2, "店B")
+	seedOpenMerchant(db, 3, "店C")
+	p := seedOnShelfProduct(db, 1, "跨店商品")
+
+	svc := &ProductService{DB: db}
+	if err := svc.ReplaceApplicableMerchants(nil, p.ID, 1, []uint64{1, 2}); err != nil {
+		t.Fatalf("replace applicable: %v", err)
+	}
+	if err := svc.ReplaceApplicableMerchants(nil, p.ID, 1, []uint64{1, 3}); err != nil {
+		t.Fatalf("replace applicable patch: %v", err)
+	}
+
+	ids, err := svc.ListApplicableMerchantIDs(p.ID)
+	if err != nil {
+		t.Fatalf("list applicable: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 3 {
+		t.Fatalf("want applicable [1 3], got %v", ids)
+	}
+}

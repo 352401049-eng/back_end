@@ -156,3 +156,13 @@ func merchantShelfProductScope(q *gorm.DB, merchantID uint64) *gorm.DB {
 		merchantID, merchantID,
 	)
 }
+
+func (s *ProductService) assertOwnerScope(product *model.Product, scopeMerchantID *uint64) error {
+	if scopeMerchantID == nil {
+		return nil
+	}
+	if product.MerchantID != *scopeMerchantID {
+		return ErrProductForbidden
+	}
+	return nil
+}

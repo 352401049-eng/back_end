@@ -178,7 +178,7 @@ func (s *ProductService) GetByID(id uint64, scopeMerchantID *uint64) (*model.Pro
 	var product model.Product
 	q := query.NotDeleted(s.DB).Preload("Category", "is_deleted = ?", model.NotDeleted).Preload("Merchant", "is_deleted = ?", model.NotDeleted).Where("id = ?", id)
 	if scopeMerchantID != nil {
-		q = q.Where("merchant_id = ?", *scopeMerchantID)
+		q = merchantShelfProductScope(q, *scopeMerchantID)
 	}
 	if err := q.First(&product).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -254,6 +254,9 @@ func (s *ProductService) List(page, pageSize int, filter ProductListFilter) ([]m
 func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *uint64) (*model.Product, error) {
 	product, err := s.GetByID(id, scopeMerchantID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return nil, err
 	}
 	if err := s.validateInput(input); err != nil {
@@ -414,7 +417,11 @@ func (s *ProductService) UpdateImages(id uint64, images []string, coverURL *stri
 	if len(images) == 0 {
 		return nil, ErrInvalidProductArg
 	}
-	if _, err := s.GetByID(id, scopeMerchantID); err != nil {
+	product, err := s.GetByID(id, scopeMerchantID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return nil, err
 	}
 	cover := images[0]
@@ -433,7 +440,11 @@ func (s *ProductService) UpdateStatus(id uint64, status uint8, scopeMerchantID *
 	if status != model.ProductStatusOff && status != model.ProductStatusOn {
 		return nil, ErrInvalidProductArg
 	}
-	if _, err := s.GetByID(id, scopeMerchantID); err != nil {
+	product, err := s.GetByID(id, scopeMerchantID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return nil, err
 	}
 	if err := s.DB.Model(&model.Product{}).Where("id = ?", id).Update("status", status).Error; err != nil {
@@ -446,6 +457,9 @@ func (s *ProductService) UpdateStatus(id uint64, status uint8, scopeMerchantID *
 func (s *ProductService) Delete(id uint64, scopeMerchantID *uint64) error {
 	product, err := s.GetByID(id, scopeMerchantID)
 	if err != nil {
+		return err
+	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return err
 	}
 	return s.DB.Transaction(func(tx *gorm.DB) error {
@@ -487,6 +501,9 @@ func (s *ProductService) UpdatePrice(id uint64, price float64, originalPrice *fl
 	if err != nil {
 		return nil, err
 	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
+		return nil, err
+	}
 	if product.EnableGroupBuy == 1 && product.GroupBuyPrice != nil && price <= *product.GroupBuyPrice {
 		return nil, ErrInvalidProductArg
 	}
@@ -500,6 +517,9 @@ func (s *ProductService) UpdatePrice(id uint64, price float64, originalPrice *fl
 func (s *ProductService) UpdateGroupBuy(id uint64, input GroupBuyConfigInput, scopeMerchantID *uint64) (*model.Product, error) {
 	product, err := s.GetByID(id, scopeMerchantID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return nil, err
 	}
 	targetCount := input.GroupBuyTargetCount
@@ -570,7 +590,11 @@ func (s *ProductService) UpdateCoupon(id uint64, enableCoupon uint8, scopeMercha
 	if enableCoupon != 0 && enableCoupon != 1 {
 		return nil, ErrInvalidProductArg
 	}
-	if _, err := s.GetByID(id, scopeMerchantID); err != nil {
+	product, err := s.GetByID(id, scopeMerchantID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return nil, err
 	}
 	if err := s.DB.Model(&model.Product{}).Where("id = ?", id).
@@ -593,6 +617,9 @@ type UpdateProductSaleInput struct {
 func (s *ProductService) UpdateSaleOptions(id uint64, input UpdateProductSaleInput, scopeMerchantID *uint64) (*model.Product, error) {
 	product, err := s.GetByID(id, scopeMerchantID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return nil, err
 	}
 
@@ -644,7 +671,11 @@ func (s *ProductService) UpdateSaleOptions(id uint64, input UpdateProductSaleInp
 }
 
 func (s *ProductService) UpdateStock(id uint64, stock uint32, scopeMerchantID *uint64) (*model.Product, error) {
-	if _, err := s.GetByID(id, scopeMerchantID); err != nil {
+	product, err := s.GetByID(id, scopeMerchantID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return nil, err
 	}
 	// 快捷改库存同步团购通道库存（下单扣 deal_stock，stock 为兼容字段）

@@ -97,6 +97,7 @@ type ProductRequest struct {
 	Status         uint8    `json:"status" example:"0"`
 	PackageGroups  []service.PackageGroupInput `json:"package_groups"`
 	OptionGroups   []service.OptionGroupInput  `json:"option_groups"`
+	ApplicableMerchantIDs *[]uint64 `json:"applicable_merchant_ids"`
 }
 
 // UpdateProductRequest 选择性更新商品：只传需要修改的字段，未传字段保留原值。
@@ -130,6 +131,7 @@ type UpdateProductRequest struct {
 	Status              *uint8    `json:"status"`
 	PackageGroups       []service.PackageGroupInput  `json:"package_groups"`
 	OptionGroups        *[]service.OptionGroupInput  `json:"option_groups"`
+	ApplicableMerchantIDs *[]uint64 `json:"applicable_merchant_ids"`
 }
 
 func (r UpdateProductRequest) hasField() bool {
@@ -141,7 +143,8 @@ func (r UpdateProductRequest) hasField() bool {
 		r.EnableGroupBuy != nil || r.EnableCoupon != nil || r.AllowPickup != nil || r.AllowDelivery != nil ||
 		r.GroupBuyTargetCount != nil || r.GroupBuyPrice != nil || r.GroupBuyAllowRepeat != nil ||
 		r.GroupBuyMaxConcurrentTeams != nil ||
-		r.ItemType != nil || r.Status != nil || len(r.PackageGroups) > 0 || r.OptionGroups != nil
+		r.ItemType != nil || r.Status != nil || len(r.PackageGroups) > 0 || r.OptionGroups != nil ||
+		r.ApplicableMerchantIDs != nil
 }
 
 type UpdateProductImagesRequest struct {
@@ -1556,6 +1559,9 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 		og := req.OptionGroups
 		input.OptionGroups = &og
 	}
+	if req.ApplicableMerchantIDs != nil {
+		input.ApplicableMerchantIDs = *req.ApplicableMerchantIDs
+	}
 	return input
 }
 
@@ -1687,6 +1693,10 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	}
 	if req.OptionGroups != nil {
 		input.OptionGroups = req.OptionGroups
+	}
+	if req.ApplicableMerchantIDs != nil {
+		input.HasApplicableMerchantIDs = true
+		input.ApplicableMerchantIDs = *req.ApplicableMerchantIDs
 	}
 	return input
 }
