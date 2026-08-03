@@ -11,7 +11,7 @@ type UploadConfig struct {
 	Dir              string // 本地存储根目录
 	MaxSizeMB        int
 	URLPrefix        string // 对外访问前缀，如 /uploads
-	PublicBase       string // 完整域名前缀，如 https://weixin.catmicloud.cn
+	PublicBase       string // 完整域名前缀，如 https://api.yujixinjiang.cn
 	AvatarPublicBase string // 头像 URL 域名前缀，默认同 PublicBase
 }
 

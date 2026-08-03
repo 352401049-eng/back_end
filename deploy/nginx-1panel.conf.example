@@ -1,5 +1,5 @@
 # 在 1Panel「网站」→ 目标站点 → 配置文件 中合并以下片段。
-# 假设域名 weixin.catmicloud.cn，后端进程监听 127.0.0.1:8080。
+# 假设域名 api.yujixinjiang.cn，后端进程监听 127.0.0.1:8080。
 
 # client_max_body_size 需 ≥ UPLOAD_MAX_MB（默认 10m）
 client_max_body_size 12m;

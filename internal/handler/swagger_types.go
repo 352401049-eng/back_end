@@ -18,7 +18,7 @@ type WeChatPhoneRequest struct {
 
 // AvatarRequest 头像授权请求。
 type AvatarRequest struct {
-	AvatarURL string `json:"avatar_url" binding:"required" example:"https://weixin.catmicloud.cn/uploads/2026/07/01/avatar.jpg"`
+	AvatarURL string `json:"avatar_url" binding:"required" example:"https://api.yujixinjiang.cn/uploads/2026/07/01/avatar.jpg"`
 }
 
 // MerchantProfileResp Swagger 商家资料响应。

@@ -1,6 +1,6 @@
 # 1Panel 生产部署（Ubuntu）
 
-小程序 API 域名以 `https://weixin.catmicloud.cn` 为例。
+小程序 API 域名以 `https://api.yujixinjiang.cn` 为准（与 `weixin/config/api.js`、`deploy/1panel.env.example` 一致）。
 
 ## 一、1Panel 里先装好基础服务
 
@@ -73,14 +73,14 @@ curl -s http://127.0.0.1:8080/api/health
 
 ## 五、1Panel 建网站 + HTTPS
 
-1. **网站 → 创建** → 域名 `weixin.catmicloud.cn`
+1. **网站 → 创建** → 域名 `api.yujixinjiang.cn`
 2. 类型选 **反向代理** → 目标 `http://127.0.0.1:8080`
 3. **SSL**：申请 Let’s Encrypt（或上传证书），强制 HTTPS
-4. 在站点配置中合并 `deploy/nginx-1panel.conf.example`（至少拦截 `/swagger`，并设 `client_max_body_size`）
+4. 在站点配置中合并 `deploy/nginx-1panel.conf.example` 或使用 `deploy/api.yujixinjiang.cn.nginx.conf`（至少拦截 `/swagger`，并设 `client_max_body_size`）
 5. 公网验证：
 
 ```bash
-curl -s https://weixin.catmicloud.cn/api/health
+curl -s https://api.yujixinjiang.cn/api/health
 ```
 
 `/swagger` 应 404。
@@ -88,7 +88,7 @@ curl -s https://weixin.catmicloud.cn/api/health
 ## 六、微信侧
 
 1. 小程序后台 → 开发 → 开发管理 → **服务器域名**：
-   - request / uploadFile / downloadFile：`https://weixin.catmicloud.cn`
+   - request / uploadFile / downloadFile：`https://api.yujixinjiang.cn`
 2. 微信支付商户平台：JSAPI、绑定小程序 AppID、支付回调 URL 与 `.env` 一致
 3. 体验版实测：真实支付 0.01 元 → 订单变已支付；取消/超时关单
 
