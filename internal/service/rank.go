@@ -232,8 +232,6 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 		rows = rows[:limit]
 	}
 
-	s.enrichHotGroupActivity(rows)
-
 	teamIDs := make([]uint64, 0, len(rows))
 	for _, r := range rows {
 		if r.TeamID > 0 {
@@ -271,68 +269,6 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 		})
 	}
 	return out, nil
-}
-
-// enrichHotGroupActivity 为热拼条目补齐活动拼团入口。
-// 订单行可能未写 activity_*（商品本身未开拼团通道），但活动商品开启了拼团；
-// 热拼榜进详情必须带 activityId/activityProductId，否则会落到无拼团 UI 的商品页。
-func (s *RankService) enrichHotGroupActivity(rows []hotGroupRow) {
-	if len(rows) == 0 {
-		return
-	}
-	need := make([]uint64, 0)
-	seen := map[uint64]struct{}{}
-	for i := range rows {
-		if rows[i].ActivityProductID != nil && *rows[i].ActivityProductID > 0 {
-			continue
-		}
-		pid := rows[i].ProductID
-		if _, ok := seen[pid]; ok {
-			continue
-		}
-		seen[pid] = struct{}{}
-		need = append(need, pid)
-	}
-	if len(need) == 0 {
-		return
-	}
-	now := time.Now()
-	type apRow struct {
-		ID         uint64
-		ActivityID uint64
-		ProductID  uint64
-		GroupPrice *float64
-	}
-	var aps []apRow
-	_ = s.freshDB().Table("activity_product AS ap").
-		Select("ap.id, ap.activity_id, ap.product_id, ap.group_buy_price AS group_price").
-		Joins("JOIN activity AS a ON a.id = ap.activity_id AND a.is_deleted = 0").
-		Where("ap.is_deleted = 0 AND ap.status = 1 AND ap.enable_group_buy = 1").
-		Where("ap.product_id IN ?", need).
-		Where("a.status = ? AND a.start_at <= ? AND a.end_at >= ?", model.ActivityStatusOn, now, now).
-		Order("ap.id DESC").
-		Scan(&aps).Error
-	best := map[uint64]apRow{}
-	for _, ap := range aps {
-		if _, ok := best[ap.ProductID]; !ok {
-			best[ap.ProductID] = ap
-		}
-	}
-	for i := range rows {
-		if rows[i].ActivityProductID != nil && *rows[i].ActivityProductID > 0 {
-			continue
-		}
-		ap, ok := best[rows[i].ProductID]
-		if !ok {
-			continue
-		}
-		aid, apid := ap.ActivityID, ap.ID
-		rows[i].ActivityID = &aid
-		rows[i].ActivityProductID = &apid
-		if ap.GroupPrice != nil && *ap.GroupPrice > 0 {
-			rows[i].GroupPrice = *ap.GroupPrice
-		}
-	}
 }
 
 func itoaUint64(v uint64) string {
