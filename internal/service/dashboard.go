@@ -301,7 +301,7 @@ func (s *DashboardService) listCompletedBagSalesItems(filter SalesReportFilter) 
 	q := query.NotDeleted(s.freshDB().Model(&model.UserInventoryUsage{})).
 		Where("status = ?", model.InventoryUsageCompleted)
 	if filter.MerchantID != nil {
-		q = q.Where("merchant_id = ?", *filter.MerchantID)
+		q = q.Where("usage_merchant_id = ?", *filter.MerchantID)
 	}
 	q = applyCompletedTimeRange(q, "updated_at", filter.StartDate, filter.EndDate)
 
@@ -364,7 +364,7 @@ func (s *DashboardService) listCompletedTakeoutSalesItems(filter SalesReportFilt
 	q := query.NotDeleted(s.freshDB().Model(&model.TakeoutOrder{})).
 		Where("status = ? AND pay_status = ?", model.TakeoutStatusCompleted, model.PayStatusPaid)
 	if filter.MerchantID != nil {
-		q = q.Where("merchant_id = ?", *filter.MerchantID)
+		q = q.Where("usage_merchant_id = ?", *filter.MerchantID)
 	}
 	q = applyCompletedTimeRange(q, "updated_at", filter.StartDate, filter.EndDate)
 
@@ -542,7 +542,7 @@ func (s *DashboardService) orderTrend(merchantID *uint64, days int) ([]DailyStat
 			model.NotDeleted, model.InventoryUsageCompleted, start).
 		Select(bagDay + " AS day, COUNT(*) AS order_count, COALESCE(SUM((" + bagUnit + ") * u.quantity), 0) AS sales_amount")
 	if merchantID != nil {
-		bagQ = bagQ.Where("u.merchant_id = ?", *merchantID)
+		bagQ = bagQ.Where("u.usage_merchant_id = ?", *merchantID)
 	}
 	var bagRows []row
 	if err := bagQ.Group(bagDay).Scan(&bagRows).Error; err != nil {
@@ -557,7 +557,7 @@ func (s *DashboardService) orderTrend(merchantID *uint64, days int) ([]DailyStat
 			model.TakeoutStatusCompleted, model.PayStatusPaid, start).
 		Select(toDay + " AS day, COUNT(*) AS order_count, COALESCE(SUM(GREATEST(pay_amount - refunded_amount, 0)), 0) AS sales_amount")
 	if merchantID != nil {
-		toQ = toQ.Where("merchant_id = ?", *merchantID)
+		toQ = toQ.Where("usage_merchant_id = ?", *merchantID)
 	}
 	var toRows []row
 	if err := toQ.Group(toDay).Scan(&toRows).Error; err != nil {
@@ -610,7 +610,7 @@ func (s *DashboardService) topProducts(merchantID *uint64, limit int) ([]Product
 		Select("u.product_id, COALESCE(SUM(u.quantity), 0) AS sales_count").
 		Where("u.is_deleted = ? AND u.status = ?", model.NotDeleted, model.InventoryUsageCompleted)
 	if merchantID != nil {
-		bagQ = bagQ.Where("u.merchant_id = ?", *merchantID)
+		bagQ = bagQ.Where("u.usage_merchant_id = ?", *merchantID)
 	}
 	var bagRows []agg
 	if err := bagQ.Group("u.product_id").Scan(&bagRows).Error; err != nil {
@@ -626,7 +626,7 @@ func (s *DashboardService) topProducts(merchantID *uint64, limit int) ([]Product
 		Where("ti.is_deleted = 0 AND t.status = ? AND t.pay_status = ?",
 			model.TakeoutStatusCompleted, model.PayStatusPaid)
 	if merchantID != nil {
-		toQ = toQ.Where("t.merchant_id = ?", *merchantID)
+		toQ = toQ.Where("t.usage_merchant_id = ?", *merchantID)
 	}
 	var toRows []agg
 	if err := toQ.Group("ti.product_id").Scan(&toRows).Error; err != nil {
