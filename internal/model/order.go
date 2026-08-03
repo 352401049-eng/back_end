@@ -80,6 +80,7 @@ type Order struct {
 	OrderNo             string           `gorm:"size:32;not null" json:"order_no"`
 	AccountID           uint64           `gorm:"not null" json:"account_id"`
 	MerchantID          uint64           `gorm:"not null" json:"merchant_id"`
+	UsageMerchantID     *uint64          `gorm:"column:usage_merchant_id" json:"usage_merchant_id,omitempty"`
 	PackageProductID    *uint64          `gorm:"column:package_product_id;index" json:"package_product_id,omitempty"`
 	ActivityID          *uint64          `gorm:"column:activity_id" json:"activity_id,omitempty"`
 	Status              uint8            `gorm:"not null;default:0" json:"status"`

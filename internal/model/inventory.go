@@ -54,6 +54,7 @@ type UserInventoryUsage struct {
 	InventoryID     uint64           `gorm:"not null" json:"inventory_id"`
 	ProductID       uint64           `gorm:"not null" json:"product_id"`
 	MerchantID      uint64           `gorm:"not null" json:"merchant_id"`
+	UsageMerchantID uint64           `gorm:"column:usage_merchant_id;not null;default:0" json:"usage_merchant_id"`
 	SourceOrderID   *uint64          `gorm:"column:source_order_id" json:"source_order_id,omitempty"`
 	Quantity        uint32           `gorm:"not null" json:"quantity"`
 	DeliveryType    uint8            `gorm:"not null" json:"delivery_type"`

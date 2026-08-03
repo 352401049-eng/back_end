@@ -24,6 +24,7 @@ type TakeoutOrder struct {
 	OrderNo            string           `gorm:"size:32;not null" json:"order_no"`
 	AccountID          uint64           `gorm:"not null" json:"account_id"`
 	MerchantID         uint64           `gorm:"not null" json:"merchant_id"`
+	UsageMerchantID    uint64           `gorm:"column:usage_merchant_id;not null;default:0" json:"usage_merchant_id"`
 	Status             uint8            `gorm:"not null;default:0" json:"status"`
 	GoodsAmount        float64          `gorm:"type:decimal(10,2);not null" json:"goods_amount"`
 	DeliveryFee        float64          `gorm:"type:decimal(10,2);not null;default:0" json:"delivery_fee"`
