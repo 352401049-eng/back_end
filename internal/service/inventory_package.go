@@ -503,8 +503,13 @@ func filterOptionSelectionsForProduct(
 }
 
 func validateFulfillmentFlags(product model.Product, deliveryType uint8) error {
-	if product.ItemType == model.ProductItemTypeVirtual && deliveryType == model.DeliveryTypeDelivery {
-		return ErrVirtualNotDeliverable
+	// 虚拟商品仅支持到店核销（delivery_type=pickup 生成核销码），禁止骑手配送；
+	// 不校验 allow_pickup（虚拟商品后台常关自取/配送开关）。
+	if product.ItemType == model.ProductItemTypeVirtual {
+		if deliveryType == model.DeliveryTypeDelivery {
+			return ErrVirtualNotDeliverable
+		}
+		return nil
 	}
 	if deliveryType == model.DeliveryTypeDelivery && product.AllowDelivery != 1 {
 		return ErrDeliveryNotAllowed
