@@ -193,8 +193,13 @@ func (h *StoreHandler) listMerchantProducts(c *gin.Context, merchantID uint64) {
 		response.InternalError(c, "获取商品列表失败")
 		return
 	}
+	views, err := h.ProductSvc.ToStoreViews(list)
+	if err != nil {
+		response.InternalError(c, "获取商品列表失败")
+		return
+	}
 	response.OK(c, query.PageResult{
-		List:     h.ProductSvc.ToStoreViews(list),
+		List:     views,
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
@@ -350,6 +355,12 @@ func (h *StoreHandler) GetMerchantStore(c *gin.Context) {
 		return
 	}
 
+	groupViews, err := h.ProductSvc.ToStoreViews(groupProducts)
+	if err != nil {
+		response.InternalError(c, "获取团购商品失败")
+		return
+	}
+
 	var deliveryZone *service.DeliveryZoneView
 	if h.ZoneSvc != nil {
 		deliveryZone, _ = h.ZoneSvc.GetPublicView(merchantID)
@@ -360,7 +371,7 @@ func (h *StoreHandler) GetMerchantStore(c *gin.Context) {
 		DeliveryZone:     deliveryZone,
 		ActiveActivities: h.ActivitySvc.ToStoreViews(activities, true),
 		ClaimableCoupons: coupons,
-		GroupBuyProducts: h.ProductSvc.ToStoreViews(groupProducts),
+		GroupBuyProducts: groupViews,
 	})
 }
 

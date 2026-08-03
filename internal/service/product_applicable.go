@@ -105,15 +105,15 @@ func (s *ProductService) AssertMerchantApplicable(productID, merchantID uint64) 
 	return nil
 }
 
-func (s *ProductService) loadApplicableMerchantBriefs(productIDs []uint64) (map[uint64][]ApplicableMerchantBrief, map[uint64][]uint64) {
+func (s *ProductService) loadApplicableMerchantBriefs(productIDs []uint64) (map[uint64][]ApplicableMerchantBrief, map[uint64][]uint64, error) {
 	briefs := make(map[uint64][]ApplicableMerchantBrief)
 	idsMap := make(map[uint64][]uint64)
 	if len(productIDs) == 0 {
-		return briefs, idsMap
+		return briefs, idsMap, nil
 	}
 	var rows []model.ProductApplicableMerchant
 	if err := s.DB.Where("product_id IN ?", productIDs).Order("merchant_id ASC").Find(&rows).Error; err != nil {
-		return briefs, idsMap
+		return nil, nil, err
 	}
 	merchantIDs := make([]uint64, 0, len(rows))
 	for i := range rows {
@@ -123,10 +123,11 @@ func (s *ProductService) loadApplicableMerchantBriefs(productIDs []uint64) (map[
 	if len(merchantIDs) > 0 {
 		var merchants []model.MerchantProfile
 		if err := query.NotDeleted(s.DB).Select("id", "shop_name").
-			Where("id IN ?", merchantIDs).Find(&merchants).Error; err == nil {
-			for i := range merchants {
-				shopNames[merchants[i].ID] = merchants[i].ShopName
-			}
+			Where("id IN ?", merchantIDs).Find(&merchants).Error; err != nil {
+			return nil, nil, err
+		}
+		for i := range merchants {
+			shopNames[merchants[i].ID] = merchants[i].ShopName
 		}
 	}
 	for i := range rows {
@@ -138,18 +139,10 @@ func (s *ProductService) loadApplicableMerchantBriefs(productIDs []uint64) (map[
 			ShopName: shopNames[mid],
 		})
 	}
-	return briefs, idsMap
+	return briefs, idsMap, nil
 }
 
 func applyApplicableMerchantsToStoreView(view *ProductStoreView, ids []uint64, briefs []ApplicableMerchantBrief) {
-	if view == nil {
-		return
-	}
-	view.ApplicableMerchantIDs = ids
-	view.ApplicableMerchants = briefs
-}
-
-func applyApplicableMerchantsToDetailView(view *ProductDetailView, ids []uint64, briefs []ApplicableMerchantBrief) {
 	if view == nil {
 		return
 	}

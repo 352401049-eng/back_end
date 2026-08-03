@@ -814,7 +814,10 @@ func (s *ProductService) GetOnShelfPublic(id uint64) (*ProductDetailView, error)
 }
 
 func (s *ProductService) toDetailView(product *model.Product) (*ProductDetailView, error) {
-	store := s.ToStoreView(product)
+	store, err := s.ToStoreView(product)
+	if err != nil {
+		return nil, err
+	}
 	view := &ProductDetailView{
 		Product:               *product,
 		CanGroupBuy:           store.CanGroupBuy,

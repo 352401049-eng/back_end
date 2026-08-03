@@ -97,6 +97,26 @@ func TestListOnShelfIncludesApplicable(t *testing.T) {
 	}
 }
 
+func TestReplaceNormalizesOwnerIntoApplicable(t *testing.T) {
+	db := setupApplicableProductTestDB(t)
+	seedOpenMerchant(db, 1, "店A")
+	seedOpenMerchant(db, 2, "店B")
+	p := seedOnShelfProduct(db, 1, "跨店商品")
+
+	svc := &ProductService{DB: db}
+	if err := svc.ReplaceApplicableMerchants(nil, p.ID, 1, []uint64{2}); err != nil {
+		t.Fatalf("replace applicable: %v", err)
+	}
+
+	ids, err := svc.ListApplicableMerchantIDs(p.ID)
+	if err != nil {
+		t.Fatalf("list applicable: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		t.Fatalf("want applicable [1 2], got %v", ids)
+	}
+}
+
 func TestGetOnShelfAllowsApplicableMerchant(t *testing.T) {
 	db := setupApplicableProductTestDB(t)
 	seedOpenMerchant(db, 1, "店A")

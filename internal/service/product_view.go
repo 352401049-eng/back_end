@@ -38,9 +38,9 @@ type ProductStoreView struct {
 	ApplicableMerchants   []ApplicableMerchantBrief `json:"applicable_merchants"`
 }
 
-func (s *ProductService) ToStoreView(p *model.Product) *ProductStoreView {
+func (s *ProductService) ToStoreView(p *model.Product) (*ProductStoreView, error) {
 	if p == nil {
-		return nil
+		return nil, nil
 	}
 	gbMap := s.loadActiveGroupBuys([]uint64{p.ID})
 	var gb *model.GroupBuy
@@ -48,18 +48,24 @@ func (s *ProductService) ToStoreView(p *model.Product) *ProductStoreView {
 		gb = &g
 	}
 	view := buildProductStoreView(*p, gb)
-	briefsMap, idsMap := s.loadApplicableMerchantBriefs([]uint64{p.ID})
+	briefsMap, idsMap, err := s.loadApplicableMerchantBriefs([]uint64{p.ID})
+	if err != nil {
+		return nil, err
+	}
 	applyApplicableMerchantsToStoreView(&view, idsMap[p.ID], briefsMap[p.ID])
-	return &view
+	return &view, nil
 }
 
-func (s *ProductService) ToStoreViews(products []model.Product) []ProductStoreView {
+func (s *ProductService) ToStoreViews(products []model.Product) ([]ProductStoreView, error) {
 	ids := make([]uint64, 0, len(products))
 	for i := range products {
 		ids = append(ids, products[i].ID)
 	}
 	gbMap := s.loadActiveGroupBuys(ids)
-	briefsMap, idsMap := s.loadApplicableMerchantBriefs(ids)
+	briefsMap, idsMap, err := s.loadApplicableMerchantBriefs(ids)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]ProductStoreView, 0, len(products))
 	for i := range products {
 		var gb *model.GroupBuy
@@ -70,7 +76,7 @@ func (s *ProductService) ToStoreViews(products []model.Product) []ProductStoreVi
 		applyApplicableMerchantsToStoreView(&view, idsMap[products[i].ID], briefsMap[products[i].ID])
 		views = append(views, view)
 	}
-	return views
+	return views, nil
 }
 
 func (s *ProductService) loadActiveGroupBuys(productIDs []uint64) map[uint64]model.GroupBuy {
