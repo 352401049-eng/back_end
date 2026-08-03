@@ -162,6 +162,7 @@ func (h *UserHandler) CheckoutCart(c *gin.Context) {
 type CheckoutCartTakeoutRequest struct {
 	CartItemIDs        []uint64                              `json:"cart_item_ids" binding:"required,min=1"`
 	MerchantID         uint64                                `json:"merchant_id" binding:"required"`
+	UsageMerchantID    uint64                                `json:"usage_merchant_id" binding:"required"`
 	AddressID          uint64                                `json:"address_id" binding:"required"`
 	DeliveryTimeRemark string                                `json:"delivery_time_remark"`
 	Lines              []service.CartCheckoutTakeoutLineInput `json:"lines"`
@@ -192,7 +193,7 @@ func (h *UserHandler) CheckoutCartTakeout(c *gin.Context) {
 		return
 	}
 	view, err := h.TakeoutSvc.CreateFromCart(accountID, service.CartCheckoutTakeoutInput{
-		CartItemIDs: req.CartItemIDs, MerchantID: req.MerchantID,
+		CartItemIDs: req.CartItemIDs, MerchantID: req.MerchantID, UsageMerchantID: req.UsageMerchantID,
 		AddressID: req.AddressID, DeliveryTimeRemark: req.DeliveryTimeRemark,
 		Lines: req.Lines,
 	})

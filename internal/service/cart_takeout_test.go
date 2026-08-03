@@ -84,14 +84,24 @@ func TestValidateCartCheckoutTakeoutInput(t *testing.T) {
 			in: CartCheckoutTakeoutInput{
 				CartItemIDs: []uint64{1},
 				MerchantID:  9,
+				UsageMerchantID: 9,
 			},
 			wantErr: ErrAddressRequired,
+		},
+		{
+			name: "missing usage merchant",
+			in: CartCheckoutTakeoutInput{
+				CartItemIDs: []uint64{1},
+				MerchantID:  9,
+			},
+			wantErr: ErrInvalidProductArg,
 		},
 		{
 			name: "ok",
 			in: CartCheckoutTakeoutInput{
 				CartItemIDs: []uint64{1, 2},
 				MerchantID:  9,
+				UsageMerchantID: 9,
 				AddressID:   3,
 			},
 		},

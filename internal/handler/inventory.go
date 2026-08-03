@@ -127,6 +127,7 @@ type UseInventoryRequest struct {
 
 type UseBatchInventoryRequest struct {
 	Items             []service.UseBatchItemInput `json:"items" binding:"required"`
+	UsageMerchantID   uint64                      `json:"usage_merchant_id"`
 	DeliveryType      *uint8                      `json:"delivery_type" binding:"required"`
 	AddressID         *uint64                     `json:"address_id"`
 	DeliveryLatitude  *float64                    `json:"delivery_latitude"`
@@ -199,7 +200,7 @@ func (h *UserHandler) UseInventoryBatch(c *gin.Context) {
 		return
 	}
 	view, err := h.InventorySvc.UseBatch(accountID, service.UseBatchInput{
-		Items: req.Items, DeliveryType: *req.DeliveryType,
+		Items: req.Items, UsageMerchantID: req.UsageMerchantID, DeliveryType: *req.DeliveryType,
 		AddressID: req.AddressID, DeliveryLatitude: req.DeliveryLatitude, DeliveryLongitude: req.DeliveryLongitude,
 		Remark: req.Remark,
 	})

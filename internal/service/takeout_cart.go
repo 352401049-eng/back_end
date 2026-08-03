@@ -17,6 +17,7 @@ import (
 type CartCheckoutTakeoutInput struct {
 	CartItemIDs        []uint64
 	MerchantID         uint64
+	UsageMerchantID    uint64
 	AddressID          uint64
 	DeliveryTimeRemark string
 	Lines              []CartCheckoutTakeoutLineInput
@@ -55,6 +56,9 @@ func validateCartCheckoutTakeoutInput(in CartCheckoutTakeoutInput) error {
 	}
 	if in.MerchantID == 0 {
 		return fmt.Errorf("%w: 请指定商家", ErrInvalidProductArg)
+	}
+	if in.UsageMerchantID == 0 {
+		return fmt.Errorf("%w: 请选择使用门店", ErrInvalidProductArg)
 	}
 	if in.AddressID == 0 {
 		return ErrAddressRequired
@@ -133,6 +137,9 @@ func (s *TakeoutService) CreateFromCart(accountID uint64, in CartCheckoutTakeout
 		if err := assertProductChannelPurchasable(product, productChannelTakeout); err != nil {
 			return nil, err
 		}
+		if err := (&ProductService{DB: s.DB}).AssertMerchantApplicable(product.ID, in.UsageMerchantID); err != nil {
+			return nil, err
+		}
 
 		unit, err := takeoutGoodsUnitPrice(product)
 		if err != nil {
@@ -157,13 +164,13 @@ func (s *TakeoutService) CreateFromCart(accountID uint64, in CartCheckoutTakeout
 	addrID := in.AddressID
 	coordIn := DeliveryCoordinateInput{AddressID: &addrID}
 	if s.ZoneSvc != nil {
-		if err := s.ZoneSvc.ValidateDelivery(accountID, in.MerchantID, model.DeliveryTypeDelivery, coordIn); err != nil {
+		if err := s.ZoneSvc.ValidateDelivery(accountID, in.UsageMerchantID, model.DeliveryTypeDelivery, coordIn); err != nil {
 			return nil, err
 		}
 	}
 
 	var mp model.MerchantProfile
-	if err := query.NotDeleted(s.DB).Select("id", "delivery_fee", "rider_earnings").First(&mp, in.MerchantID).Error; err != nil {
+	if err := query.NotDeleted(s.DB).Select("id", "delivery_fee", "rider_earnings").First(&mp, in.UsageMerchantID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMerchantNotFound
 		}
@@ -243,6 +250,7 @@ func (s *TakeoutService) CreateFromCart(accountID uint64, in CartCheckoutTakeout
 			OrderNo:            genTakeoutOrderNo(),
 			AccountID:          accountID,
 			MerchantID:         in.MerchantID,
+			UsageMerchantID:    in.UsageMerchantID,
 			Status:             model.TakeoutStatusPendingPay,
 			GoodsAmount:        goodsAmount,
 			DeliveryFee:        deliveryFee,

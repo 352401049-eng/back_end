@@ -34,6 +34,7 @@ type TakeoutService struct {
 
 type CreateTakeoutInput struct {
 	MerchantID         uint64
+	UsageMerchantID    uint64
 	ProductID          uint64
 	Quantity           uint32
 	AddressID          uint64
@@ -299,6 +300,9 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 	if in.Quantity == 0 {
 		in.Quantity = 1
 	}
+	if in.UsageMerchantID == 0 {
+		return nil, fmt.Errorf("%w: 请选择使用门店", ErrInvalidProductArg)
+	}
 	if in.AddressID == 0 {
 		return nil, ErrAddressRequired
 	}
@@ -321,17 +325,20 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 	if product.TakeoutStock < in.Quantity {
 		return nil, ErrInsufficientStock
 	}
+	if err := (&ProductService{DB: s.DB}).AssertMerchantApplicable(product.ID, in.UsageMerchantID); err != nil {
+		return nil, err
+	}
 
 	addrID := in.AddressID
 	coordIn := DeliveryCoordinateInput{AddressID: &addrID}
 	if s.ZoneSvc != nil {
-		if err := s.ZoneSvc.ValidateDelivery(accountID, in.MerchantID, model.DeliveryTypeDelivery, coordIn); err != nil {
+		if err := s.ZoneSvc.ValidateDelivery(accountID, in.UsageMerchantID, model.DeliveryTypeDelivery, coordIn); err != nil {
 			return nil, err
 		}
 	}
 
 	var mp model.MerchantProfile
-	if err := query.NotDeleted(s.DB).Select("id", "delivery_fee", "rider_earnings").First(&mp, in.MerchantID).Error; err != nil {
+	if err := query.NotDeleted(s.DB).Select("id", "delivery_fee", "rider_earnings").First(&mp, in.UsageMerchantID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMerchantNotFound
 		}
@@ -436,7 +443,8 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 		takeout = model.TakeoutOrder{
 			OrderNo:            genTakeoutOrderNo(),
 			AccountID:          accountID,
-			MerchantID:         in.MerchantID,
+			MerchantID:         product.MerchantID,
+			UsageMerchantID:    in.UsageMerchantID,
 			Status:             model.TakeoutStatusPendingPay,
 			GoodsAmount:        goodsAmount,
 			DeliveryFee:        deliveryFee,
@@ -714,7 +722,7 @@ func (s *TakeoutService) GetView(accountID, takeoutID uint64) (*TakeoutView, err
 func (s *TakeoutService) GetMerchantView(merchantID, takeoutID uint64) (*TakeoutView, error) {
 	var to model.TakeoutOrder
 	if err := query.NotDeleted(s.DB).
-		Where("id = ? AND merchant_id = ?", takeoutID, merchantID).
+		Where("id = ? AND usage_merchant_id = ?", takeoutID, merchantID).
 		Preload("Items", "is_deleted = ?", model.NotDeleted).
 		First(&to).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -802,7 +810,7 @@ func (s *TakeoutService) ListForMerchant(merchantID uint64, page, pageSize int, 
 		return nil, 0, err
 	}
 
-	q := query.NotDeleted(s.DB.Model(&model.TakeoutOrder{})).Where("merchant_id = ?", merchantID)
+	q := query.NotDeleted(s.DB.Model(&model.TakeoutOrder{})).Where("usage_merchant_id = ?", merchantID)
 	if status != nil {
 		q = q.Where("status = ?", *status)
 	}
@@ -913,7 +921,7 @@ func (s *TakeoutService) ConfirmPrepared(merchantID, takeoutID uint64) (*Takeout
 			}
 			return err
 		}
-		if to.MerchantID != merchantID {
+		if to.UsageMerchantID != merchantID {
 			return ErrTakeoutForbidden
 		}
 		if to.Status != model.TakeoutStatusPreparing || to.PayStatus != model.PayStatusPaid {
@@ -930,7 +938,7 @@ func (s *TakeoutService) ConfirmPrepared(merchantID, takeoutID uint64) (*Takeout
 			Status:           model.DeliveryPendingAccept,
 			MerchantPrepared: 1,
 			PreparedAt:       &now,
-			PickupCode:       genPickupCode(tx, merchantID),
+			PickupCode:       genPickupCode(tx, to.UsageMerchantID),
 			DeliveryFee:      to.DeliveryFee,
 			RiderEarnings:    to.RiderEarnings,
 		}
@@ -993,7 +1001,7 @@ func (s *TakeoutService) Reject(merchantID, takeoutID uint64, reason string) (*T
 			}
 			return err
 		}
-		if to.MerchantID != merchantID {
+		if to.UsageMerchantID != merchantID {
 			return ErrTakeoutForbidden
 		}
 		if to.Status == model.TakeoutStatusCancelled {

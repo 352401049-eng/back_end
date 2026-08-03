@@ -20,6 +20,7 @@ type UseBatchItemInput struct {
 
 type UseBatchInput struct {
 	Items                      []UseBatchItemInput
+	UsageMerchantID            uint64
 	DeliveryType               uint8
 	AddressID                  *uint64
 	DeliveryLatitude           *float64
@@ -43,12 +44,12 @@ type loadedUseBatchItem struct {
 }
 
 // validateUseBatchDraft 校验批量使用草稿（不扣库存），供配送费预支付单创建。
-func (s *InventoryService) validateUseBatchDraft(accountID uint64, input UseBatchInput, merchantID uint64) error {
-	_, err := s.loadUseBatchItems(accountID, input, merchantID)
+func (s *InventoryService) validateUseBatchDraft(accountID uint64, input UseBatchInput, usageMerchantID uint64) error {
+	_, err := s.loadUseBatchItems(accountID, input, usageMerchantID)
 	return err
 }
 
-func (s *InventoryService) loadUseBatchItems(accountID uint64, input UseBatchInput, expectMerchantID uint64) ([]loadedUseBatchItem, error) {
+func (s *InventoryService) loadUseBatchItems(accountID uint64, input UseBatchInput, expectUsageMerchantID uint64) ([]loadedUseBatchItem, error) {
 	if len(input.Items) == 0 {
 		return nil, fmt.Errorf("%w: 请选择商品", ErrInventoryUsageInvalid)
 	}
@@ -59,9 +60,15 @@ func (s *InventoryService) loadUseBatchItems(accountID uint64, input UseBatchInp
 	if deliveryType == model.DeliveryTypeDelivery && input.AddressID == nil {
 		return nil, ErrAddressRequired
 	}
+	if deliveryType == model.DeliveryTypeDelivery && input.UsageMerchantID == 0 {
+		return nil, fmt.Errorf("%w: 请选择使用门店", ErrInvalidProductArg)
+	}
+	if expectUsageMerchantID > 0 && input.UsageMerchantID != expectUsageMerchantID {
+		return nil, fmt.Errorf("%w: 商家不匹配", ErrInventoryUsageInvalid)
+	}
 
 	loaded := make([]loadedUseBatchItem, 0, len(input.Items))
-	var merchantID uint64
+	var ownerMerchantID uint64
 
 	for _, it := range input.Items {
 		qty := it.Quantity
@@ -84,18 +91,24 @@ func (s *InventoryService) loadUseBatchItems(accountID uint64, input UseBatchInp
 		if inv.Quantity < qty {
 			return nil, ErrInventoryInsufficient
 		}
-		if merchantID == 0 {
-			merchantID = inv.Product.MerchantID
-		} else if inv.Product.MerchantID != merchantID {
+		if ownerMerchantID == 0 {
+			ownerMerchantID = inv.Product.MerchantID
+		} else if inv.Product.MerchantID != ownerMerchantID {
 			return nil, fmt.Errorf("%w: 只能同时使用同一家店的商品", ErrInventoryUsageInvalid)
-		}
-		if expectMerchantID > 0 && merchantID != expectMerchantID {
-			return nil, fmt.Errorf("%w: 商家不匹配", ErrInventoryUsageInvalid)
 		}
 		if err := validateFulfillmentFlags(inv.Product, deliveryType); err != nil {
 			return nil, err
 		}
 		loaded = append(loaded, loadedUseBatchItem{inv: inv, qty: qty, sels: it.PackageSelections, optSels: it.OptionSelections})
+	}
+
+	if deliveryType == model.DeliveryTypeDelivery {
+		productSvc := &ProductService{DB: s.DB}
+		for _, item := range loaded {
+			if err := productSvc.AssertMerchantApplicable(item.inv.ProductID, input.UsageMerchantID); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	needByInv := map[uint64]uint32{}
@@ -122,7 +135,11 @@ func (s *InventoryService) loadUseBatchItems(accountID uint64, input UseBatchInp
 	if zoneSvc == nil {
 		zoneSvc = &DeliveryZoneService{DB: s.DB}
 	}
-	if err := zoneSvc.ValidateDelivery(accountID, merchantID, deliveryType, DeliveryCoordinateInput{
+	zoneMerchantID := ownerMerchantID
+	if deliveryType == model.DeliveryTypeDelivery {
+		zoneMerchantID = input.UsageMerchantID
+	}
+	if err := zoneSvc.ValidateDelivery(accountID, zoneMerchantID, deliveryType, DeliveryCoordinateInput{
 		AddressID: input.AddressID, AddressSnapshot: addrSnap,
 	}); err != nil {
 		return nil, err
@@ -130,7 +147,7 @@ func (s *InventoryService) loadUseBatchItems(accountID uint64, input UseBatchInp
 
 	if deliveryType == model.DeliveryTypeDelivery && !input.FulfillAfterDeliveryFeePay {
 		var merchant model.MerchantProfile
-		if err := query.NotDeleted(s.DB).Select("delivery_fee").First(&merchant, merchantID).Error; err != nil {
+		if err := query.NotDeleted(s.DB).Select("delivery_fee").First(&merchant, input.UsageMerchantID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, ErrMerchantNotFound
 			}
@@ -152,10 +169,11 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 	}
 
 	deliveryType, _ := normalizeDeliveryType(input.DeliveryType)
-	var merchantID uint64
+	var ownerMerchantID uint64
 	if len(loaded) > 0 {
-		merchantID = loaded[0].inv.Product.MerchantID
+		ownerMerchantID = loaded[0].inv.Product.MerchantID
 	}
+	usageMerchantID := input.UsageMerchantID
 
 	var addrSnap *model.AddressSnapshot
 	if deliveryType == model.DeliveryTypeDelivery {
@@ -178,7 +196,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 
 		if deliveryType == model.DeliveryTypeDelivery {
 			var merchant model.MerchantProfile
-			if err := query.NotDeleted(tx).First(&merchant, merchantID).Error; err != nil {
+			if err := query.NotDeleted(tx).First(&merchant, usageMerchantID).Error; err != nil {
 				return ErrMerchantNotFound
 			}
 			deliveryFee = merchant.DeliveryFee
@@ -228,7 +246,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 			}
 			usage := model.UserInventoryUsage{
 				AccountID: accountID, InventoryID: inv.ID, ProductID: inv.ProductID,
-				MerchantID: merchantID, SourceOrderID: srcOID,
+				MerchantID: ownerMerchantID, UsageMerchantID: usageMerchantID, SourceOrderID: srcOID,
 				Quantity: item.qty, DeliveryType: deliveryType,
 				AddressSnapshot: addrSnap, Status: status, Remark: input.Remark,
 				PackageSelections: snap, PackageSelectStatus: pkgStatus,

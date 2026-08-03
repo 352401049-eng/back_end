@@ -118,7 +118,8 @@ func (s *DeliveryFeePayService) Create(accountID uint64, in CreateDeliveryFeePay
 	}
 
 	batchIn := UseBatchInput{
-		Items:                        in.Items,
+		Items:                      in.Items,
+		UsageMerchantID:            in.MerchantID,
 		DeliveryType:                 model.DeliveryTypeDelivery,
 		AddressID:                    &in.AddressID,
 		Remark:                       remark,
@@ -245,6 +246,7 @@ func (s *DeliveryFeePayService) MarkPaidInTx(tx *gorm.DB, feeOrderID uint64, at 
 	invOnTx.DB = tx
 	result, err := invOnTx.UseBatch(feeOrder.AccountID, UseBatchInput{
 		Items:                      payload.Items,
+		UsageMerchantID:            feeOrder.MerchantID,
 		DeliveryType:               model.DeliveryTypeDelivery,
 		AddressID:                    &payload.AddressID,
 		Remark:                       payload.Remark,

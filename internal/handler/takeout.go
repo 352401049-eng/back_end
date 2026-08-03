@@ -19,6 +19,7 @@ type TakeoutHandler struct {
 
 type CreateTakeoutRequest struct {
 	MerchantID         uint64                          `json:"merchant_id"`
+	UsageMerchantID    uint64                          `json:"usage_merchant_id"`
 	ProductID          uint64                          `json:"product_id"`
 	Quantity           uint32                          `json:"quantity"`
 	AddressID          uint64                          `json:"address_id"`
@@ -50,6 +51,7 @@ func (h *TakeoutHandler) Create(c *gin.Context) {
 	}
 	view, err := h.TakeoutSvc.Create(accountID, service.CreateTakeoutInput{
 		MerchantID:         req.MerchantID,
+		UsageMerchantID:    req.UsageMerchantID,
 		ProductID:          req.ProductID,
 		Quantity:           req.Quantity,
 		AddressID:          req.AddressID,
