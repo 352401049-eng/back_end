@@ -213,6 +213,8 @@ func handleCartError(c *gin.Context, err error) {
 		response.Fail(c, 404, 404, "购物车项不存在")
 	case errors.Is(err, service.ErrCartProductInvalid):
 		response.BadRequest(c, "商品无效或未上架")
+	case errors.Is(err, service.ErrPhoneRequired):
+		response.BadRequest(c, "请先授权手机号")
 	case errors.Is(err, service.ErrOptionRequired):
 		msg := "请先选择规格"
 		if raw := err.Error(); len(raw) > len(service.ErrOptionRequired.Error())+2 {

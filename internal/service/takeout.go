@@ -290,6 +290,9 @@ func (s *TakeoutService) payTimeoutMinutes() int {
 
 // Create 创建外卖单：校验商品/地址/配送范围/套餐选配/规格；不写背包；创建时预扣库存（超时未付回滚）。
 func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*TakeoutView, error) {
+	if err := AssertAccountHasPhone(s.DB, accountID); err != nil {
+		return nil, err
+	}
 	if in.MerchantID == 0 || in.ProductID == 0 {
 		return nil, fmt.Errorf("%w: 请指定 merchant_id 与 product_id", ErrInvalidProductArg)
 	}

@@ -64,6 +64,9 @@ func (s *OrderService) IsActivityProductPackage(activityProductID uint64) bool {
 
 // CreatePackage 店内套餐下单：一店一单，实付套餐价（或活动/拼团价）。
 func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderInput) (*OrderView, error) {
+	if err := AssertAccountHasPhone(s.DB, accountID); err != nil {
+		return nil, err
+	}
 	if input.ProductID == 0 && (input.ActivityProductID == nil || *input.ActivityProductID == 0) {
 		return nil, fmt.Errorf("%w: 请指定套餐商品", ErrInvalidProductArg)
 	}

@@ -317,6 +317,8 @@ func handleTakeoutError(c *gin.Context, err error) {
 		response.Fail(c, 404, 404, "商家不存在")
 	case errors.Is(err, service.ErrInsufficientStock):
 		response.BadRequest(c, "库存不足")
+	case errors.Is(err, service.ErrPhoneRequired):
+		response.BadRequest(c, "请先授权手机号")
 	case errors.Is(err, service.ErrAddressRequired):
 		response.BadRequest(c, "请选择收货地址")
 	case errors.Is(err, service.ErrDeliveryOutOfRange):

@@ -33,6 +33,9 @@ type cartCheckoutLine struct {
 // CheckoutCart 将同店、直购购物车行合并为一笔订单。
 // 含套餐时不写 package_product_id，以便入背包时入账全部明细（含套餐本体）。
 func (s *OrderService) CheckoutCart(accountID uint64, input CheckoutCartInput) (*OrderView, error) {
+	if err := AssertAccountHasPhone(s.DB, accountID); err != nil {
+		return nil, err
+	}
 	if len(input.CartItemIDs) == 0 {
 		return nil, fmt.Errorf("%w: 请选择购物车商品", ErrInvalidProductArg)
 	}

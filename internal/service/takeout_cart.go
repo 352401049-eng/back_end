@@ -75,6 +75,9 @@ func lineSelectionsByCartID(lines []CartCheckoutTakeoutLineInput) map[uint64][]O
 
 // CreateFromCart 将同店、可外卖的购物车行合并为一笔外卖单。
 func (s *TakeoutService) CreateFromCart(accountID uint64, in CartCheckoutTakeoutInput) (*TakeoutView, error) {
+	if err := AssertAccountHasPhone(s.DB, accountID); err != nil {
+		return nil, err
+	}
 	if err := validateCartCheckoutTakeoutInput(in); err != nil {
 		return nil, err
 	}

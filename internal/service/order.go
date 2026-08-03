@@ -118,6 +118,9 @@ type JoinableTeamsResult struct {
 }
 
 func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderView, error) {
+	if err := AssertAccountHasPhone(s.DB, accountID); err != nil {
+		return nil, err
+	}
 	if input.Quantity == 0 {
 		input.Quantity = 1
 	}

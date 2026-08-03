@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"yujixinjiang/backend/internal/config"
@@ -18,6 +19,7 @@ var (
 	ErrAccountDisabled     = errors.New("account disabled")
 	ErrWeChatNotConfigured = errors.New("wechat not configured")
 	ErrPhoneAlreadyBound   = errors.New("phone already bound")
+	ErrPhoneRequired       = errors.New("phone required")
 )
 
 // AuthService 登录与 token 签发。
@@ -154,6 +156,18 @@ func (s *AuthService) BindWeChatPhone(accountID uint64, code string) (*model.Acc
 	}
 
 	return s.GetAccount(accountID)
+}
+
+// AssertAccountHasPhone 校验账号已绑定手机号（下单/加购前置条件）。
+func AssertAccountHasPhone(db *gorm.DB, accountID uint64) error {
+	var account model.Account
+	if err := query.NotDeleted(db).Where("id = ?", accountID).First(&account).Error; err != nil {
+		return err
+	}
+	if account.Phone == nil || strings.TrimSpace(*account.Phone) == "" {
+		return ErrPhoneRequired
+	}
+	return nil
 }
 
 // UpdateAvatar 更新用户头像。

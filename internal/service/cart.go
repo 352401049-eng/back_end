@@ -42,6 +42,9 @@ type UpdateCartInput struct {
 }
 
 func (s *CartService) Add(accountID uint64, input AddCartInput) (*model.CartItem, error) {
+	if err := AssertAccountHasPhone(s.DB, accountID); err != nil {
+		return nil, err
+	}
 	if input.Quantity == 0 {
 		input.Quantity = 1
 	}
