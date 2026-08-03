@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 
 	"yujixinjiang/backend/internal/auth"
 	"yujixinjiang/backend/internal/payment"
@@ -62,17 +64,22 @@ func (h *PaymentHandler) CreatePrepay(c *gin.Context) {
 }
 
 // WeChatNotify godoc
-// @Summary      微信支付回调（预留）
-// @Description  验签与入账未实现；启用微信支付前请勿依赖
+// @Summary      微信支付回调
+// @Description  验签、解密并入账；成功时按微信要求返回 {"code":"SUCCESS"} 原始 JSON
 // @Tags         支付回调
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  response.Body
+// @Success      200  {string}  string  "微信 ACK"
 // @Router       /payments/wechat/notify [post]
 func (h *PaymentHandler) WeChatNotify(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+	const maxNotifyBody = 1 << 20 // 1MB
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxNotifyBody+1))
 	if err != nil {
-		response.BadRequest(c, "读取回调失败")
+		writeWeChatNotifyFail(c, http.StatusBadRequest, "读取回调失败")
+		return
+	}
+	if len(body) > maxNotifyBody {
+		writeWeChatNotifyFail(c, http.StatusRequestEntityTooLarge, "回调体过大")
 		return
 	}
 	headers := map[string]string{}
@@ -83,10 +90,19 @@ func (h *PaymentHandler) WeChatNotify(c *gin.Context) {
 	}
 	result, err := h.OrderSvc.HandlePaymentNotify(headers, body)
 	if err != nil {
-		handlePaymentError(c, err)
+		writeWeChatNotifyFail(c, http.StatusBadRequest, "处理失败")
 		return
 	}
-	response.OK(c, result)
+	ack := `{"code":"SUCCESS"}`
+	if result != nil && result.RawAck != "" {
+		ack = result.RawAck
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", []byte(ack))
+}
+
+func writeWeChatNotifyFail(c *gin.Context, status int, message string) {
+	payload, _ := json.Marshal(map[string]string{"code": "FAIL", "message": message})
+	c.Data(status, "application/json; charset=utf-8", payload)
 }
 
 func handlePaymentError(c *gin.Context, err error) {

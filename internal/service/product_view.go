@@ -18,6 +18,7 @@ type GroupPurchaseOption struct {
 	GroupBuyID          *uint64 `json:"group_buy_id,omitempty"`
 	TargetCount         *uint32 `json:"target_count,omitempty"`
 	AllowRepeatJoin     uint8   `json:"allow_repeat_join"`
+	MaxConcurrentTeams  uint32  `json:"max_concurrent_teams"`
 }
 
 // ProductSaleOptions 团购 / 拼团购买的展示与下单参考。
@@ -115,6 +116,7 @@ func buildProductStoreView(p model.Product, gb *model.GroupBuy) ProductStoreView
 		GroupBuyID:      groupBuyID,
 		TargetCount:     p.GroupBuyTargetCount,
 		AllowRepeatJoin: p.GroupBuyAllowRepeat,
+		MaxConcurrentTeams: p.GroupBuyMaxConcurrentTeams,
 	}
 
 	return ProductStoreView{

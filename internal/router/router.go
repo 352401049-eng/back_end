@@ -35,7 +35,10 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	}
 	r.Static(cfg.Upload.URLPrefix, cfg.Upload.Dir)
 
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// 生产默认关闭 Swagger；需要时设 ENABLE_SWAGGER=true
+	if !config.IsRelease() || os.Getenv("ENABLE_SWAGGER") == "true" {
+		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	health := &handler.HealthHandler{DB: db}
 
@@ -56,14 +59,17 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	couponSvc := &service.CouponService{DB: db}
 	activitySvc := &service.ActivityService{DB: db}
 	announcementSvc := &service.AnnouncementService{DB: db}
-		payProvider := payment.NewProvider(cfg, db)
-		log.Printf("支付渠道: %s (immediate_settle=%v)", payProvider.Name(), payProvider.ImmediateSettle())
-		// 微信支付：启动时下载平台证书（回调验签用）
-		if wp, ok := payProvider.(*payment.WeChatProvider); ok && wp.Client != nil {
-			if err := wp.Client.FetchPlatformCerts(); err != nil {
-				log.Printf("[wechat] 平台证书下载失败: %v", err)
-			}
+	payProvider, err := payment.NewProvider(cfg, db)
+	if err != nil {
+		panic("初始化支付渠道失败: " + err.Error())
+	}
+	log.Printf("支付渠道: %s (immediate_settle=%v)", payProvider.Name(), payProvider.ImmediateSettle())
+	// 微信支付：启动时下载平台证书（回调验签用）
+	if wp, ok := payProvider.(*payment.WeChatProvider); ok && wp.Client != nil {
+		if err := wp.Client.FetchPlatformCerts(); err != nil {
+			log.Printf("[wechat] 平台证书下载失败: %v", err)
 		}
+	}
 	orderSvc := &service.OrderService{
 		DB: db, InventorySvc: inventorySvc, CouponSvc: couponSvc,
 		ActivitySvc: activitySvc, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
@@ -154,6 +160,10 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	deliveryZoneHandler := &handler.DeliveryZoneHandler{
 		ZoneSvc: deliveryZoneSvc, MerchantSvc: merchantSvc, TencentKey: cfg.Map.TencentKey,
 	}
+	fulfillmentEventSvc := &service.FulfillmentEventService{DB: db}
+	fulfillmentEventHandler := &handler.FulfillmentEventHandler{
+		DB: db, Svc: fulfillmentEventSvc, MerchantSvc: merchantSvc,
+	}
 
 	r.GET("/api/health", health.Check)
 
@@ -208,15 +218,15 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		user := authorized.Group("")
 		// admin 可代客下单测试（OrderService 仍按 accountID 隔离数据，无越权风险）
 		user.Use(middleware.RequireAccountTypes(model.AccountTypeUser, model.AccountTypeAdmin))
-		registerUserRoutes(user, userHandler, couponHandler, paymentHandler, takeoutHandler, deliveryFeeHandler)
+		registerUserRoutes(user, userHandler, couponHandler, paymentHandler, takeoutHandler, deliveryFeeHandler, fulfillmentEventHandler)
 
 		merchant := authorized.Group("/merchant")
 		merchant.Use(middleware.RequireAccountTypes(model.AccountTypeMerchant, model.AccountTypeAdmin))
-		registerMerchantRoutes(merchant, merchantHandler, merchantOrderHandler, takeoutHandler, couponHandler, announcementHandler, activityHandler, deliveryZoneHandler)
+		registerMerchantRoutes(merchant, merchantHandler, merchantOrderHandler, takeoutHandler, couponHandler, announcementHandler, activityHandler, deliveryZoneHandler, fulfillmentEventHandler)
 
 		admin := authorized.Group("/admin")
 		admin.Use(middleware.RequireAccountTypes(model.AccountTypeAdmin))
-		registerAdminRoutes(admin, adminHandler, adminDashboardHandler, couponHandler, adminExtraHandler, announcementHandler, deliveryZoneHandler, activityHandler)
+		registerAdminRoutes(admin, adminHandler, adminDashboardHandler, couponHandler, adminExtraHandler, announcementHandler, deliveryZoneHandler, activityHandler, fulfillmentEventHandler)
 
 		rider := authorized.Group("/rider")
 		rider.Use(middleware.RequireRider())
@@ -226,11 +236,12 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	return r
 }
 
-func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.CouponHandler, ph *handler.PaymentHandler, th *handler.TakeoutHandler, dfh *handler.DeliveryFeeHandler) {
+func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.CouponHandler, ph *handler.PaymentHandler, th *handler.TakeoutHandler, dfh *handler.DeliveryFeeHandler, fe *handler.FulfillmentEventHandler) {
 	r.GET("/user/overview", h.Overview)
 	r.GET("/user/profile", h.Profile)
 	r.GET("/user/orders", h.Orders)
 	r.POST("/user/orders", h.CreateOrder)
+	r.GET("/user/orders/:id/events", fe.ListUserOrderEvents)
 	r.GET("/user/orders/:id", h.OrderDetail)
 	r.POST("/user/orders/:id/pay", ph.CreatePrepay)
 	r.POST("/user/orders/:id/cancel", h.CancelOrder)
@@ -240,14 +251,17 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.GET("/user/payment/provider", ph.Provider)
 	r.POST("/user/takeout-orders", th.Create)
 	r.GET("/user/takeout-orders", th.List)
+	r.GET("/user/takeout-orders/:id/events", fe.ListUserTakeoutEvents)
 	r.GET("/user/takeout-orders/:id", th.Get)
 	r.POST("/user/takeout-orders/:id/pay", th.Pay)
 	r.POST("/user/takeout-orders/:id/cancel", th.Cancel)
 	r.POST("/user/delivery-fee-orders", dfh.Create)
 	r.POST("/user/delivery-fee-orders/:id/pay", dfh.Pay)
 	r.GET("/user/deliveries", h.ListUserDeliveries)
+	r.GET("/user/deliveries/:id/events", fe.ListUserDeliveryEvents)
 	r.GET("/user/deliveries/:id", h.GetUserDelivery)
 	r.POST("/user/deliveries/:id/confirm", h.ConfirmDeliveryReceipt)
+	r.POST("/user/deliveries/:id/exception", h.ReportUserDeliveryException)
 	r.POST("/user/deliveries/:id/cancel", h.CancelUserDelivery)
 	r.GET("/user/cart", h.Cart)
 	r.POST("/user/cart", h.AddCart)
@@ -295,7 +309,8 @@ func startGroupExpireWorker(orderSvc *service.OrderService) {
 // startPendingPayExpireWorker 定时关闭超时未支付的入包/外卖/配送费订单。
 func startPendingPayExpireWorker(orderSvc *service.OrderService, takeoutSvc *service.TakeoutService, deliveryFeePaySvc *service.DeliveryFeePayService) {
 	go func() {
-		ticker := time.NewTicker(time.Minute)
+		// 15s 一轮，配合 5 分钟支付窗，倒计时结束后尽快关单
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
 			now := time.Now()
@@ -321,7 +336,7 @@ func startPendingPayExpireWorker(orderSvc *service.OrderService, takeoutSvc *ser
 	}()
 }
 
-func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *handler.MerchantOrderHandler, to *handler.TakeoutHandler, ch *handler.CouponHandler, ah *handler.AnnouncementHandler, act *handler.ActivityHandler, dz *handler.DeliveryZoneHandler) {
+func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *handler.MerchantOrderHandler, to *handler.TakeoutHandler, ch *handler.CouponHandler, ah *handler.AnnouncementHandler, act *handler.ActivityHandler, dz *handler.DeliveryZoneHandler, fe *handler.FulfillmentEventHandler) {
 	r.GET("/profile", h.GetProfile)
 	r.PATCH("/profile", h.UpdateProfile)
 	r.PATCH("/profile/images", h.UpdateShopImages)
@@ -335,9 +350,11 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.GET("/deliveries/preparing", mo.ListPreparingDeliveries)
 	r.GET("/deliveries/prepared", mo.ListPreparedDeliveries)
 	r.GET("/takeout-orders", to.MerchantList)
+	r.GET("/takeout-orders/:id/events", fe.ListMerchantTakeoutEvents)
 	r.GET("/takeout-orders/:id", to.MerchantGet)
 	r.POST("/takeout-orders/:id/prepare", to.MerchantPrepare)
 	r.POST("/takeout-orders/:id/reject", to.MerchantReject)
+	r.GET("/orders/:id/events", fe.ListMerchantOrderEvents)
 	r.GET("/dashboard", mo.Dashboard)
 	r.GET("/sales", mo.SalesReport)
 
@@ -404,7 +421,7 @@ func registerMerchantRoutes(r *gin.RouterGroup, h *handler.MerchantHandler, mo *
 	r.GET("/activities/:id/products/:activity_product_id", act.GetMerchantProduct)
 }
 
-func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handler.AdminDashboardHandler, ch *handler.CouponHandler, ae *handler.AdminExtraHandler, ah *handler.AnnouncementHandler, dz *handler.DeliveryZoneHandler, act *handler.ActivityHandler) {
+func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handler.AdminDashboardHandler, ch *handler.CouponHandler, ae *handler.AdminExtraHandler, ah *handler.AnnouncementHandler, dz *handler.DeliveryZoneHandler, act *handler.ActivityHandler, fe *handler.FulfillmentEventHandler) {
 	r.POST("/merchants", h.CreateMerchant)
 	r.GET("/merchants", h.ListMerchants)
 	r.GET("/merchants/:id", h.GetMerchant)
@@ -450,6 +467,7 @@ func registerAdminRoutes(r *gin.RouterGroup, h *handler.AdminHandler, ad *handle
 	r.GET("/sales", ad.SalesReport)
 	r.GET("/orders", ad.ListOrders)
 	r.GET("/orders/:id", ad.GetOrder)
+	r.GET("/fulfillment-events", fe.ListAdminEvents)
 	r.GET("/verification-records", ad.ListVerificationRecords)
 
 	r.GET("/users", ae.ListUsers)

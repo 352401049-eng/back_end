@@ -329,12 +329,12 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			deliveryFee = merchant.DeliveryFee
 			riderEarnings = merchant.RiderEarnings
 			now := time.Now()
+			// 背包跑腿无出餐环节，不生成出餐号（出餐号仅外卖/订单配送备餐用）
 			d := model.DeliveryOrder{
 				InventoryUsageID: &usage.ID,
 				Status:           model.DeliveryPendingAdminReview,
 				MerchantPrepared: 1,
 				PreparedAt:       &now,
-				PickupCode:       genPickupCode(tx, usage.MerchantID),
 				DeliveryFee:      deliveryFee,
 				RiderEarnings:    riderEarnings,
 			}
@@ -521,7 +521,10 @@ func (s *InventoryService) finalizeCancelUsage(accountID uint64, usage *model.Us
 		if reason != nil {
 			updates["cancel_reason"] = *reason
 		}
-		return tx.Model(usage).Updates(updates).Error
+		if err := tx.Model(usage).Updates(updates).Error; err != nil {
+			return err
+		}
+		return InvalidateVerificationRecordsForUsage(tx, usage.ID)
 	})
 	if err != nil {
 		return nil, err

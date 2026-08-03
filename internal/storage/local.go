@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"yujixinjiang/backend/internal/config"
@@ -117,13 +116,8 @@ func detectImageExt(r io.ReadSeeker, filename string) (string, error) {
 		return ".gif", nil
 	case "image/webp":
 		return ".webp", nil
-	}
-
-	ext := strings.ToLower(filepath.Ext(filename))
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
-		return ext, nil
 	default:
+		// 不以扩展名放行，避免伪装图片上传
 		return "", ErrInvalidFileType
 	}
 }

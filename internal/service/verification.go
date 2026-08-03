@@ -25,6 +25,26 @@ type VerificationService struct {
 	InventorySvc *InventoryService
 }
 
+// InvalidateVerificationRecordsForUsage 使用记录被回退/取消时作废关联核销记录，
+// 避免「核销次数」仍计入已撤销的到店核销（如跑腿核销后管理员取消配送）。
+func InvalidateVerificationRecordsForUsage(tx *gorm.DB, usageID uint64) error {
+	if tx == nil || usageID == 0 {
+		return nil
+	}
+	var codeIDs []uint64
+	if err := query.NotDeleted(tx.Model(&model.VerificationCode{})).
+		Where("inventory_usage_id = ?", usageID).
+		Pluck("id", &codeIDs).Error; err != nil {
+		return err
+	}
+	if len(codeIDs) == 0 {
+		return nil
+	}
+	return query.NotDeleted(tx.Model(&model.VerificationRecord{})).
+		Where("verification_code_id IN ?", codeIDs).
+		Update("is_deleted", model.Deleted).Error
+}
+
 // VerifyPreviewView 扫码后展示的核销信息（数量固定，不可选）。
 type VerifyPreviewView struct {
 	Code        string  `json:"code"`
@@ -296,27 +316,33 @@ func toVerifyPreviewView(resolved *verifyResolveResult) *VerifyPreviewView {
 	}
 }
 
-func (s *VerificationService) ListByMerchant(merchantID uint64, page, pageSize int) ([]model.VerificationRecord, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 10
-	}
-	offset := (page - 1) * pageSize
-	q := query.NotDeleted(s.DB.Model(&model.VerificationRecord{})).Where("merchant_id = ?", merchantID)
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var list []model.VerificationRecord
-	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
-		return nil, 0, err
-	}
-	return list, total, nil
+// VerificationRecordView 核销记录展示：含核销码、商品、件数与成交金额。
+type VerificationRecordView struct {
+	ID          uint64    `json:"id"`
+	Code        string    `json:"code"`
+	VoucherCode string    `json:"voucher_code"`
+	OrderID     uint64    `json:"order_id"`
+	OrderNo     string    `json:"order_no,omitempty"`
+	MerchantID  uint64    `json:"merchant_id"`
+	ProductID   uint64    `json:"product_id"`
+	ProductName string    `json:"product_name"`
+	Quantity    uint32    `json:"quantity"`
+	UseCount    uint32    `json:"use_count"`
+	UnitPrice   float64   `json:"unit_price"`
+	TotalAmount float64   `json:"total_amount"`
+	VerifyType  string    `json:"verify_type"`
+	VerifiedAt  time.Time `json:"verified_at"`
+	OperatorID  uint64    `json:"operator_id"`
 }
 
-func (s *VerificationService) ListAll(page, pageSize int) ([]model.VerificationRecord, int64, error) {
+func (s *VerificationService) effectiveVerificationBase() *gorm.DB {
+	return query.NotDeleted(s.DB.Model(&model.VerificationRecord{})).
+		Joins("JOIN verification_code vc ON vc.id = verification_record.verification_code_id AND vc.is_deleted = ?", model.NotDeleted).
+		Joins("JOIN user_inventory_usage u ON u.id = vc.inventory_usage_id AND u.is_deleted = ? AND u.status = ?",
+			model.NotDeleted, model.InventoryUsageCompleted)
+}
+
+func (s *VerificationService) ListByMerchant(merchantID uint64, page, pageSize int) ([]VerificationRecordView, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -324,14 +350,168 @@ func (s *VerificationService) ListAll(page, pageSize int) ([]model.VerificationR
 		pageSize = 10
 	}
 	offset := (page - 1) * pageSize
-	q := query.NotDeleted(s.DB.Model(&model.VerificationRecord{}))
+	q := s.effectiveVerificationBase().Where("verification_record.merchant_id = ?", merchantID)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var list []model.VerificationRecord
-	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+	if err := q.Order("verification_record.id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
-	return list, total, nil
+	return s.toVerificationRecordViews(list), total, nil
+}
+
+func (s *VerificationService) ListAll(page, pageSize int) ([]VerificationRecordView, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	offset := (page - 1) * pageSize
+	q := s.effectiveVerificationBase()
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.VerificationRecord
+	if err := q.Order("verification_record.id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+		return nil, 0, err
+	}
+	return s.toVerificationRecordViews(list), total, nil
+}
+
+func (s *VerificationService) toVerificationRecordViews(list []model.VerificationRecord) []VerificationRecordView {
+	out := make([]VerificationRecordView, 0, len(list))
+	for i := range list {
+		out = append(out, s.buildVerificationRecordView(&list[i]))
+	}
+	return out
+}
+
+func (s *VerificationService) buildVerificationRecordView(rec *model.VerificationRecord) VerificationRecordView {
+	view := VerificationRecordView{
+		ID:         rec.ID,
+		OrderID:    rec.OrderID,
+		MerchantID: rec.MerchantID,
+		OperatorID: rec.OperatorID,
+		VerifiedAt: rec.VerifiedAt,
+		VerifyType: "merchant",
+		Quantity:   1,
+		UseCount:   1,
+	}
+	var vc model.VerificationCode
+	if err := query.NotDeleted(s.DB).First(&vc, rec.VerificationCodeID).Error; err == nil {
+		view.Code = vc.Code
+		view.VoucherCode = vc.Code
+		if vc.InventoryUsageID != nil {
+			var usage model.UserInventoryUsage
+			if err := query.NotDeleted(s.DB).First(&usage, *vc.InventoryUsageID).Error; err == nil {
+				view.ProductID = usage.ProductID
+				view.Quantity = usage.Quantity
+				view.UseCount = usage.Quantity
+				if usage.Quantity == 0 {
+					view.Quantity = 1
+					view.UseCount = 1
+				}
+				var product model.Product
+				if err := query.NotDeleted(s.DB).Select("id", "name", "price").First(&product, usage.ProductID).Error; err == nil {
+					view.ProductName = product.Name
+					view.UnitPrice = product.Price
+				}
+				orderID := rec.OrderID
+				if usage.SourceOrderID != nil && *usage.SourceOrderID > 0 {
+					orderID = *usage.SourceOrderID
+				}
+				if orderID > 0 {
+					view.OrderID = orderID
+					unit, amount, orderNo := s.lookupOrderItemMoney(orderID, usage.ProductID, view.Quantity)
+					if orderNo != "" {
+						view.OrderNo = orderNo
+					}
+					if unit > 0 {
+						view.UnitPrice = unit
+					}
+					if amount > 0 {
+						view.TotalAmount = amount
+					}
+				}
+			}
+		}
+	}
+	if view.ProductName == "" && rec.OrderID > 0 {
+		var order model.Order
+		if err := query.NotDeleted(s.DB).
+			Preload("Items", "is_deleted = ?", model.NotDeleted).
+			First(&order, rec.OrderID).Error; err == nil {
+			view.OrderNo = order.OrderNo
+			if len(order.Items) > 0 {
+				it := order.Items[0]
+				view.ProductID = it.ProductID
+				view.ProductName = it.ProductName
+				view.Quantity = it.Quantity
+				view.UseCount = it.Quantity
+				if it.Quantity == 0 {
+					view.Quantity = 1
+					view.UseCount = 1
+				}
+				unit := it.UnitPrice
+				if it.Quantity > 0 && it.Subtotal > 0 {
+					unit = it.Subtotal / float64(it.Quantity)
+				}
+				view.UnitPrice = roundMoney(unit)
+				view.TotalAmount = roundMoney(it.Subtotal)
+				if view.TotalAmount <= 0 && order.PayAmount > 0 {
+					view.TotalAmount = roundMoney(order.PayAmount)
+				}
+			}
+		}
+	}
+	if view.TotalAmount <= 0 && view.UnitPrice > 0 {
+		view.TotalAmount = roundMoney(view.UnitPrice * float64(view.Quantity))
+	}
+	view.TotalAmount = roundMoney(view.TotalAmount)
+	view.UnitPrice = roundMoney(view.UnitPrice)
+	if view.ProductName == "" {
+		view.ProductName = "商品"
+	}
+	return view
+}
+
+func (s *VerificationService) lookupOrderItemMoney(orderID, productID uint64, qty uint32) (unitPrice, amount float64, orderNo string) {
+	var order model.Order
+	if err := query.NotDeleted(s.DB).Select("id", "order_no", "pay_amount").First(&order, orderID).Error; err == nil {
+		orderNo = order.OrderNo
+	}
+	var items []model.OrderItem
+	if err := query.NotDeleted(s.DB).Where("order_id = ?", orderID).Find(&items).Error; err != nil || len(items) == 0 {
+		return 0, 0, orderNo
+	}
+	var matched *model.OrderItem
+	for i := range items {
+		if items[i].ProductID == productID {
+			matched = &items[i]
+			break
+		}
+	}
+	if matched == nil {
+		matched = &items[0]
+	}
+	unit := matched.UnitPrice
+	if matched.Quantity > 0 && matched.Subtotal > 0 {
+		unit = matched.Subtotal / float64(matched.Quantity)
+	}
+	unit = roundMoney(unit)
+	if qty == 0 {
+		qty = matched.Quantity
+	}
+	if qty == 0 {
+		qty = 1
+	}
+	amt := roundMoney(unit * float64(qty))
+	if amt <= 0 && matched.Subtotal > 0 {
+		amt = roundMoney(matched.Subtotal)
+	}
+	return unit, amt, orderNo
 }

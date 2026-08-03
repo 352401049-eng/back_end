@@ -78,6 +78,12 @@ type ProductRequest struct {
 	Price          float64  `json:"price" binding:"required" example:"99.9"`
 	OriginalPrice  *float64 `json:"original_price" example:"129.9"`
 	Stock          uint32   `json:"stock" example:"100"`
+	EnableDeal          *uint8   `json:"enable_deal" example:"1"`
+	EnableGroup         *uint8   `json:"enable_group" example:"0"`
+	EnableTakeout       *uint8   `json:"enable_takeout" example:"0"`
+	DealStock           *uint32  `json:"deal_stock" example:"100"`
+	GroupStock          *uint32  `json:"group_stock" example:"50"`
+	TakeoutStock        *uint32  `json:"takeout_stock" example:"50"`
 	IsHot               uint8    `json:"is_hot" example:"0"`
 	EnableGroupBuy      *uint8   `json:"enable_group_buy" example:"0"`
 	EnableCoupon        *uint8   `json:"enable_coupon" example:"1"`
@@ -86,6 +92,7 @@ type ProductRequest struct {
 	GroupBuyTargetCount *uint32  `json:"group_buy_target_count" example:"3"`
 	GroupBuyPrice       *float64 `json:"group_buy_price" example:"79.9"`
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
+	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams" example:"0"`
 	ItemType            uint8    `json:"item_type" example:"1"`
 	Status         uint8    `json:"status" example:"0"`
 	PackageGroups  []service.PackageGroupInput `json:"package_groups"`
@@ -104,6 +111,12 @@ type UpdateProductRequest struct {
 	Price               *float64  `json:"price"`
 	OriginalPrice       *float64  `json:"original_price"`
 	Stock               *uint32   `json:"stock"`
+	EnableDeal          *uint8    `json:"enable_deal"`
+	EnableGroup         *uint8    `json:"enable_group"`
+	EnableTakeout       *uint8    `json:"enable_takeout"`
+	DealStock           *uint32   `json:"deal_stock"`
+	GroupStock          *uint32   `json:"group_stock"`
+	TakeoutStock        *uint32   `json:"takeout_stock"`
 	IsHot               *uint8    `json:"is_hot"`
 	EnableGroupBuy      *uint8    `json:"enable_group_buy"`
 	EnableCoupon        *uint8    `json:"enable_coupon"`
@@ -112,6 +125,7 @@ type UpdateProductRequest struct {
 	GroupBuyTargetCount *uint32   `json:"group_buy_target_count"`
 	GroupBuyPrice       *float64  `json:"group_buy_price"`
 	GroupBuyAllowRepeat *uint8    `json:"group_buy_allow_repeat"`
+	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams"`
 	ItemType            *uint8    `json:"item_type"`
 	Status              *uint8    `json:"status"`
 	PackageGroups       []service.PackageGroupInput  `json:"package_groups"`
@@ -122,8 +136,11 @@ func (r UpdateProductRequest) hasField() bool {
 	return r.MerchantID != nil || r.CategoryID != nil || r.CategoryName != nil ||
 		r.Name != nil || r.Description != nil || r.CoverURL != nil || r.Images != nil ||
 		r.Price != nil || r.OriginalPrice != nil || r.Stock != nil || r.IsHot != nil ||
+		r.EnableDeal != nil || r.EnableGroup != nil || r.EnableTakeout != nil ||
+		r.DealStock != nil || r.GroupStock != nil || r.TakeoutStock != nil ||
 		r.EnableGroupBuy != nil || r.EnableCoupon != nil || r.AllowPickup != nil || r.AllowDelivery != nil ||
 		r.GroupBuyTargetCount != nil || r.GroupBuyPrice != nil || r.GroupBuyAllowRepeat != nil ||
+		r.GroupBuyMaxConcurrentTeams != nil ||
 		r.ItemType != nil || r.Status != nil || len(r.PackageGroups) > 0 || r.OptionGroups != nil
 }
 
@@ -150,6 +167,7 @@ type UpdateProductGroupBuyRequest struct {
 	GroupBuyTargetCount *uint32  `json:"group_buy_target_count" example:"3"`
 	GroupBuyPrice       *float64 `json:"group_buy_price" example:"79.9"`
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
+	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams" example:"0"`
 }
 
 type UpdateProductCouponRequest struct {
@@ -163,6 +181,7 @@ type UpdateProductSaleRequest struct {
 	GroupBuyTargetCount *uint32  `json:"group_buy_target_count" example:"3"`
 	GroupBuyPrice       *float64 `json:"group_buy_price" example:"79.9"`
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
+	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams" example:"0"`
 }
 
 // CreateMerchant godoc
@@ -787,6 +806,7 @@ func (h *AdminHandler) patchProductGroupBuy(c *gin.Context, scope *uint64) {
 		GroupBuyTargetCount: req.GroupBuyTargetCount,
 		GroupBuyPrice:       req.GroupBuyPrice,
 		GroupBuyAllowRepeat: req.GroupBuyAllowRepeat,
+		GroupBuyMaxConcurrentTeams: req.GroupBuyMaxConcurrentTeams,
 	}, scope)
 	if err != nil {
 		h.handleProductError(c, err)
@@ -826,7 +846,8 @@ func (h *AdminHandler) patchProductSale(c *gin.Context, scope *uint64) {
 		return
 	}
 	if req.EnableGroupBuy == nil && req.EnableCoupon == nil &&
-		req.GroupBuyTargetCount == nil && req.GroupBuyPrice == nil && req.GroupBuyAllowRepeat == nil {
+		req.GroupBuyTargetCount == nil && req.GroupBuyPrice == nil && req.GroupBuyAllowRepeat == nil &&
+		req.GroupBuyMaxConcurrentTeams == nil {
 		response.BadRequest(c, "请至少传一个销售方式字段")
 		return
 	}
@@ -836,6 +857,7 @@ func (h *AdminHandler) patchProductSale(c *gin.Context, scope *uint64) {
 		GroupBuyTargetCount: req.GroupBuyTargetCount,
 		GroupBuyPrice:       req.GroupBuyPrice,
 		GroupBuyAllowRepeat: req.GroupBuyAllowRepeat,
+		GroupBuyMaxConcurrentTeams: req.GroupBuyMaxConcurrentTeams,
 	}, scope)
 	if err != nil {
 		h.handleProductError(c, err)
@@ -1455,10 +1477,36 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 	if req.CategoryName != nil {
 		input.CategoryName = strings.TrimSpace(*req.CategoryName)
 	}
+	if req.EnableDeal != nil {
+		input.EnableDeal = *req.EnableDeal
+	}
+	if req.EnableGroup != nil {
+		input.EnableGroup = *req.EnableGroup
+	} else if req.EnableGroupBuy != nil {
+		input.EnableGroup = *req.EnableGroupBuy
+	}
+	if req.EnableTakeout != nil {
+		input.EnableTakeout = *req.EnableTakeout
+	} else if req.AllowDelivery != nil {
+		input.EnableTakeout = *req.AllowDelivery
+	}
+	if req.DealStock != nil {
+		input.DealStock = *req.DealStock
+	} else {
+		input.DealStock = req.Stock
+	}
+	if req.GroupStock != nil {
+		input.GroupStock = *req.GroupStock
+	}
+	if req.TakeoutStock != nil {
+		input.TakeoutStock = *req.TakeoutStock
+	}
 	if req.EnableGroupBuy != nil {
 		input.EnableGroupBuy = *req.EnableGroupBuy
 	} else if existing != nil {
 		input.EnableGroupBuy = existing.EnableGroupBuy
+	} else {
+		input.EnableGroupBuy = input.EnableGroup
 	}
 	if req.EnableCoupon != nil {
 		input.EnableCoupon = *req.EnableCoupon
@@ -1479,7 +1527,7 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 	} else if existing != nil {
 		input.AllowDelivery = existing.AllowDelivery
 	} else {
-		input.AllowDelivery = 1
+		input.AllowDelivery = input.EnableTakeout
 	}
 	if req.GroupBuyTargetCount != nil {
 		input.GroupBuyTargetCount = req.GroupBuyTargetCount
@@ -1495,6 +1543,11 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 		input.GroupBuyAllowRepeat = *req.GroupBuyAllowRepeat
 	} else if existing != nil {
 		input.GroupBuyAllowRepeat = existing.GroupBuyAllowRepeat
+	}
+	if req.GroupBuyMaxConcurrentTeams != nil {
+		input.GroupBuyMaxConcurrentTeams = *req.GroupBuyMaxConcurrentTeams
+	} else if existing != nil {
+		input.GroupBuyMaxConcurrentTeams = existing.GroupBuyMaxConcurrentTeams
 	}
 	if len(req.PackageGroups) > 0 {
 		input.PackageGroups = req.PackageGroups
@@ -1517,6 +1570,12 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 		Price:               existing.Price,
 		OriginalPrice:       existing.OriginalPrice,
 		Stock:               existing.Stock,
+		EnableDeal:          existing.EnableDeal,
+		EnableGroup:         existing.EnableGroup,
+		EnableTakeout:       existing.EnableTakeout,
+		DealStock:           existing.DealStock,
+		GroupStock:          existing.GroupStock,
+		TakeoutStock:        existing.TakeoutStock,
 		IsHot:               existing.IsHot,
 		EnableGroupBuy:      existing.EnableGroupBuy,
 		EnableCoupon:        existing.EnableCoupon,
@@ -1525,6 +1584,7 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 		GroupBuyTargetCount: existing.GroupBuyTargetCount,
 		GroupBuyPrice:       existing.GroupBuyPrice,
 		GroupBuyAllowRepeat: existing.GroupBuyAllowRepeat,
+		GroupBuyMaxConcurrentTeams: existing.GroupBuyMaxConcurrentTeams,
 		ItemType:            existing.ItemType,
 		Status:              existing.Status,
 	}
@@ -1558,12 +1618,39 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	}
 	if req.Stock != nil {
 		input.Stock = *req.Stock
+		if req.DealStock == nil {
+			input.DealStock = *req.Stock
+		}
+	}
+	if req.EnableDeal != nil {
+		input.EnableDeal = *req.EnableDeal
+	}
+	if req.EnableGroup != nil {
+		input.EnableGroup = *req.EnableGroup
+		input.EnableGroupBuy = *req.EnableGroup
+	}
+	if req.EnableTakeout != nil {
+		input.EnableTakeout = *req.EnableTakeout
+		input.AllowDelivery = *req.EnableTakeout
+	}
+	if req.DealStock != nil {
+		input.DealStock = *req.DealStock
+		input.Stock = *req.DealStock
+	}
+	if req.GroupStock != nil {
+		input.GroupStock = *req.GroupStock
+	}
+	if req.TakeoutStock != nil {
+		input.TakeoutStock = *req.TakeoutStock
 	}
 	if req.IsHot != nil {
 		input.IsHot = *req.IsHot
 	}
 	if req.EnableGroupBuy != nil {
 		input.EnableGroupBuy = *req.EnableGroupBuy
+		if req.EnableGroup == nil {
+			input.EnableGroup = *req.EnableGroupBuy
+		}
 	}
 	if req.EnableCoupon != nil {
 		input.EnableCoupon = *req.EnableCoupon
@@ -1573,6 +1660,9 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	}
 	if req.AllowDelivery != nil {
 		input.AllowDelivery = *req.AllowDelivery
+		if req.EnableTakeout == nil {
+			input.EnableTakeout = *req.AllowDelivery
+		}
 	}
 	if req.GroupBuyTargetCount != nil {
 		input.GroupBuyTargetCount = req.GroupBuyTargetCount
@@ -1582,6 +1672,9 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	}
 	if req.GroupBuyAllowRepeat != nil {
 		input.GroupBuyAllowRepeat = *req.GroupBuyAllowRepeat
+	}
+	if req.GroupBuyMaxConcurrentTeams != nil {
+		input.GroupBuyMaxConcurrentTeams = *req.GroupBuyMaxConcurrentTeams
 	}
 	if req.ItemType != nil {
 		input.ItemType = *req.ItemType

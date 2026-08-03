@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"yujixinjiang/backend/internal/auth"
 	"yujixinjiang/backend/internal/query"
@@ -23,11 +24,11 @@ type ReportExceptionRequest struct {
 
 // ListUserDeliveries godoc
 // @Summary      我的配送单列表
-// @Description  scope=active|delivering 配送中；pending_confirm 待确认收货；history 已完成
+// @Description  scope=active|delivering 配送中；pending_confirm 待确认收货；appealing|exception 申诉中；history 已完成/已取消
 // @Tags         用户-配送
 // @Produce      json
 // @Security     BearerAuth
-// @Param        scope      query  string  false  "active|pending_confirm|history"
+// @Param        scope      query  string  false  "active|pending_confirm|appealing|history"
 // @Param        page       query  int     false  "页码"
 // @Param        page_size  query  int     false  "每页条数"
 // @Success      200  {object}  response.Body{data=query.PageResult}
@@ -130,6 +131,41 @@ func (h *UserHandler) ConfirmOrderReceipt(c *gin.Context) {
 	response.OK(c, view)
 }
 
+// ReportUserDeliveryException godoc
+// @Summary      用户上报配送异常
+// @Description  仅骑手送达后待确认收货时可上报；进入管理端配送异常人工处理
+// @Tags         用户-配送
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int                     true  "配送单 ID"
+// @Param        body  body  ReportExceptionRequest  true  "异常说明"
+// @Success      200  {object}  response.Body{data=service.DeliveryView}
+// @Router       /user/deliveries/{id}/exception [post]
+func (h *UserHandler) ReportUserDeliveryException(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "ID 无效")
+		return
+	}
+	var req ReportExceptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	view, err := h.DeliverySvc.ReportExceptionByUser(accountID, id, req.Reason)
+	if err != nil {
+		handleDeliveryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
 // CancelUserDelivery godoc
 // @Summary      取消待审核背包跑腿配送
 // @Description  仅待平台审核（status=8）的背包跑腿单可取消
@@ -167,7 +203,11 @@ func handleDeliveryError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrBagErrandStartNotAllowed):
 		response.BadRequest(c, "跑腿单请先到店核销后再配送")
 	case errors.Is(err, service.ErrDeliveryStatusInvalid):
-		response.BadRequest(c, "当前状态不允许此操作")
+		msg := "当前状态不允许此操作"
+		if detail, ok := strings.CutPrefix(err.Error(), service.ErrDeliveryStatusInvalid.Error()+": "); ok && detail != "" {
+			msg = detail
+		}
+		response.BadRequest(c, msg)
 	case errors.Is(err, service.ErrDeliveryTaken):
 		response.BadRequest(c, "配送单已被接单")
 	default:

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -110,8 +111,54 @@ func Load() (*Config, error) {
 	if err := cfg.normalizePayment(); err != nil {
 		return nil, err
 	}
+	if err := cfg.validateRuntime(); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
+}
+
+// IsRelease 是否以生产模式运行（GIN_MODE=release）。
+func IsRelease() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("GIN_MODE")), "release")
+}
+
+var jwtSecretPlaceholders = map[string]struct{}{
+	"":                                 {},
+	"dev-secret-change-me":             {},
+	"change-me-to-a-long-random-string": {},
+}
+
+// validateRuntime 在 release 下强制安全配置；开发环境仅告警。
+func (c *Config) validateRuntime() error {
+	secret := strings.TrimSpace(c.JWT.Secret)
+	_, isPlaceholder := jwtSecretPlaceholders[secret]
+
+	if IsRelease() {
+		if isPlaceholder || len(secret) < 32 {
+			return fmt.Errorf("生产环境 JWT_SECRET 必须为至少 32 字符的随机串，禁止使用示例值")
+		}
+		provider := strings.ToLower(strings.TrimSpace(c.Payment.Provider))
+		if provider != "wechat" && provider != "wx" && provider != "weixin" {
+			return fmt.Errorf("生产环境禁止使用 mock 支付，请设置 PAYMENT_PROVIDER=wechat 且 WECHAT_PAY_ENABLED=true")
+		}
+		if !c.Payment.WeChatEnabled {
+			return fmt.Errorf("生产环境必须设置 WECHAT_PAY_ENABLED=true")
+		}
+		if strings.TrimSpace(c.WeChat.AppID) == "" || strings.TrimSpace(c.WeChat.Secret) == "" {
+			return fmt.Errorf("生产环境必须配置 WECHAT_APPID 与 WECHAT_SECRET")
+		}
+		return nil
+	}
+
+	if isPlaceholder {
+		log.Println("警告: JWT_SECRET 仍为示例值，上线前务必更换为随机长串")
+	}
+	provider := strings.ToLower(strings.TrimSpace(c.Payment.Provider))
+	if provider == "mock" || provider == "" {
+		log.Println("警告: 当前为 mock 支付（下单即视为已付），生产环境请改用微信支付")
+	}
+	return nil
 }
 
 // normalizePayment 规范化支付配置，启用微信时校验必填项。
@@ -178,11 +225,11 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// loadPayTimeoutMinutes 读取待支付订单超时分钟数，默认 15，最小 1。
+// loadPayTimeoutMinutes 读取待支付订单超时分钟数，默认 5，最小 1。
 func loadPayTimeoutMinutes() int {
-	v, err := strconv.Atoi(getEnv("PAY_TIMEOUT_MINUTES", "15"))
+	v, err := strconv.Atoi(getEnv("PAY_TIMEOUT_MINUTES", "5"))
 	if err != nil || v < 1 {
-		return 15
+		return 5
 	}
 	return v
 }

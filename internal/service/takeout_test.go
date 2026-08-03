@@ -39,6 +39,41 @@ func TestTakeoutStatusMeta(t *testing.T) {
 	}
 }
 
+func TestApplyTakeoutDisplayMetaMerchantReject(t *testing.T) {
+	reason := "商家拒单：今日已打烊"
+	view := &TakeoutView{
+		TakeoutOrder: model.TakeoutOrder{
+			Status:    model.TakeoutStatusCancelled,
+			PayStatus: model.PayStatusRefunding,
+			Remark:    &reason,
+		},
+		StatusText: "已取消",
+		StatusCode: "cancelled",
+	}
+	applyTakeoutDisplayMeta(view)
+	if view.StatusCode != "merchant_rejected" || view.StatusText != "商家拒单" {
+		t.Fatalf("status=%q/%q", view.StatusText, view.StatusCode)
+	}
+	if view.RejectReason != reason {
+		t.Fatalf("reject reason=%q", view.RejectReason)
+	}
+	if view.RefundStatusText != "退款中" {
+		t.Fatalf("refund=%q", view.RefundStatusText)
+	}
+}
+
+func TestApplyTakeoutDisplayMetaUserCancel(t *testing.T) {
+	view := &TakeoutView{
+		TakeoutOrder: model.TakeoutOrder{Status: model.TakeoutStatusCancelled},
+		StatusText:   "已取消",
+		StatusCode:   "cancelled",
+	}
+	applyTakeoutDisplayMeta(view)
+	if view.StatusCode != "cancelled" || view.RejectReason != "" {
+		t.Fatalf("got code=%q reason=%q", view.StatusCode, view.RejectReason)
+	}
+}
+
 func TestParseMerchantTakeoutStatusFilter(t *testing.T) {
 	st, err := parseMerchantTakeoutStatusFilter("preparing")
 	if err != nil || st == nil || *st != model.TakeoutStatusPreparing {

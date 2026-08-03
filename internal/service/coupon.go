@@ -84,7 +84,7 @@ func (s *CouponService) Create(input CreateCouponInput) (*model.Coupon, error) {
 	if input.Name == "" {
 		return nil, errors.New("优惠券名称不能为空")
 	}
-	if err := validateCouponTemplate(input.Type, input.DiscountAmount, input.DiscountRate); err != nil {
+	if err := validateCouponTemplate(input.Type, input.MinAmount, input.DiscountAmount, input.DiscountRate); err != nil {
 		return nil, err
 	}
 	if !input.EndAt.After(input.StartAt) {
@@ -149,6 +149,21 @@ func (s *CouponService) Update(id uint64, merchantScope *uint64, input UpdateCou
 	}
 	if len(updates) == 0 {
 		return coupon, nil
+	}
+	minAmt := coupon.MinAmount
+	if input.MinAmount != nil {
+		minAmt = *input.MinAmount
+	}
+	discAmt := coupon.DiscountAmount
+	if input.DiscountAmount != nil {
+		discAmt = input.DiscountAmount
+	}
+	discRate := coupon.DiscountRate
+	if input.DiscountRate != nil {
+		discRate = input.DiscountRate
+	}
+	if err := validateCouponTemplate(coupon.Type, minAmt, discAmt, discRate); err != nil {
+		return nil, err
 	}
 	if err := s.DB.Model(coupon).Updates(updates).Error; err != nil {
 		return nil, err
@@ -526,11 +541,17 @@ func assertCouponClaimable(coupon *model.Coupon) error {
 	return nil
 }
 
-func validateCouponTemplate(couponType uint8, discountAmount *float64, discountRate *uint8) error {
+func validateCouponTemplate(couponType uint8, minAmount float64, discountAmount *float64, discountRate *uint8) error {
 	switch couponType {
 	case model.CouponTypeFixed:
 		if discountAmount == nil || *discountAmount <= 0 {
 			return errors.New("满减券须填写减免金额")
+		}
+		if minAmount <= 0 {
+			return errors.New("满减券须填写大于 0 的门槛金额")
+		}
+		if *discountAmount >= minAmount {
+			return errors.New("满减券减免金额须小于门槛金额")
 		}
 	case model.CouponTypeRate:
 		if discountRate == nil || *discountRate == 0 || *discountRate >= 100 {

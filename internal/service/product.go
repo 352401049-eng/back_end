@@ -42,6 +42,7 @@ type ProductInput struct {
 	GroupBuyTargetCount *uint32
 	GroupBuyPrice       *float64
 	GroupBuyAllowRepeat uint8
+	GroupBuyMaxConcurrentTeams uint32
 	ItemType            uint8
 	Status              uint8
 	PackageGroups       []PackageGroupInput  // item_type=套餐时必填
@@ -53,6 +54,7 @@ type GroupBuyConfigInput struct {
 	GroupBuyTargetCount *uint32
 	GroupBuyPrice       *float64
 	GroupBuyAllowRepeat *uint8
+	GroupBuyMaxConcurrentTeams *uint32
 }
 
 type ProductListFilter struct {
@@ -117,6 +119,7 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		GroupBuyTargetCount: input.GroupBuyTargetCount,
 		GroupBuyPrice:       input.GroupBuyPrice,
 		GroupBuyAllowRepeat: normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
+		GroupBuyMaxConcurrentTeams: input.GroupBuyMaxConcurrentTeams,
 		EnableCoupon:        normalizeEnableCoupon(input.EnableCoupon),
 		AllowPickup:         normalizeAllowPickup(input.AllowPickup),
 		ItemType:            input.ItemType,
@@ -130,6 +133,7 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		product.GroupBuyTargetCount = nil
 		product.GroupBuyPrice = nil
 		product.GroupBuyAllowRepeat = 0
+		product.GroupBuyMaxConcurrentTeams = 0
 	}
 	if product.ItemType == 0 {
 		product.ItemType = model.ProductItemTypePhysical
@@ -301,6 +305,7 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		"group_buy_target_count": input.GroupBuyTargetCount,
 		"group_buy_price":        input.GroupBuyPrice,
 		"group_buy_allow_repeat": normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
+		"group_buy_max_concurrent_teams": input.GroupBuyMaxConcurrentTeams,
 		"enable_coupon":          normalizeEnableCoupon(input.EnableCoupon),
 		"allow_pickup":           normalizeAllowPickup(input.AllowPickup),
 		"item_type":              input.ItemType,
@@ -319,6 +324,7 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	updated.GroupBuyTargetCount = input.GroupBuyTargetCount
 	updated.GroupBuyPrice = input.GroupBuyPrice
 	updated.GroupBuyAllowRepeat = normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat)
+	updated.GroupBuyMaxConcurrentTeams = input.GroupBuyMaxConcurrentTeams
 	updated.EnableCoupon = normalizeEnableCoupon(input.EnableCoupon)
 	updated.AllowPickup = normalizeAllowPickup(input.AllowPickup)
 	updated.ItemType = input.ItemType
@@ -340,6 +346,7 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		updates["group_buy_target_count"] = nil
 		updates["group_buy_price"] = nil
 		updates["group_buy_allow_repeat"] = 0
+		updates["group_buy_max_concurrent_teams"] = 0
 	}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(product).Updates(updates).Error; err != nil {
@@ -378,10 +385,12 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	product.GroupBuyTargetCount = input.GroupBuyTargetCount
 	product.GroupBuyPrice = input.GroupBuyPrice
 	product.GroupBuyAllowRepeat = normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat)
+	product.GroupBuyMaxConcurrentTeams = input.GroupBuyMaxConcurrentTeams
 	if updated.EnableGroup != 1 {
 		product.GroupBuyTargetCount = nil
 		product.GroupBuyPrice = nil
 		product.GroupBuyAllowRepeat = 0
+		product.GroupBuyMaxConcurrentTeams = 0
 	}
 	if err := s.syncGroupBuy(product); err != nil {
 		return nil, fmt.Errorf("同步拼团配置失败: %w", err)
@@ -484,6 +493,7 @@ func (s *ProductService) UpdateGroupBuy(id uint64, input GroupBuyConfigInput, sc
 	targetCount := input.GroupBuyTargetCount
 	groupPrice := input.GroupBuyPrice
 	allowRepeat := product.GroupBuyAllowRepeat
+	maxTeams := product.GroupBuyMaxConcurrentTeams
 	if input.EnableGroupBuy == 1 {
 		if targetCount == nil {
 			targetCount = product.GroupBuyTargetCount
@@ -494,6 +504,9 @@ func (s *ProductService) UpdateGroupBuy(id uint64, input GroupBuyConfigInput, sc
 		if input.GroupBuyAllowRepeat != nil {
 			allowRepeat = normalizeGroupBuyAllowRepeat(*input.GroupBuyAllowRepeat)
 		}
+		if input.GroupBuyMaxConcurrentTeams != nil {
+			maxTeams = *input.GroupBuyMaxConcurrentTeams
+		}
 	}
 	check := ProductInput{
 		Price:               product.Price,
@@ -501,6 +514,7 @@ func (s *ProductService) UpdateGroupBuy(id uint64, input GroupBuyConfigInput, sc
 		GroupBuyTargetCount: targetCount,
 		GroupBuyPrice:       groupPrice,
 		GroupBuyAllowRepeat: allowRepeat,
+		GroupBuyMaxConcurrentTeams: maxTeams,
 	}
 	if err := validateGroupBuyConfig(check); err != nil {
 		return nil, err
@@ -513,10 +527,12 @@ func (s *ProductService) UpdateGroupBuy(id uint64, input GroupBuyConfigInput, sc
 		updates["group_buy_target_count"] = targetCount
 		updates["group_buy_price"] = groupPrice
 		updates["group_buy_allow_repeat"] = allowRepeat
+		updates["group_buy_max_concurrent_teams"] = maxTeams
 	} else {
 		updates["group_buy_target_count"] = nil
 		updates["group_buy_price"] = nil
 		updates["group_buy_allow_repeat"] = 0
+		updates["group_buy_max_concurrent_teams"] = 0
 	}
 	if err := s.DB.Model(product).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("更新拼团配置失败: %w", err)
@@ -525,10 +541,12 @@ func (s *ProductService) UpdateGroupBuy(id uint64, input GroupBuyConfigInput, sc
 	product.GroupBuyTargetCount = targetCount
 	product.GroupBuyPrice = groupPrice
 	product.GroupBuyAllowRepeat = allowRepeat
+	product.GroupBuyMaxConcurrentTeams = maxTeams
 	if input.EnableGroupBuy != 1 {
 		product.GroupBuyTargetCount = nil
 		product.GroupBuyPrice = nil
 		product.GroupBuyAllowRepeat = 0
+		product.GroupBuyMaxConcurrentTeams = 0
 	}
 	if err := s.syncGroupBuy(product); err != nil {
 		return nil, fmt.Errorf("同步拼团配置失败: %w", err)
@@ -556,6 +574,7 @@ type UpdateProductSaleInput struct {
 	GroupBuyTargetCount *uint32
 	GroupBuyPrice       *float64
 	GroupBuyAllowRepeat *uint8
+	GroupBuyMaxConcurrentTeams *uint32
 }
 
 // UpdateSaleOptions 一次性更新拼团与优惠券配置（商品编辑页）。
@@ -565,7 +584,7 @@ func (s *ProductService) UpdateSaleOptions(id uint64, input UpdateProductSaleInp
 		return nil, err
 	}
 
-	if input.EnableGroupBuy != nil || input.GroupBuyTargetCount != nil || input.GroupBuyPrice != nil || input.GroupBuyAllowRepeat != nil {
+	if input.EnableGroupBuy != nil || input.GroupBuyTargetCount != nil || input.GroupBuyPrice != nil || input.GroupBuyAllowRepeat != nil || input.GroupBuyMaxConcurrentTeams != nil {
 		enable := product.EnableGroupBuy
 		if input.EnableGroupBuy != nil {
 			enable = *input.EnableGroupBuy
@@ -585,11 +604,19 @@ func (s *ProductService) UpdateSaleOptions(id uint64, input UpdateProductSaleInp
 			v := product.GroupBuyAllowRepeat
 			allowRepeat = &v
 		}
+		var maxTeams *uint32
+		if input.GroupBuyMaxConcurrentTeams != nil {
+			maxTeams = input.GroupBuyMaxConcurrentTeams
+		} else {
+			v := product.GroupBuyMaxConcurrentTeams
+			maxTeams = &v
+		}
 		if _, err := s.UpdateGroupBuy(id, GroupBuyConfigInput{
 			EnableGroupBuy:      enable,
 			GroupBuyTargetCount: target,
 			GroupBuyPrice:       price,
 			GroupBuyAllowRepeat: allowRepeat,
+			GroupBuyMaxConcurrentTeams: maxTeams,
 		}, scopeMerchantID); err != nil {
 			return nil, err
 		}
@@ -694,17 +721,19 @@ func validateProductChannels(p *model.Product) error {
 }
 
 func applyProductChannels(p *model.Product, input ProductInput, existing *model.Product, isCreate bool) {
-	var enableDeal, enableGroup, enableTakeout uint8
+	enableDeal := input.EnableDeal
+	enableGroup := input.EnableGroup
+	enableTakeout := input.EnableTakeout
 	dealStock := input.DealStock
 	groupStock := input.GroupStock
 	takeoutStock := input.TakeoutStock
 
 	if isCreate {
-		enableDeal = input.EnableDeal
-		enableGroup = input.EnableGroup
-		enableTakeout = input.EnableTakeout
 		if enableGroup == 0 && input.EnableGroupBuy == 1 {
 			enableGroup = 1
+		}
+		if enableTakeout == 0 && input.AllowDelivery == 1 {
+			enableTakeout = 1
 		}
 		if enableDeal == 0 && enableGroup == 0 && enableTakeout == 0 {
 			enableDeal = 1
@@ -713,27 +742,12 @@ func applyProductChannels(p *model.Product, input ProductInput, existing *model.
 			dealStock = input.Stock
 		}
 	} else if existing != nil {
-		usingNewFields := input.EnableDeal != 0 || input.EnableGroup != 0 || input.EnableTakeout != 0
-		if usingNewFields {
-			enableDeal = input.EnableDeal
-			enableGroup = input.EnableGroup
-			enableTakeout = input.EnableTakeout
-		} else {
-			enableDeal = existing.EnableDeal
-			enableGroup = input.EnableGroupBuy
-			enableTakeout = input.AllowDelivery
+		// buildPatch 已把未传字段填成原值；此处直接采用 input，允许把库存改成 0。
+		if enableGroup == 0 && input.EnableGroupBuy == 1 && existing.EnableGroup == 0 {
+			enableGroup = 1
 		}
-		if dealStock == 0 {
-			dealStock = input.Stock
-		}
-		if dealStock == 0 {
-			dealStock = existing.DealStock
-		}
-		if groupStock == 0 {
-			groupStock = existing.GroupStock
-		}
-		if takeoutStock == 0 {
-			takeoutStock = existing.TakeoutStock
+		if enableTakeout == 0 && input.AllowDelivery == 1 && existing.EnableTakeout == 0 {
+			enableTakeout = 1
 		}
 	}
 

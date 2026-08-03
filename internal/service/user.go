@@ -30,6 +30,7 @@ type UserStats struct {
 
 // UserOrderBadges 个人中心订单角标，与 GET /user/orders?status_code= 筛选一致
 type UserOrderBadges struct {
+	PendingPay         int64 `json:"pending_pay"` // 待支付（购买单 + 外卖单）
 	PendingGroup       int64 `json:"pending_group"`
 	PendingMerchant    int64 `json:"pending_merchant"`
 	Approved           int64 `json:"approved"`
@@ -47,6 +48,7 @@ type UserOrderBadges struct {
 type UserDeliveryBadges struct {
 	Active         int64 `json:"active"`
 	PendingConfirm int64 `json:"pending_confirm"`
+	Appealing      int64 `json:"appealing"` // 用户申诉中（配送异常待管理员处理）
 	Completed      int64 `json:"completed"`
 	Total          int64 `json:"total"`
 }
@@ -82,6 +84,7 @@ type CartItemView struct {
 	CanUseCoupon bool     `json:"can_use_coupon"`
 	GroupBuyID   *uint64  `json:"group_buy_id,omitempty"`
 	ShopName     string   `json:"shop_name,omitempty"`
+	HasOptions   bool     `json:"has_options"`
 }
 
 func (s *UserService) GetOverview(accountID uint64) (*OverviewResponse, error) {
@@ -275,6 +278,7 @@ func (s *UserService) ListCart(accountID uint64) ([]CartItemView, error) {
 		}
 		sale := buildProductStoreView(item.Product, gb)
 
+		hasOpts, _ := ProductNeedsOptions(s.DB, item.ProductID)
 		view := CartItemView{
 			CartItem:     item,
 			UnitPrice:    item.Product.Price,
@@ -282,6 +286,7 @@ func (s *UserService) ListCart(accountID uint64) ([]CartItemView, error) {
 			CanUseCoupon: sale.CanUseCoupon,
 			GroupBuyID:   sale.GroupBuyID,
 			ShopName:     shopNames[item.Product.MerchantID],
+			HasOptions:   hasOpts,
 		}
 		if item.PurchaseType == model.PurchaseTypeGroup {
 			if item.Product.GroupBuyPrice != nil {
@@ -450,6 +455,7 @@ func buildUserOrderBadges(db *gorm.DB, accountID uint64) (*UserOrderBadges, erro
 		code  string
 		field *int64
 	}{
+		{"pending_pay", &badges.PendingPay},
 		{"pending_group", &badges.PendingGroup},
 		{"pending_merchant", &badges.PendingMerchant},
 		{"approved", &badges.Approved},
@@ -466,6 +472,15 @@ func buildUserOrderBadges(db *gorm.DB, accountID uint64) (*UserOrderBadges, erro
 		}
 		*item.field = count
 	}
+	// 外卖待支付一并计入，供个人中心「全部」角标
+	var takeoutPending int64
+	if err := query.NotDeleted(db.Model(&model.TakeoutOrder{})).
+		Where("account_id = ? AND status = ? AND pay_status = ?",
+			accountID, model.TakeoutStatusPendingPay, model.PayStatusUnpaid).
+		Count(&takeoutPending).Error; err != nil {
+		return nil, err
+	}
+	badges.PendingPay += takeoutPending
 	if err := query.NotDeleted(db.Model(&model.Order{})).
 		Where("account_id = ? AND status = ?", accountID, model.OrderStatusPendingConfirm).
 		Count(&badges.PendingConfirm).Error; err != nil {
@@ -495,10 +510,13 @@ func countUserOrdersByStatusCode(db *gorm.DB, accountID uint64, statusCode strin
 }
 
 func userDeliveryBaseQuery(db *gorm.DB, accountID uint64) *gorm.DB {
+	// 与 DeliveryService.userDeliveryQuery 一致：购买单 / 背包跑腿 / 外卖单
 	return query.NotDeleted(db.Model(&model.DeliveryOrder{})).Where(
 		`order_id IN (SELECT id FROM `+"`order`"+` WHERE account_id = ? AND is_deleted = 0)
-		OR inventory_usage_id IN (SELECT id FROM user_inventory_usage WHERE account_id = ? AND is_deleted = 0)`,
-		accountID, accountID,
+		OR inventory_usage_id IN (SELECT id FROM user_inventory_usage WHERE account_id = ? AND is_deleted = 0)
+		OR id IN (SELECT delivery_order_id FROM user_inventory_usage WHERE account_id = ? AND delivery_order_id IS NOT NULL AND is_deleted = 0)
+		OR takeout_order_id IN (SELECT id FROM takeout_order WHERE account_id = ? AND is_deleted = 0)`,
+		accountID, accountID, accountID, accountID,
 	)
 }
 
@@ -515,9 +533,23 @@ func buildUserDeliveryBadges(db *gorm.DB, accountID uint64) (*UserDeliveryBadges
 	}).Count(&badges.Active).Error; err != nil {
 		return nil, err
 	}
+	// 外卖配餐中尚无配送单，计入「配送中」角标，避免用户下单后角标为 0
+	var preparingTakeout int64
+	if err := query.NotDeleted(db.Model(&model.TakeoutOrder{})).
+		Where("account_id = ? AND status = ? AND pay_status = ?",
+			accountID, model.TakeoutStatusPreparing, model.PayStatusPaid).
+		Count(&preparingTakeout).Error; err != nil {
+		return nil, err
+	}
+	badges.Active += preparingTakeout
 	if err := userDeliveryBaseQuery(db, accountID).
 		Where("status = ? AND user_confirmed = ?", model.DeliveryDelivered, 0).
 		Count(&badges.PendingConfirm).Error; err != nil {
+		return nil, err
+	}
+	if err := userDeliveryBaseQuery(db, accountID).
+		Where("status = ?", model.DeliveryException).
+		Count(&badges.Appealing).Error; err != nil {
 		return nil, err
 	}
 	if err := userDeliveryBaseQuery(db, accountID).

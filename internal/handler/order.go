@@ -237,6 +237,22 @@ func (h *StoreHandler) GetGroupProgress(c *gin.Context) {
 
 func handleOrderError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, service.ErrPendingPayDuplicate):
+		msg := "您有该商品的待付款订单，请前往订单查看并完成支付或取消后再购买"
+		var dup *service.PendingPayDuplicateError
+		data := gin.H{"reason": "pending_pay_duplicate"}
+		if errors.As(err, &dup) && dup != nil {
+			data["order_id"] = dup.OrderID
+			data["order_no"] = dup.OrderNo
+			data["product_id"] = dup.ProductID
+			data["status_code"] = dup.StatusCode()
+			if raw := err.Error(); len(raw) > len(service.ErrPendingPayDuplicate.Error()) {
+				if i := len(service.ErrPendingPayDuplicate.Error()); i+2 < len(raw) && raw[i:i+2] == ": " {
+					msg = raw[i+2:]
+				}
+			}
+		}
+		response.BadRequestWithData(c, msg, data)
 	case errors.Is(err, service.ErrOrderNotFound):
 		response.Fail(c, 404, 404, "订单不存在")
 	case errors.Is(err, service.ErrOrderStatusInvalid):
@@ -293,6 +309,14 @@ func handleOrderError(c *gin.Context, err error) {
 		msg := "库存已使用，无法取消/拒绝"
 		if raw := err.Error(); len(raw) > len(service.ErrInventoryRollback.Error()) {
 			if i := len(service.ErrInventoryRollback.Error()); i+2 < len(raw) && raw[i:i+2] == ": " {
+				msg = raw[i+2:]
+			}
+		}
+		response.BadRequest(c, msg)
+	case errors.Is(err, payment.ErrInvalidState):
+		msg := "退款失败，请稍后重试"
+		if raw := err.Error(); len(raw) > len(payment.ErrInvalidState.Error()) {
+			if i := len(payment.ErrInvalidState.Error()); i+2 < len(raw) && raw[i:i+2] == ": " {
 				msg = raw[i+2:]
 			}
 		}
@@ -1169,7 +1193,7 @@ func (h *AdminDashboardHandler) Dashboard(c *gin.Context) {
 
 // AdminSalesReport godoc
 // @Summary      销售额报表（管理端）
-// @Description  统计有效已支付订单实付总额及核销次数。可选 merchant_id、日期范围
+// @Description  统计有效营业额/有效订单（核销完成、确认收货、外卖完成后计入）及核销次数。可选 merchant_id、日期范围
 // @Tags         管理端-统计
 // @Produce      json
 // @Security     BearerAuth
@@ -1294,7 +1318,7 @@ func (h *MerchantOrderHandler) Dashboard(c *gin.Context) {
 
 // MerchantSalesReport godoc
 // @Summary      销售额报表（商家端）
-// @Description  本店有效已支付订单实付总额及核销次数
+// @Description  本店有效营业额/有效订单（核销完成、确认收货、外卖完成后计入）及核销次数
 // @Tags         商家端-统计
 // @Produce      json
 // @Security     BearerAuth

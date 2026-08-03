@@ -143,8 +143,16 @@ func (s *OrderService) CheckoutCart(accountID uint64, input CheckoutCartInput) (
 	payAmount := roundMoney(totalSub - discountAmount)
 	now := time.Now()
 
+	productIDs := make([]uint64, 0, len(lines))
+	for _, ln := range lines {
+		productIDs = append(productIDs, ln.Product.ID)
+	}
+
 	var order model.Order
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := assertNoUnpaidBagOrderForProducts(tx, accountID, productIDs); err != nil {
+			return err
+		}
 		// 事务内再锁商品行，避免库存竞态
 		for i := range lines {
 			var p model.Product

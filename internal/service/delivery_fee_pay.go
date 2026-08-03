@@ -89,7 +89,7 @@ func (s *DeliveryFeePayService) payTimeoutMinutes() int {
 	if s.PayTimeoutMinutes > 0 {
 		return s.PayTimeoutMinutes
 	}
-	return 15
+	return 5
 }
 
 func (s *DeliveryFeePayService) inventorySvc() *InventoryService {

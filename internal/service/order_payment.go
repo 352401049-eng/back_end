@@ -291,12 +291,12 @@ func (s *OrderService) expireOneGroupTeam(team *model.GroupBuyTeam) error {
 	})
 }
 
-// payTimeoutMinutes 返回待支付订单超时分钟数，未配置时用默认 15 分钟。
+// payTimeoutMinutes 返回待支付订单超时分钟数，未配置时用默认 5 分钟。
 func (s *OrderService) payTimeoutMinutes() int {
 	if s.PayTimeoutMinutes > 0 {
 		return s.PayTimeoutMinutes
 	}
-	return 15
+	return 5
 }
 
 // ExpireStalePendingPayOrders 关闭超时未支付的订单：回滚库存/券/销量 + 退款 + 置 Closed。

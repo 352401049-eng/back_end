@@ -193,6 +193,8 @@ func OrderStatusDisplayText(status, reviewStage uint8) string {
 		return "待骑手接单"
 	case "delivering":
 		return "配送中"
+	case "pending_confirm":
+		return "待确认收货"
 	case "completed":
 		return "已完成"
 	case "cancelled":
@@ -248,6 +250,9 @@ func OrderStatusCode(status, reviewStage uint8) string {
 	}
 	if status == OrderStatusShipping {
 		return "delivering"
+	}
+	if status == OrderStatusPendingConfirm {
+		return "pending_confirm"
 	}
 	if status == OrderStatusCompleted {
 		return "completed"

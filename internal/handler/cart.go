@@ -12,17 +12,19 @@ import (
 )
 
 type AddCartRequest struct {
-	ProductID      uint64  `json:"product_id" binding:"required"`
-	Quantity       uint32  `json:"quantity" example:"1"`
-	Spec           *string `json:"spec"`
-	PurchaseType   uint8   `json:"purchase_type" example:"1"`
-	GroupBuyID     *uint64 `json:"group_buy_id"`
-	GroupBuyTeamID *uint64 `json:"group_buy_team_id"`
+	ProductID        uint64                              `json:"product_id" binding:"required"`
+	Quantity         uint32                              `json:"quantity" example:"1"`
+	Spec             *string                             `json:"spec"`
+	PurchaseType     uint8                               `json:"purchase_type" example:"1"`
+	GroupBuyID       *uint64                             `json:"group_buy_id"`
+	GroupBuyTeamID   *uint64                             `json:"group_buy_team_id"`
+	OptionSelections []service.OptionSelectionUnitInput  `json:"option_selections"`
 }
 
 type UpdateCartRequest struct {
-	Quantity *uint32 `json:"quantity"`
-	Selected *uint8  `json:"selected"`
+	Quantity         *uint32                             `json:"quantity"`
+	Selected         *uint8                              `json:"selected"`
+	OptionSelections []service.OptionSelectionUnitInput  `json:"option_selections"`
 }
 
 // AddCart godoc
@@ -48,6 +50,7 @@ func (h *UserHandler) AddCart(c *gin.Context) {
 	item, err := h.CartSvc.Add(accountID, service.AddCartInput{
 		ProductID: req.ProductID, Quantity: req.Quantity, Spec: req.Spec,
 		PurchaseType: req.PurchaseType, GroupBuyID: req.GroupBuyID, GroupBuyTeamID: req.GroupBuyTeamID,
+		OptionSelections: req.OptionSelections,
 	})
 	if err != nil {
 		handleCartError(c, err)
@@ -82,7 +85,12 @@ func (h *UserHandler) UpdateCart(c *gin.Context) {
 		response.BadRequest(c, "参数无效")
 		return
 	}
-	item, err := h.CartSvc.Update(accountID, id, service.UpdateCartInput{Quantity: req.Quantity, Selected: req.Selected})
+	item, err := h.CartSvc.Update(accountID, id, service.UpdateCartInput{
+		Quantity:         req.Quantity,
+		Selected:         req.Selected,
+		OptionSelections: req.OptionSelections,
+		HasOptionUpdate:  req.OptionSelections != nil,
+	})
 	if err != nil {
 		handleCartError(c, err)
 		return
@@ -205,6 +213,18 @@ func handleCartError(c *gin.Context, err error) {
 		response.Fail(c, 404, 404, "购物车项不存在")
 	case errors.Is(err, service.ErrCartProductInvalid):
 		response.BadRequest(c, "商品无效或未上架")
+	case errors.Is(err, service.ErrOptionRequired):
+		msg := "请先选择规格"
+		if raw := err.Error(); len(raw) > len(service.ErrOptionRequired.Error())+2 {
+			msg = raw[len(service.ErrOptionRequired.Error())+2:]
+		}
+		response.BadRequest(c, msg)
+	case errors.Is(err, service.ErrOptionInvalid):
+		msg := "规格无效"
+		if raw := err.Error(); len(raw) > len(service.ErrOptionInvalid.Error())+2 {
+			msg = raw[len(service.ErrOptionInvalid.Error())+2:]
+		}
+		response.BadRequest(c, msg)
 	case errors.Is(err, service.ErrInvalidProductArg):
 		msg := err.Error()
 		if i := len(service.ErrInvalidProductArg.Error()); i+2 < len(msg) && msg[i:i+2] == ": " {

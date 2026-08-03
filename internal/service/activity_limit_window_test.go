@@ -84,14 +84,19 @@ func TestCalendarWindowAt_InvalidRefreshFallsBackMidnight(t *testing.T) {
 }
 
 func TestSumBoughtQtyExcludesGroupFailed(t *testing.T) {
-	if !slices.Contains(orderStatusesExcludedFromBoughtQty, int(model.OrderStatusCancelled)) {
-		t.Fatal("excluded statuses must include Cancelled")
+	need := []int{
+		int(model.OrderStatusCancelled),
+		int(model.OrderStatusGroupFailed),
+		int(model.OrderStatusRefunded),
+		int(model.OrderStatusClosed),
 	}
-	if !slices.Contains(orderStatusesExcludedFromBoughtQty, int(model.OrderStatusGroupFailed)) {
-		t.Fatal("excluded statuses must include GroupFailed")
+	for _, st := range need {
+		if !slices.Contains(orderStatusesExcludedFromBoughtQty, st) {
+			t.Fatalf("excluded statuses missing %d, got %v", st, orderStatusesExcludedFromBoughtQty)
+		}
 	}
-	if len(orderStatusesExcludedFromBoughtQty) != 2 {
-		t.Fatalf("expected exactly 2 excluded statuses, got %v", orderStatusesExcludedFromBoughtQty)
+	if len(orderStatusesExcludedFromBoughtQty) != len(need) {
+		t.Fatalf("expected %d excluded statuses, got %v", len(need), orderStatusesExcludedFromBoughtQty)
 	}
 }
 

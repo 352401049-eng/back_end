@@ -87,7 +87,8 @@ type hotGroupRow struct {
 }
 
 // ListHotGroups 进行中的拼团。
-// 以「待成团」订单为事实来源，人数按去重账号统计，与用户端待成团列表对齐。
+// 以「已支付且待成团」订单为事实来源，人数按去重账号统计；
+// 同一商品下的多个团（含活动团与普通团）全部展示，按接近成团优先排序。
 func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 	if limit < 1 {
 		limit = rankListLimit
@@ -132,7 +133,8 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 			o.created_at,
 			oi.activity_id,
 			oi.activity_product_id`).
-		Joins("JOIN `order` AS o ON o.id = oi.order_id AND o.is_deleted = 0 AND o.status = ?", model.OrderStatusPendingGroup).
+		Joins("JOIN `order` AS o ON o.id = oi.order_id AND o.is_deleted = 0 AND o.status = ? AND o.pay_status = ?",
+			model.OrderStatusPendingGroup, model.PayStatusPaid).
 		Joins("JOIN product AS p ON p.id = oi.product_id AND p.is_deleted = 0").
 		Joins("LEFT JOIN group_buy_team AS t ON t.id = oi.group_buy_team_id AND t.is_deleted = 0").
 		Where("oi.is_deleted = 0").
@@ -211,15 +213,7 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 	}
 
 	sort.SliceStable(rows, func(i, j int) bool {
-		needI := rows[i].TargetCount - rows[i].CurrentCount
-		needJ := rows[j].TargetCount - rows[j].CurrentCount
-		if needI != needJ {
-			return needI < needJ
-		}
-		if rows[i].CurrentCount != rows[j].CurrentCount {
-			return rows[i].CurrentCount > rows[j].CurrentCount
-		}
-		return rows[i].TeamID > rows[j].TeamID
+		return hotGroupRowLess(rows[i], rows[j])
 	})
 	if len(rows) > limit {
 		rows = rows[:limit]
@@ -276,6 +270,19 @@ func itoaUint64(v uint64) string {
 		v /= 10
 	}
 	return string(buf[i:])
+}
+
+// hotGroupRowLess：更接近成团的优先；同进度时人数多、团 ID 大者优先。
+func hotGroupRowLess(a, b hotGroupRow) bool {
+	needA := a.TargetCount - a.CurrentCount
+	needB := b.TargetCount - b.CurrentCount
+	if needA != needB {
+		return needA < needB
+	}
+	if a.CurrentCount != b.CurrentCount {
+		return a.CurrentCount > b.CurrentCount
+	}
+	return a.TeamID > b.TeamID
 }
 
 func (s *RankService) loadTeamMemberNames(teamIDs []uint64) map[uint64][]string {

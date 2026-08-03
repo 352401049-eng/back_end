@@ -59,6 +59,7 @@ type ActivityProductInput struct {
 	GroupBuyTargetCount     *uint32
 	GroupBuyAllowRepeat     uint8
 	GroupBuyMaxJoinsPerUser uint32
+	GroupBuyMaxConcurrentTeams uint32
 	EnableCoupon            uint8
 	SortOrder               int
 	Status                  uint8
@@ -83,6 +84,7 @@ type UpdateActivityProductPatch struct {
 	GroupBuyTargetCount     *uint32
 	GroupBuyAllowRepeat     *uint8
 	GroupBuyMaxJoinsPerUser *uint32
+	GroupBuyMaxConcurrentTeams *uint32
 	EnableCoupon            *uint8
 	SortOrder               *int
 	Status                  *uint8
@@ -152,6 +154,7 @@ type ActivityGroupBuyConfig struct {
 	GroupBuyTargetCount     uint32
 	GroupBuyAllowRepeat     uint8
 	GroupBuyMaxJoinsPerUser uint32
+	GroupBuyMaxConcurrentTeams uint32
 }
 
 func (s *ActivityService) List(page, pageSize int, filter ActivityListFilter) ([]model.Activity, int64, error) {
@@ -348,6 +351,7 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 		GroupBuyTargetCount:     input.GroupBuyTargetCount,
 		GroupBuyAllowRepeat:     input.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: maxJoins,
+		GroupBuyMaxConcurrentTeams: input.GroupBuyMaxConcurrentTeams,
 		EnableCoupon:            normalizeEnableCoupon(input.EnableCoupon),
 		SortOrder:               input.SortOrder, Status: status,
 	}
@@ -372,10 +376,14 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 	return s.GetActivityProduct(ap.ID, merchantID)
 }
 
+func activityProductPairWhereClause() string {
+	return "activity_id = ? AND product_id = ?"
+}
+
 func (s *ActivityService) findActivityProductPair(activityID, productID uint64) (model.ActivityProduct, bool, error) {
 	var existing model.ActivityProduct
 	err := s.DB.Unscoped().
-		Where("activity_id = ? AND product_id = ?", activityID, productID).
+		Where(activityProductPairWhereClause(), activityID, productID).
 		First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.ActivityProduct{}, false, nil
@@ -406,6 +414,7 @@ func normalizeActivityProductGroupBuyInput(input ActivityProductInput) ActivityP
 		input.GroupBuyTargetCount = nil
 		input.GroupBuyAllowRepeat = 0
 		input.GroupBuyMaxJoinsPerUser = 0
+		input.GroupBuyMaxConcurrentTeams = 0
 	}
 	return input
 }
@@ -425,6 +434,7 @@ func activityProductUpdates(input ActivityProductInput, maxJoins uint32, status 
 		"group_buy_target_count":       input.GroupBuyTargetCount,
 		"group_buy_allow_repeat":       input.GroupBuyAllowRepeat,
 		"group_buy_max_joins_per_user": maxJoins,
+		"group_buy_max_concurrent_teams": input.GroupBuyMaxConcurrentTeams,
 		"enable_coupon":                normalizeEnableCoupon(input.EnableCoupon),
 		"sort_order":                   input.SortOrder, "status": status,
 	}
@@ -473,7 +483,7 @@ func (p UpdateActivityProductPatch) hasField() bool {
 		p.RegisterMax != nil || p.PlatformDailyMax != nil || p.DailyRefreshTime != nil ||
 		p.EnableGroupBuy != nil || p.GroupBuyPrice != nil ||
 		p.GroupBuyTargetCount != nil || p.GroupBuyAllowRepeat != nil ||
-		p.GroupBuyMaxJoinsPerUser != nil || p.EnableCoupon != nil || p.SortOrder != nil || p.Status != nil
+		p.GroupBuyMaxJoinsPerUser != nil || p.GroupBuyMaxConcurrentTeams != nil || p.EnableCoupon != nil || p.SortOrder != nil || p.Status != nil
 }
 
 func activityProductInputToPatch(input ActivityProductInput) UpdateActivityProductPatch {
@@ -495,6 +505,7 @@ func activityProductInputToPatch(input ActivityProductInput) UpdateActivityProdu
 		GroupBuyTargetCount:     input.GroupBuyTargetCount,
 		GroupBuyAllowRepeat:     &input.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: &input.GroupBuyMaxJoinsPerUser,
+		GroupBuyMaxConcurrentTeams: &input.GroupBuyMaxConcurrentTeams,
 		EnableCoupon:            &input.EnableCoupon,
 		SortOrder:               &input.SortOrder,
 		Status:                  &input.Status,
@@ -522,6 +533,7 @@ func mergeActivityProductPatch(ap *model.ActivityProduct, patch UpdateActivityPr
 		GroupBuyTargetCount:     ap.GroupBuyTargetCount,
 		GroupBuyAllowRepeat:     ap.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: ap.GroupBuyMaxJoinsPerUser,
+		GroupBuyMaxConcurrentTeams: ap.GroupBuyMaxConcurrentTeams,
 		EnableCoupon:            ap.EnableCoupon,
 		SortOrder:               ap.SortOrder,
 		Status:                  ap.Status,
@@ -576,6 +588,9 @@ func mergeActivityProductPatch(ap *model.ActivityProduct, patch UpdateActivityPr
 	}
 	if patch.GroupBuyMaxJoinsPerUser != nil {
 		merged.GroupBuyMaxJoinsPerUser = *patch.GroupBuyMaxJoinsPerUser
+	}
+	if patch.GroupBuyMaxConcurrentTeams != nil {
+		merged.GroupBuyMaxConcurrentTeams = *patch.GroupBuyMaxConcurrentTeams
 	}
 	if patch.EnableCoupon != nil {
 		merged.EnableCoupon = *patch.EnableCoupon
@@ -765,11 +780,13 @@ func (s *ActivityService) countGroupBuyProductsByActivity(activityIDs []uint64, 
 	if len(activityIDs) == 0 {
 		return out
 	}
-	q := query.NotDeleted(s.DB.Model(&model.ActivityProduct{})).
-		Select("activity_id, COUNT(*) AS cnt").
-		Where("activity_id IN ?", activityIDs).
-		Where("enable_group_buy = 1").
-		Where("group_buy_price IS NOT NULL AND group_buy_price > 0 AND group_buy_target_count >= 2")
+	// 表名前缀 is_deleted：JOIN product 后裸列名会 Error 1052 Column 'is_deleted' in where clause is ambiguous
+	q := s.DB.Model(&model.ActivityProduct{}).
+		Select("activity_product.activity_id AS activity_id, COUNT(*) AS cnt").
+		Where("activity_product.is_deleted = ?", model.NotDeleted).
+		Where("activity_product.activity_id IN ?", activityIDs).
+		Where("activity_product.enable_group_buy = 1").
+		Where("activity_product.group_buy_price IS NOT NULL AND activity_product.group_buy_price > 0 AND activity_product.group_buy_target_count >= 2")
 	if publicOnly {
 		q = q.Joins("JOIN product ON product.id = activity_product.product_id AND product.is_deleted = ? AND product.status = ?",
 			model.NotDeleted, model.ProductStatusOn).
@@ -904,6 +921,7 @@ func buildActivityProductStoreView(act *model.Activity, ap *model.ActivityProduc
 		},
 		TargetCount:     ap.GroupBuyTargetCount,
 		AllowRepeatJoin: ap.GroupBuyAllowRepeat,
+		MaxConcurrentTeams: ap.GroupBuyMaxConcurrentTeams,
 	}
 
 	return ActivityProductStoreView{
@@ -952,16 +970,38 @@ func (s *ActivityService) enrichActivityProductLimits(view *ActivityProductStore
 	return nil
 }
 
+func productSellableUnits(p *model.Product) uint32 {
+	if p == nil {
+		return 0
+	}
+	best := p.Stock
+	if p.DealStock > best {
+		best = p.DealStock
+	}
+	if p.GroupStock > best {
+		best = p.GroupStock
+	}
+	if p.TakeoutStock > best {
+		best = p.TakeoutStock
+	}
+	return best
+}
+
 func availableActivityStock(ap *model.ActivityProduct, product *model.Product) uint32 {
+	base := productSellableUnits(product)
 	if ap.ActivityStock == 0 {
-		return product.Stock
+		return base
 	}
 	remain := uint32(0)
 	if ap.ActivityStock > ap.SoldCount {
 		remain = ap.ActivityStock - ap.SoldCount
 	}
-	if product.Stock < remain {
-		return product.Stock
+	// 商品通道库存均为 0 时，仅以活动库存为准（避免遗留 stock=0 误杀）
+	if base == 0 {
+		return remain
+	}
+	if base < remain {
+		return base
 	}
 	return remain
 }
@@ -1030,6 +1070,7 @@ func (s *ActivityService) ResolveForOrder(accountID uint64, activityProductID ui
 			GroupBuyTargetCount:     target,
 			GroupBuyAllowRepeat:     ap.GroupBuyAllowRepeat,
 			GroupBuyMaxJoinsPerUser: maxJoins,
+			GroupBuyMaxConcurrentTeams: ap.GroupBuyMaxConcurrentTeams,
 		}
 	}
 
@@ -1110,20 +1151,20 @@ func (s *ActivityService) RollbackSoldInTx(tx *gorm.DB, orderID uint64) error {
 		if it.ActivityProductID == nil || it.Quantity == 0 {
 			continue
 		}
-		res := tx.Model(&model.ActivityProduct{}).
-			Where("id = ? AND sold_count >= ?", *it.ActivityProductID, it.Quantity).
-			Update("sold_count", gorm.Expr("sold_count - ?", it.Quantity))
-		if res.Error != nil {
-			return res.Error
+		ap, err := lockActivityProduct(tx, *it.ActivityProductID)
+		if err != nil {
+			return err
 		}
-		if res.RowsAffected == 0 {
-			return fmt.Errorf("activity sold_count rollback failed for activity_product %d", *it.ActivityProductID)
-		}
-		if it.PlatformDailyBucket != nil && *it.PlatformDailyBucket != "" {
-			ap, err := lockActivityProduct(tx, *it.ActivityProductID)
-			if err != nil {
+		// 与 CreditSoldInTx 对称：仅 activity_stock>0 时才记/回滚 sold_count；
+		// 不限库存活动只占用平台日限，硬扣 sold_count 会在 0 上 RowsAffected=0 导致取消 500。
+		if ap.ActivityStock > 0 {
+			if err := tx.Model(&model.ActivityProduct{}).
+				Where("id = ?", *it.ActivityProductID).
+				Update("sold_count", gorm.Expr("GREATEST(0, CAST(sold_count AS SIGNED) - ?)", it.Quantity)).Error; err != nil {
 				return err
 			}
+		}
+		if it.PlatformDailyBucket != nil && *it.PlatformDailyBucket != "" {
 			if _, err := ensurePlatformDailyBucketLocked(tx, ap, time.Now()); err != nil {
 				return err
 			}
@@ -1131,6 +1172,45 @@ func (s *ActivityService) RollbackSoldInTx(tx *gorm.DB, orderID uint64) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// RollbackSoldQtyOnRefundInTx 背包退款时按件数回滚活动已售（支持部分退）。
+func (s *ActivityService) RollbackSoldQtyOnRefundInTx(tx *gorm.DB, orderID, productID uint64, quantity uint32) error {
+	if orderID == 0 || productID == 0 || quantity == 0 {
+		return nil
+	}
+	var items []model.OrderItem
+	if err := query.NotDeleted(tx).
+		Where("order_id = ? AND product_id = ? AND activity_product_id IS NOT NULL", orderID, productID).
+		Order("id ASC").
+		Find(&items).Error; err != nil {
+		return err
+	}
+	need := quantity
+	for i := range items {
+		it := &items[i]
+		if need == 0 || it.ActivityProductID == nil || it.Quantity == 0 {
+			continue
+		}
+		take := it.Quantity
+		if take > need {
+			take = need
+		}
+		ap, err := lockActivityProduct(tx, *it.ActivityProductID)
+		if err != nil {
+			return err
+		}
+		// 与 CreditSoldInTx / RollbackSoldInTx 对称：不限量活动不记 sold_count
+		if ap.ActivityStock > 0 {
+			if err := tx.Model(&model.ActivityProduct{}).
+				Where("id = ?", *it.ActivityProductID).
+				Update("sold_count", gorm.Expr("GREATEST(0, CAST(sold_count AS SIGNED) - ?)", take)).Error; err != nil {
+				return err
+			}
+		}
+		need -= take
 	}
 	return nil
 }

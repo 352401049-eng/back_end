@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"yujixinjiang/backend/internal/backup"
 	"yujixinjiang/backend/internal/config"
@@ -48,7 +50,9 @@ func main() {
 	addr := ":" + cfg.Port
 	log.Printf("服务已启动: http://localhost%s", addr)
 	log.Printf("健康检查: http://localhost%s/api/health", addr)
-	log.Printf("Swagger 文档: http://localhost%s/swagger/index.html", addr)
+	if !config.IsRelease() || os.Getenv("ENABLE_SWAGGER") == "true" {
+		log.Printf("Swagger 文档: http://localhost%s/swagger/index.html", addr)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -57,12 +61,23 @@ func main() {
 	sched.Start(ctx)
 	defer sched.Stop()
 
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
 	go func() {
-		if err := r.Run(addr); err != nil {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("服务启动失败: %v", err)
 		}
 	}()
 
 	<-ctx.Done()
 	log.Println("服务正在关闭...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("优雅关闭失败: %v", err)
+	}
 }

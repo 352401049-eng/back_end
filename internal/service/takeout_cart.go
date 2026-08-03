@@ -137,9 +137,17 @@ func (s *TakeoutService) CreateFromCart(accountID uint64, in CartCheckoutTakeout
 		}
 		sub := roundMoney(unit * float64(cart.Quantity))
 		goodsAmount = roundMoney(goodsAmount + sub)
+		opts := lineOpts[cart.ID]
+		if len(opts) == 0 {
+			fromCart, err := cartOptionSelectionsFromItem(cart)
+			if err != nil {
+				return nil, err
+			}
+			opts = fromCart
+		}
 		lines = append(lines, cartTakeoutLine{
 			Cart: cart, Product: product, UnitPrice: unit, Subtotal: sub,
-			Opts: lineOpts[cart.ID],
+			Opts: opts,
 		})
 	}
 

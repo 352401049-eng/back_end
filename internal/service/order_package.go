@@ -238,6 +238,9 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 
 	var order model.Order
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := assertNoUnpaidBagOrderForProducts(tx, accountID, []uint64{pkg.ID}); err != nil {
+			return err
+		}
 		if s.ActivitySvc != nil && activityProductID != nil && actCtx != nil && actCtx.ActivityProduct != nil {
 			var apLock model.ActivityProduct
 			if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -325,7 +328,8 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		if err := tx.Create(&pkgItem).Error; err != nil {
 			return err
 		}
-		if err := deductChannelStockInTx(tx, pkg.ID, qty, purchaseTypeToChannel(input.PurchaseType)); err != nil {
+		stockCh := stockChannelForOrder(pkg, input.PurchaseType, activityProductID != nil)
+		if err := deductChannelStockInTx(tx, pkg.ID, qty, stockCh); err != nil {
 			return err
 		}
 

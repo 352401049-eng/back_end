@@ -47,6 +47,8 @@ type TakeoutView struct {
 	model.TakeoutOrder
 	StatusText             string                 `json:"status_text"`
 	StatusCode             string                 `json:"status_code"`
+	RejectReason           string                 `json:"reject_reason,omitempty"`
+	RefundStatusText       string                 `json:"refund_status_text,omitempty"`
 	PickupCode             string                 `json:"pickup_code,omitempty"`
 	PackageSelectionText   string                 `json:"package_selection_text,omitempty"`
 	OptionSelectionText    string                 `json:"option_selection_text,omitempty"`
@@ -100,8 +102,31 @@ func (s *TakeoutService) toView(to *model.TakeoutOrder) *TakeoutView {
 		StatusText:   text,
 		StatusCode:   code,
 	}
+	applyTakeoutDisplayMeta(view)
 	s.enrichSelectionDisplay(view)
 	return view
+}
+
+// applyTakeoutDisplayMeta 商家拒单与退款进度展示（主状态保留拒单语义，退款作副文案）。
+func applyTakeoutDisplayMeta(view *TakeoutView) {
+	if view == nil {
+		return
+	}
+	remark := ""
+	if view.Remark != nil {
+		remark = strings.TrimSpace(*view.Remark)
+	}
+	if view.Status == model.TakeoutStatusCancelled && strings.HasPrefix(remark, "商家拒单") {
+		view.StatusText = "商家拒单"
+		view.StatusCode = "merchant_rejected"
+		view.RejectReason = remark
+	}
+	switch view.PayStatus {
+	case model.PayStatusRefunding:
+		view.RefundStatusText = "退款中"
+	case model.PayStatusRefunded:
+		view.RefundStatusText = "已退款"
+	}
 }
 
 func (s *TakeoutService) enrichSelectionDisplay(view *TakeoutView) {
@@ -260,7 +285,7 @@ func (s *TakeoutService) payTimeoutMinutes() int {
 	if s.PayTimeoutMinutes > 0 {
 		return s.PayTimeoutMinutes
 	}
-	return 15
+	return 5
 }
 
 // Create 创建外卖单：校验商品/地址/配送范围/套餐选配/规格；不写背包；创建时预扣库存（超时未付回滚）。
@@ -442,7 +467,16 @@ func (s *TakeoutService) Create(accountID uint64, in CreateTakeoutInput) (*Takeo
 		if err := deductTakeoutStockInTx(tx, &takeout); err != nil {
 			return err
 		}
-
+		aid := accountID
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectTakeout,
+			SubjectID:   takeout.ID,
+			EventCode:   model.EventCreated,
+			ActorRole:   model.FulfillmentActorUser,
+			ActorID:     &aid,
+			Title:       "订单已创建",
+			Detail:      map[string]interface{}{"pay_amount": payAmount},
+		})
 		return s.settlePaymentInTx(tx, takeout.ID, now)
 	})
 	if err != nil {
@@ -522,7 +556,16 @@ func (s *TakeoutService) MarkPaidInTx(tx *gorm.DB, takeoutID uint64, at time.Tim
 		}
 		return ErrTakeoutStatusInvalid
 	}
-	_ = at
+	aid := to.AccountID
+	AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+		SubjectType: model.FulfillmentSubjectTakeout,
+		SubjectID:   takeoutID,
+		EventCode:   model.EventPaid,
+		ActorRole:   model.FulfillmentActorUser,
+		ActorID:     &aid,
+		Title:       "支付成功，商家配餐中",
+		Detail:      map[string]interface{}{"paid_at": at.Format(time.RFC3339)},
+	})
 	return nil
 }
 
@@ -637,10 +680,15 @@ func (s *TakeoutService) attachPickupCode(view *TakeoutView) {
 		return
 	}
 	var d model.DeliveryOrder
-	if err := query.NotDeleted(s.DB).Select("pickup_code").First(&d, *view.DeliveryOrderID).Error; err != nil {
+	if err := query.NotDeleted(s.DB).Select("pickup_code", "status").First(&d, *view.DeliveryOrderID).Error; err != nil {
 		return
 	}
 	view.PickupCode = d.PickupCode
+	// 配送申诉中：外卖单仍可能是 fulfilling，用户端展示为申诉中
+	if d.Status == model.DeliveryException && view.Status == model.TakeoutStatusFulfilling {
+		view.StatusText = "申诉中"
+		view.StatusCode = "appealing"
+	}
 }
 
 func (s *TakeoutService) GetView(accountID, takeoutID uint64) (*TakeoutView, error) {
@@ -898,6 +946,25 @@ func (s *TakeoutService) ConfirmPrepared(merchantID, takeoutID uint64) (*Takeout
 		if res.RowsAffected == 0 {
 			return ErrTakeoutStatusInvalid
 		}
+		mid := merchantID
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectTakeout,
+			SubjectID:   takeoutID,
+			EventCode:   model.EventPrepared,
+			ActorRole:   model.FulfillmentActorMerchant,
+			ActorID:     &mid,
+			Title:       "商家已出餐，等待骑手接单",
+			Detail:      map[string]interface{}{"delivery_order_id": d.ID, "pickup_code": d.PickupCode},
+		})
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectDelivery,
+			SubjectID:   d.ID,
+			EventCode:   model.EventCreated,
+			ActorRole:   model.FulfillmentActorMerchant,
+			ActorID:     &mid,
+			Title:       "配送单已创建",
+			Detail:      map[string]interface{}{"takeout_order_id": takeoutID},
+		})
 		return nil
 	})
 	if err != nil {
@@ -976,6 +1043,24 @@ func (s *TakeoutService) Reject(merchantID, takeoutID uint64, reason string) (*T
 		if res.RowsAffected == 0 {
 			return ErrTakeoutStatusInvalid
 		}
+		mid := merchantID
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectTakeout,
+			SubjectID:   takeoutID,
+			EventCode:   model.EventMerchantRejected,
+			ActorRole:   model.FulfillmentActorMerchant,
+			ActorID:     &mid,
+			Title:       "商家已拒单",
+			Detail:      map[string]interface{}{"reason": reasonText},
+		})
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectTakeout,
+			SubjectID:   takeoutID,
+			EventCode:   model.EventRefundRequested,
+			ActorRole:   model.FulfillmentActorSystem,
+			Title:       "退款已发起",
+			Detail:      map[string]interface{}{"amount": to.PayAmount, "reason": reasonText},
+		})
 		return nil
 	})
 	if err != nil {

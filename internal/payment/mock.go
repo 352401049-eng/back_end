@@ -1,6 +1,7 @@
 package payment
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -187,6 +188,16 @@ func (p *MockProvider) refundTakeoutAmountInTx(tx *gorm.DB, takeoutID uint64, am
 		if status == model.PayStatusRefunded {
 			_ = query.NotDeleted(tx.Model(&model.TakeoutOrder{})).Where("id = ?", takeoutID).
 				Update("status", model.TakeoutStatusCancelled).Error
+			detail, _ := json.Marshal(map[string]interface{}{"amount": refund})
+			_ = tx.Create(&model.FulfillmentEvent{
+				SubjectType: model.FulfillmentSubjectTakeout,
+				SubjectID:   takeoutID,
+				EventCode:   model.EventRefundSucceeded,
+				ActorRole:   model.FulfillmentActorSystem,
+				Title:       "退款已到账",
+				Detail:      detail,
+				CreatedAt:   time.Now(),
+			}).Error
 		}
 		return nil
 	})

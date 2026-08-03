@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"yujixinjiang/backend/internal/model"
 	"yujixinjiang/backend/internal/payment/wechatv3"
 	"yujixinjiang/backend/internal/query"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -107,6 +109,17 @@ func (p *WeChatProvider) createOrderPrepay(sub PaySubject) (*PrepayResult, error
 			Message: "订单已支付"}, nil
 	}
 
+	// 2b. 已有预支付流水则复用（避免重复调微信 / prepay_id 唯一冲突）
+	// 支付窗已过则不复用过期 prepay_id，避免客户端拿到失效签名。
+	if reused, err := p.reuseOpenPrepay(model.PaySubjectOrder, orderID, order.OrderNo, order.PrepayID, order.PayExpireAt); err != nil {
+		return nil, err
+	} else if reused != nil {
+		return reused, nil
+	}
+	if order.PayExpireAt != nil && !order.PayExpireAt.After(time.Now()) {
+		return nil, fmt.Errorf("%w: 支付已超时，请重新下单", ErrInvalidState)
+	}
+
 	// 3. 获取用户 openid
 	var account model.Account
 	if err := query.NotDeleted(p.DB).Select("id", "openid").First(&account, accountID).Error; err != nil {
@@ -161,9 +174,9 @@ func (p *WeChatProvider) createOrderPrepay(sub PaySubject) (*PrepayResult, error
 		Status:      model.PayTxStatusPrepay,
 	}
 	if err := p.DB.Create(&pt).Error; err != nil {
-		// 唯一索引冲突：并发创建了同 prepay_id 流水，重查即可
+		// 唯一索引冲突：同 prepay_id 已存在，复用签名即可
 		if isDuplicateKey(err) {
-			return p.CreatePrepayForSubject(sub)
+			return p.prepayResultFromID(prepayID)
 		}
 		return nil, err
 	}
@@ -171,18 +184,7 @@ func (p *WeChatProvider) createOrderPrepay(sub PaySubject) (*PrepayResult, error
 	// 7. 更新订单 prepay_id
 	_ = p.DB.Model(&order).Update("prepay_id", prepayID).Error
 
-	// 8. 生成 wx.requestPayment 二次签名
-	params, err := p.Client.Signer().SignPrepay(p.AppID, prepayID)
-	if err != nil {
-		return nil, fmt.Errorf("生成支付签名失败: %w", err)
-	}
-
-	return &PrepayResult{
-		Provider: p.Name(),
-		NeedPay:  true,
-		Params:   params,
-		Message:  "请调起微信支付",
-	}, nil
+	return p.prepayResultFromID(prepayID)
 }
 
 func (p *WeChatProvider) createTakeoutPrepay(sub PaySubject) (*PrepayResult, error) {
@@ -382,11 +384,8 @@ func (p *WeChatProvider) HandleNotify(headers map[string]string, body []byte) (*
 
 	eventType, plaintext, err := p.Client.ParseAndDecryptNotify(headers, body)
 	if err != nil {
+		// 验签/解密失败直接拒绝，避免伪造回调触发全量未支付单查询。
 		log.Printf("[wechat notify] verify/decrypt failed: %v", err)
-		// 解密失败时，尝试主动查微信支付状态
-		if et := parseEventTypeSafely(body); et == wechatv3.EventPaySuccess {
-			return p.retrieveAndSettlePayments()
-		}
 		return nil, fmt.Errorf("回调验证失败: %w", err)
 	}
 
@@ -399,6 +398,17 @@ func (p *WeChatProvider) HandleNotify(headers map[string]string, body []byte) (*
 		log.Printf("[wechat notify] unhandled event type: %s", eventType)
 		return &NotifyResult{Paid: false, RawAck: `{"code":"SUCCESS"}`}, nil
 	}
+}
+
+// assertPayNotifyIdentity 校验回调商户号/应用号与本地配置一致。
+func (p *WeChatProvider) assertPayNotifyIdentity(mchID, appID string) error {
+	if p.MchID != "" && mchID != "" && mchID != p.MchID {
+		return fmt.Errorf("回调 mchid 不匹配: got=%s want=%s", mchID, p.MchID)
+	}
+	if p.AppID != "" && appID != "" && appID != p.AppID {
+		return fmt.Errorf("回调 appid 不匹配: got=%s want=%s", appID, p.AppID)
+	}
+	return nil
 }
 
 // handlePaySuccess 处理支付成功回调。
@@ -417,10 +427,23 @@ func (p *WeChatProvider) handlePaySuccess(data []byte) (*NotifyResult, error) {
 	if txID == "" {
 		return nil, fmt.Errorf("回调缺少 transaction_id")
 	}
+	if err := p.assertPayNotifyIdentity(notify.MchID, notify.AppID); err != nil {
+		return nil, err
+	}
 
 	var result NotifyResult
 	err = p.DB.Transaction(func(tx *gorm.DB) error {
-		sub, err := p.upsertPaidTransaction(tx, notify.OutTradeNo, txID, float64(notify.Amount.Total)/100.0, data)
+		sub, err := ResolveSubjectByOrderNo(tx, notify.OutTradeNo)
+		if err != nil {
+			return err
+		}
+		expectedFen := wechatv3.YuanToFen(sub.Amount)
+		if notify.Amount.Total != expectedFen {
+			return fmt.Errorf("回调金额不匹配: order_no=%s notify=%d expected=%d",
+				notify.OutTradeNo, notify.Amount.Total, expectedFen)
+		}
+		// 入账金额以业务单为准，避免浮点/回调字段偏差
+		sub, err = p.upsertPaidTransaction(tx, notify.OutTradeNo, txID, sub.Amount, data)
 		if err != nil {
 			return err
 		}
@@ -620,6 +643,12 @@ func (p *WeChatProvider) handleRefundSuccess(data []byte) (*NotifyResult, error)
 	if notify.RefundStatus != "SUCCESS" {
 		return &NotifyResult{RawAck: `{"code":"SUCCESS"}`}, nil
 	}
+	if err := p.assertPayNotifyIdentity(notify.MchID, ""); err != nil {
+		return nil, err
+	}
+	if notify.RefundID == "" || notify.OutRefundNo == "" {
+		return nil, fmt.Errorf("回调缺少 refund_id/out_refund_no")
+	}
 
 	refundYuan := wechatv3.FenToYuan(notify.Amount.Refund)
 	if refundYuan < 0 {
@@ -634,6 +663,28 @@ func (p *WeChatProvider) handleRefundSuccess(data []byte) (*NotifyResult, error)
 		subjectType := pt.SubjectType
 		if subjectType == "" {
 			subjectType = SubjectTypeFromOrderNo(notify.OutTradeNo)
+		}
+		var rawJSON *string
+		if len(data) > 0 {
+			s := string(data)
+			rawJSON = &s
+		}
+		rec := model.PaymentRefund{
+			OrderNo:      notify.OutTradeNo,
+			OutRefundNo:  notify.OutRefundNo,
+			RefundID:     notify.RefundID,
+			SubjectType:  subjectType,
+			SubjectID:    pt.SubjectID,
+			RefundAmount: refundYuan,
+			Status:       1,
+			WechatRaw:    rawJSON,
+		}
+		if err := tx.Create(&rec).Error; err != nil {
+			if isDuplicateKey(err) {
+				// 已处理过的退款通知：幂等成功，不再累加
+				return nil
+			}
+			return err
 		}
 		switch subjectType {
 		case model.PaySubjectTakeout:
@@ -720,6 +771,16 @@ func (p *WeChatProvider) applyTakeoutRefundInTx(tx *gorm.DB, pt model.PaymentTra
 	if status == model.PayStatusRefunded {
 		_ = query.NotDeleted(tx.Model(&model.TakeoutOrder{})).Where("id = ?", takeout.ID).
 			Update("status", model.TakeoutStatusCancelled).Error
+		detail, _ := json.Marshal(map[string]interface{}{"amount": refundYuan})
+		_ = tx.Create(&model.FulfillmentEvent{
+			SubjectType: model.FulfillmentSubjectTakeout,
+			SubjectID:   takeout.ID,
+			EventCode:   model.EventRefundSucceeded,
+			ActorRole:   model.FulfillmentActorSystem,
+			Title:       "退款已到账",
+			Detail:      detail,
+			CreatedAt:   time.Now(),
+		}).Error
 	}
 	if pt.Status != model.PayTxStatusRefunded && status == model.PayStatusRefunded {
 		_ = tx.Model(&pt).Update("status", model.PayTxStatusRefunded).Error
@@ -977,7 +1038,93 @@ func truncateRunes(s string, maxLen int) string {
 
 // isDuplicateKey 判断是否为 MySQL 唯一索引冲突。
 func isDuplicateKey(err error) bool {
-	return errors.Is(err, gorm.ErrDuplicatedKey)
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Duplicate entry") || strings.Contains(msg, "1062")
+}
+
+func (p *WeChatProvider) prepayResultFromID(prepayID string) (*PrepayResult, error) {
+	if prepayID == "" {
+		return nil, ErrInvalidState
+	}
+	params, err := p.Client.Signer().SignPrepay(p.AppID, prepayID)
+	if err != nil {
+		return nil, fmt.Errorf("生成支付签名失败: %w", err)
+	}
+	return &PrepayResult{
+		Provider: p.Name(),
+		NeedPay:  true,
+		Params:   params,
+		Message:  "请调起微信支付",
+	}, nil
+}
+
+// reuseOpenPrepay 若该主体已有预支付流水（或订单上已有 prepay_id），直接复用。
+// payExpireAt 已过期（或距过期不足 30s）时不复用，并作废本地预支付记录，避免返回失效签名。
+func (p *WeChatProvider) reuseOpenPrepay(subjectType string, subjectID uint64, orderNo string, orderPrepayID *string, payExpireAt *time.Time) (*PrepayResult, error) {
+	now := time.Now()
+	if payExpireAt != nil && payExpireAt.Sub(now) < 30*time.Second {
+		if err := p.invalidateOpenPrepay(subjectType, subjectID, orderNo, orderPrepayID); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	var existing model.PaymentTransaction
+	q := p.DB.Where("status = ?", model.PayTxStatusPrepay)
+	if subjectType == model.PaySubjectOrder {
+		q = q.Where("(subject_type = ? AND subject_id = ?) OR (order_id = ? AND subject_id = 0)",
+			subjectType, subjectID, subjectID)
+	} else {
+		q = q.Where("subject_type = ? AND subject_id = ?", subjectType, subjectID)
+	}
+	err := q.Order("id DESC").First(&existing).Error
+	if err == nil && existing.PrepayID != nil && *existing.PrepayID != "" {
+		return p.prepayResultFromID(*existing.PrepayID)
+	}
+	if orderPrepayID != nil && *orderPrepayID != "" {
+		return p.prepayResultFromID(*orderPrepayID)
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// invalidateOpenPrepay 作废本地预支付流水并清空订单 prepay_id；尽量关闭微信侧未支付单以便可重新下单。
+func (p *WeChatProvider) invalidateOpenPrepay(subjectType string, subjectID uint64, orderNo string, orderPrepayID *string) error {
+	q := p.DB.Model(&model.PaymentTransaction{}).Where("status = ?", model.PayTxStatusPrepay)
+	if subjectType == model.PaySubjectOrder {
+		q = q.Where("(subject_type = ? AND subject_id = ?) OR (order_id = ? AND subject_id = 0)",
+			subjectType, subjectID, subjectID)
+	} else {
+		q = q.Where("subject_type = ? AND subject_id = ?", subjectType, subjectID)
+	}
+	if err := q.Update("status", model.PayTxStatusFailed).Error; err != nil {
+		return err
+	}
+	if subjectType == model.PaySubjectOrder {
+		if err := p.DB.Model(&model.Order{}).Where("id = ?", subjectID).
+			Update("prepay_id", nil).Error; err != nil {
+			return err
+		}
+	}
+	if p.Client != nil && orderNo != "" {
+		if err := p.Client.CloseOrder(p.MchID, orderNo); err != nil {
+			log.Printf("[wechat] close expired prepay %s: %v", orderNo, err)
+		}
+	}
+	_ = orderPrepayID
+	return nil
 }
 
 // parseEventTypeSafely 从回调 JSON 中提取 event_type（不依赖 resource 解密）。

@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	PurchaseTypeSolo  uint8 = 1
@@ -8,19 +11,22 @@ const (
 )
 
 type CartItem struct {
-	ID             uint64    `gorm:"primaryKey" json:"id"`
-	AccountID      uint64    `gorm:"not null" json:"account_id"`
-	ProductID      uint64    `gorm:"not null" json:"product_id"`
-	PurchaseType   uint8     `gorm:"not null;default:1" json:"purchase_type"`
-	GroupBuyID     *uint64   `gorm:"column:group_buy_id" json:"group_buy_id,omitempty"`
-	GroupBuyTeamID *uint64   `gorm:"column:group_buy_team_id" json:"group_buy_team_id,omitempty"`
-	Spec           *string   `gorm:"size:128" json:"spec,omitempty"`
-	Quantity       uint32    `gorm:"not null;default:1" json:"quantity"`
-	Selected       uint8     `gorm:"not null;default:1" json:"selected"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID               uint64          `gorm:"primaryKey" json:"id"`
+	AccountID        uint64          `gorm:"not null" json:"account_id"`
+	ProductID        uint64          `gorm:"not null" json:"product_id"`
+	PurchaseType     uint8           `gorm:"not null;default:1" json:"purchase_type"`
+	GroupBuyID       *uint64         `gorm:"column:group_buy_id" json:"group_buy_id,omitempty"`
+	GroupBuyTeamID   *uint64         `gorm:"column:group_buy_team_id" json:"group_buy_team_id,omitempty"`
+	Spec             *string         `gorm:"size:128" json:"spec,omitempty"`
+	OptionSelections json.RawMessage `gorm:"type:json" json:"option_selections,omitempty"`
+	OptionText       string          `gorm:"size:512" json:"option_text,omitempty"`
+	OptionKey        string          `gorm:"size:64;not null;default:''" json:"option_key,omitempty"`
+	Quantity         uint32          `gorm:"not null;default:1" json:"quantity"`
+	Selected         uint8           `gorm:"not null;default:1" json:"selected"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 	SoftDelete
-	Product        Product   `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+	Product Product `gorm:"foreignKey:ProductID" json:"product,omitempty"`
 }
 
 func (CartItem) TableName() string { return "cart_item" }

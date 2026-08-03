@@ -20,6 +20,15 @@ var (
 	ErrInventoryRefundInvalid = errors.New("inventory refund invalid")
 )
 
+// errGroupBuyNoSelfRefund 拼团成团入袋后禁止用户自助退款（对齐美团：未成团可退，成团后须履约/联系商家）。
+func errGroupBuyNoSelfRefund() error {
+	return fmt.Errorf("%w: 拼团商品成团进入背包后不可自行退款", ErrInventoryRefundInvalid)
+}
+
+func isGroupBuyPurchaseType(purchaseType uint8) bool {
+	return purchaseType == model.PurchaseTypeGroup
+}
+
 type InventoryRefundView struct {
 	InventoryID   uint64  `json:"inventory_id"`
 	ProductID     uint64  `json:"product_id"`
@@ -163,6 +172,9 @@ func (s *OrderService) RefundInventory(accountID, inventoryID uint64, quantity u
 				}
 				return err
 			}
+			if err := s.maybeReleaseCouponAfterOrderRefundInTx(tx, a.OrderID); err != nil {
+				return err
+			}
 			// 微信：事务内先扣背包；CreateRefund 失败时由 AttachRestore 回滚
 			payment.AttachRestoreToLastRefundJob(tx, accountID, inv.ProductID, inv.Spec, a.Quantity)
 			oid := a.OrderID
@@ -175,6 +187,10 @@ func (s *OrderService) RefundInventory(accountID, inventoryID uint64, quantity u
 				return err
 			}
 			if s.ActivitySvc != nil {
+				// 活动已售与平台日限均按退款件数回滚（此前只回滚日限，导致 sold_count 虚高）
+				if err := s.ActivitySvc.RollbackSoldQtyOnRefundInTx(tx, a.OrderID, inv.ProductID, a.Quantity); err != nil {
+					return err
+				}
 				if err := s.ActivitySvc.RollbackPlatformDailyOnRefundInTx(tx, a.OrderID, inv.ProductID, a.Quantity); err != nil {
 					return err
 				}
@@ -248,6 +264,10 @@ func listRefundBatches(db *gorm.DB, accountID, productID uint64, spec string, in
 		if err != nil {
 			return nil, err
 		}
+		// 拼团入袋来源不出现在可退列表
+		if isGroupBuyPurchaseType(meta.PurchaseType) {
+			continue
+		}
 		takeQty, amount, err := planOrderItemRefundWithMeta(meta, uint32(take))
 		if err != nil {
 			// 该来源暂不可退（支付态/余额），跳过
@@ -302,7 +322,14 @@ func allocateInventoryRefundItems(tx *gorm.DB, accountID, productID uint64, spec
 		if requirePayTx && !orderHasPaidPaymentTx(tx, it.OrderID) {
 			return nil, fmt.Errorf("%w: 该来源订单无微信支付流水，不可退款", ErrInventoryRefundInvalid)
 		}
-		takeQty, amount, err := planOrderItemRefund(tx, it.OrderID, productID, spec, it.Quantity)
+		meta, metaErr := loadOrderRefundMeta(tx, it.OrderID, productID, spec)
+		if metaErr != nil {
+			return nil, metaErr
+		}
+		if isGroupBuyPurchaseType(meta.PurchaseType) {
+			return nil, errGroupBuyNoSelfRefund()
+		}
+		takeQty, amount, err := planOrderItemRefundWithMeta(meta, it.Quantity)
 		if err != nil {
 			return nil, err
 		}
@@ -346,7 +373,14 @@ func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec stri
 		if requirePayTx && !orderHasPaidPaymentTx(tx, oid) {
 			return nil, fmt.Errorf("%w: 该来源订单无微信支付流水，不可退款", ErrInventoryRefundInvalid)
 		}
-		takeQty, amount, err := planOrderItemRefund(tx, oid, productID, spec, uint32(take))
+		meta, metaErr := loadOrderRefundMeta(tx, oid, productID, spec)
+		if metaErr != nil {
+			return nil, metaErr
+		}
+		if isGroupBuyPurchaseType(meta.PurchaseType) {
+			return nil, errGroupBuyNoSelfRefund()
+		}
+		takeQty, amount, err := planOrderItemRefundWithMeta(meta, uint32(take))
 		if err != nil {
 			return nil, err
 		}
@@ -386,7 +420,12 @@ func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec stri
 		if requirePayTx && !orderHasPaidPaymentTx(tx, oid) {
 			continue
 		}
-		takeQty, amount, err := planOrderItemRefund(tx, oid, productID, spec, uint32(take))
+		meta, metaErr := loadOrderRefundMeta(tx, oid, productID, spec)
+		if metaErr != nil || isGroupBuyPurchaseType(meta.PurchaseType) {
+			// 拼团入袋或元数据异常：跳过，与列表一致
+			continue
+		}
+		takeQty, amount, err := planOrderItemRefundWithMeta(meta, uint32(take))
 		if err != nil || takeQty == 0 || amount <= 0 {
 			// 与 listRefundBatches 一致：跳过暂不可退来源，继续下一笔
 			continue
@@ -395,7 +434,7 @@ func allocateInventoryRefund(tx *gorm.DB, accountID, productID uint64, spec stri
 		need -= int32(takeQty)
 	}
 	if need > 0 {
-		return nil, fmt.Errorf("%w: 可退数量不足（可能部分已使用或余额不足）", ErrInventoryRefundInvalid)
+		return nil, fmt.Errorf("%w: 可退数量不足（拼团入袋不可退，或已使用/余额不足）", ErrInventoryRefundInvalid)
 	}
 	var inv model.UserInventory
 	invQty := quantity
@@ -655,13 +694,23 @@ func loadOrderRefundMeta(db *gorm.DB, orderID, productID uint64, spec string) (*
 	}
 	var order model.Order
 	if err := query.NotDeleted(db).
-		Select("id", "order_no", "pay_amount", "refunded_amount", "refund_pending_amount", "pay_status", "created_at", "activity_id").
+		Select("id", "order_no", "total_amount", "discount_amount", "pay_amount", "refunded_amount", "refund_pending_amount", "pay_status", "created_at", "activity_id", "user_coupon_id").
 		First(&order, orderID).Error; err != nil {
 		return nil, err
 	}
-	unit := matched.UnitPrice
+	catalogUnit := matched.UnitPrice
 	if matched.Quantity > 0 && matched.Subtotal > 0 {
-		unit = matched.Subtotal / float64(matched.Quantity)
+		catalogUnit = matched.Subtotal / float64(matched.Quantity)
+	}
+	// 按行小计占订单总额比例分摊实付，保证用券订单按优惠后单价退款
+	unit := catalogUnit
+	if order.TotalAmount > 0 && matched.Quantity > 0 {
+		itemPayShare := matched.Subtotal / order.TotalAmount * order.PayAmount
+		unit = itemPayShare / float64(matched.Quantity)
+	}
+	unit = math.Round(unit*100) / 100
+	if unit <= 0 {
+		unit = math.Round(catalogUnit*100) / 100
 	}
 	activityID := matched.ActivityID
 	if activityID == nil {
@@ -669,8 +718,8 @@ func loadOrderRefundMeta(db *gorm.DB, orderID, productID uint64, spec string) (*
 	}
 	return &orderRefundMeta{
 		OrderNo:      order.OrderNo,
-		UnitPrice:    math.Round(unit*100) / 100,
-		Label:        refundSourceLabel(matched.PurchaseType, activityID),
+		UnitPrice:    unit,
+		Label:        refundSourceLabel(matched.PurchaseType, activityID, order.DiscountAmount > 0),
 		PurchaseType: matched.PurchaseType,
 		ActivityID:   activityID,
 		CreatedAt:    order.CreatedAt,
@@ -681,14 +730,33 @@ func loadOrderRefundMeta(db *gorm.DB, orderID, productID uint64, spec string) (*
 	}, nil
 }
 
-func refundSourceLabel(purchaseType uint8, activityID *uint64) string {
+func refundSourceLabel(purchaseType uint8, activityID *uint64, usedCoupon bool) string {
 	if activityID != nil && *activityID > 0 {
 		return "活动价"
 	}
 	if purchaseType == model.PurchaseTypeGroup {
 		return "拼团价"
 	}
+	if usedCoupon {
+		return "优惠价"
+	}
 	return "原价"
+}
+
+// maybeReleaseCouponAfterOrderRefundInTx 订单实付已全退（含退款中预留）时退还优惠券。
+func (s *OrderService) maybeReleaseCouponAfterOrderRefundInTx(tx *gorm.DB, orderID uint64) error {
+	if s.CouponSvc == nil || orderID == 0 {
+		return nil
+	}
+	var order model.Order
+	if err := query.NotDeleted(tx).First(&order, orderID).Error; err != nil {
+		return nil
+	}
+	remain := order.PayAmount - order.RefundedAmount - order.RefundPendingAmount
+	if remain > 0.009 {
+		return nil
+	}
+	return s.CouponSvc.ReleaseByOrderInTx(tx, &order)
 }
 
 func planOrderItemRefund(tx *gorm.DB, orderID, productID uint64, spec string, qty uint32) (uint32, float64, error) {

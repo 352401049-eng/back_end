@@ -1,6 +1,7 @@
 package payment
 
 import (
+	"fmt"
 	"log"
 	"strings"
 
@@ -10,8 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// NewProvider 按配置创建支付实现。默认 mock。
-func NewProvider(cfg *config.Config, db *gorm.DB) Provider {
+// NewProvider 按配置创建支付实现。wechat 初始化失败时返回错误，不再静默降级为 Mock。
+func NewProvider(cfg *config.Config, db *gorm.DB) (Provider, error) {
 	name := "mock"
 	if cfg != nil && cfg.Payment.Provider != "" {
 		name = strings.ToLower(strings.TrimSpace(cfg.Payment.Provider))
@@ -27,8 +28,7 @@ func NewProvider(cfg *config.Config, db *gorm.DB) Provider {
 		}
 		client, err := wechatv3.NewClient(v3cfg)
 		if err != nil {
-			log.Printf("微信支付 V3 客户端初始化失败，降级为 Mock: %v", err)
-			return &MockProvider{DB: db}
+			return nil, fmt.Errorf("微信支付 V3 客户端初始化失败: %w", err)
 		}
 		if cfg.Payment.WeChatEnabled {
 			if certSerial, err := wechatv3.ReadCertSerialNo(cfg.Payment.WeChatCertPath); err != nil {
@@ -42,7 +42,7 @@ func NewProvider(cfg *config.Config, db *gorm.DB) Provider {
 				log.Printf("[wechat] APIv3 密钥验证通过")
 			}
 		}
-		wp := &WeChatProvider{
+		return &WeChatProvider{
 			DB:        db,
 			AppID:     cfg.WeChat.AppID,
 			MchID:     cfg.Payment.WeChatMchID,
@@ -50,9 +50,11 @@ func NewProvider(cfg *config.Config, db *gorm.DB) Provider {
 			NotifyURL: cfg.Payment.WeChatNotifyURL,
 			Enabled:   cfg.Payment.WeChatEnabled,
 			Client:    client,
-		}
-		return wp
+		}, nil
 	default:
-		return &MockProvider{DB: db}
+		if config.IsRelease() {
+			return nil, fmt.Errorf("生产环境禁止使用 mock 支付")
+		}
+		return &MockProvider{DB: db}, nil
 	}
 }

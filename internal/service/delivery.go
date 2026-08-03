@@ -58,25 +58,44 @@ type CompleteDeliveryInput struct {
 }
 
 type DeliveryUsageLine struct {
-	UsageID              uint64                         `json:"usage_id"`
-	ProductID            uint64                         `json:"product_id"`
-	ProductName          string                         `json:"product_name"`
-	Quantity             uint32                         `json:"quantity"`
-	IsPackage            bool                           `json:"is_package"`
-	PackageSelectionText string                         `json:"package_selection_text,omitempty"`
-	OptionSelectionText  string                         `json:"option_selection_text,omitempty"`
-	OptionSelections     model.OptionSelectionSnapshot  `json:"option_selections,omitempty"`
+	UsageID              uint64                        `json:"usage_id,omitempty"`
+	ProductID            uint64                        `json:"product_id"`
+	ProductName          string                        `json:"product_name"`
+	ProductImage         string                        `json:"product_image,omitempty"`
+	UnitPrice            float64                       `json:"unit_price"`
+	Quantity             uint32                        `json:"quantity"`
+	IsPackage            bool                          `json:"is_package"`
+	PackageSelectionText string                        `json:"package_selection_text,omitempty"`
+	OptionSelectionText  string                        `json:"option_selection_text,omitempty"`
+	OptionSelections     model.OptionSelectionSnapshot `json:"option_selections,omitempty"`
+}
+
+// DeliveryMerchantBrief 骑手/管理端展示用门店摘要。
+type DeliveryMerchantBrief struct {
+	ID           uint64   `json:"id"`
+	ShopName     string   `json:"shop_name"`
+	Address      string   `json:"address,omitempty"`
+	ContactPhone string   `json:"contact_phone,omitempty"`
+	Latitude     *float64 `json:"latitude,omitempty"`
+	Longitude    *float64 `json:"longitude,omitempty"`
 }
 
 type DeliveryView struct {
 	model.DeliveryOrder
-	StatusText           string                 `json:"status_text"`
-	AddressSnapshot      *model.AddressSnapshot `json:"address_snapshot,omitempty"`
-	UsageItems           []DeliveryUsageLine    `json:"usage_items,omitempty"`
-	VerifyCode           *string                `json:"verify_code,omitempty"`
-	DeliveryTimeRemark   string                 `json:"delivery_time_remark,omitempty"`
-	RiderName            string                 `json:"rider_name,omitempty"`
-	RiderPhone           string                 `json:"rider_phone,omitempty"`
+	StatusText         string                 `json:"status_text"`
+	AddressSnapshot    *model.AddressSnapshot `json:"address_snapshot,omitempty"`
+	UsageItems         []DeliveryUsageLine    `json:"usage_items,omitempty"`
+	VerifyCode         *string                `json:"verify_code,omitempty"`
+	DeliveryTimeRemark string                 `json:"delivery_time_remark,omitempty"`
+	RiderName          string                 `json:"rider_name,omitempty"`
+	RiderPhone         string                 `json:"rider_phone,omitempty"`
+	// 列表卡片摘要（骑手端商品名/图/价）
+	ProductName  string                 `json:"product_name,omitempty"`
+	ProductImage string                 `json:"product_image,omitempty"`
+	Quantity     uint32                 `json:"quantity,omitempty"`
+	GoodsAmount  float64                `json:"goods_amount"`
+	TotalAmount  float64                `json:"total_amount"`
+	Merchant     *DeliveryMerchantBrief `json:"merchant,omitempty"`
 }
 
 type BagDeliveryReviewView struct {
@@ -148,7 +167,8 @@ func (s *DeliveryService) ListForRider(riderID uint64, scope string, page, pageS
 	return toRiderDeliveryViews(s.DB, list), total, nil
 }
 
-// ListForUser scope: active=??? pending_confirm=??????history=????
+// ListForUser scope: active/delivering=配送中；pending_confirm=待确认收货；
+// appealing/exception=申诉中；history=已完成/已取消（不含待处理申诉）
 func (s *DeliveryService) ListForUser(accountID uint64, scope string, page, pageSize int) ([]DeliveryView, int64, error) {
 	if page < 1 {
 		page = 1
@@ -162,11 +182,12 @@ func (s *DeliveryService) ListForUser(accountID uint64, scope string, page, page
 	switch scope {
 	case "pending_confirm":
 		q = q.Where("status = ? AND user_confirmed = ?", model.DeliveryDelivered, 0)
+	case "appealing", "exception":
+		q = q.Where("status = ?", model.DeliveryException)
 	case "history":
 		q = q.Where("status IN ?", []int{
 			int(model.DeliveryConfirmed),
 			int(model.DeliveryCancelled),
-			int(model.DeliveryException),
 		})
 	case "active", "delivering":
 		q = q.Where("status IN ?", []int{
@@ -194,7 +215,18 @@ func (s *DeliveryService) ListForUser(accountID uint64, scope string, page, page
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
-	return toDeliveryViews(s.DB, list), total, nil
+	views := toDeliveryViews(s.DB, list)
+	applyUserAppealStatusText(views)
+	return views, total, nil
+}
+
+// applyUserAppealStatusText 用户端将配送异常展示为「申诉中」。
+func applyUserAppealStatusText(views []DeliveryView) {
+	for i := range views {
+		if views[i].Status == model.DeliveryException {
+			views[i].StatusText = "申诉中"
+		}
+	}
 }
 
 func (s *DeliveryService) GetForUser(accountID, deliveryID uint64) (*DeliveryView, error) {
@@ -211,13 +243,18 @@ func (s *DeliveryService) GetForUser(accountID, deliveryID uint64) (*DeliveryVie
 		return nil, err
 	}
 	view := toDeliveryView(s.DB, d)
+	if view.Status == model.DeliveryException {
+		view.StatusText = "申诉中"
+	}
 	return &view, nil
 }
 
 func (s *DeliveryService) Accept(riderID, deliveryID uint64) (*DeliveryView, error) {
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := query.NotDeleted(tx).Where("id = ? AND status = ? AND rider_id IS NULL", deliveryID, model.DeliveryPendingAccept).First(&d).Error; err != nil {
+		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+			Where("id = ? AND status = ? AND rider_id IS NULL", deliveryID, model.DeliveryPendingAccept).
+			First(&d).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrDeliveryNotFound
 			}
@@ -257,13 +294,40 @@ func (s *DeliveryService) Accept(riderID, deliveryID uint64) (*DeliveryView, err
 			}
 		}
 		now := time.Now()
-		if err := tx.Model(&d).Updates(map[string]interface{}{
-			"rider_id": riderID, "status": model.DeliveryAccepted, "accepted_at": now,
-		}).Error; err != nil {
-			return err
+		res := query.NotDeleted(tx.Model(&model.DeliveryOrder{})).
+			Where("id = ? AND status = ? AND rider_id IS NULL", deliveryID, model.DeliveryPendingAccept).
+			Updates(map[string]interface{}{
+				"rider_id": riderID, "status": model.DeliveryAccepted, "accepted_at": now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrDeliveryTaken
 		}
 		if d.OrderID != nil {
-			return tx.Model(&model.Order{}).Where("id = ?", *d.OrderID).Update("status", model.OrderStatusShipping).Error
+			if err := tx.Model(&model.Order{}).Where("id = ?", *d.OrderID).Update("status", model.OrderStatusShipping).Error; err != nil {
+				return err
+			}
+		}
+		rid := riderID
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectDelivery,
+			SubjectID:   deliveryID,
+			EventCode:   model.EventRiderAccepted,
+			ActorRole:   model.FulfillmentActorRider,
+			ActorID:     &rid,
+			Title:       "骑手已接单",
+		})
+		if d.TakeoutOrderID != nil {
+			AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+				SubjectType: model.FulfillmentSubjectTakeout,
+				SubjectID:   *d.TakeoutOrderID,
+				EventCode:   model.EventRiderAccepted,
+				ActorRole:   model.FulfillmentActorRider,
+				ActorID:     &rid,
+				Title:       "骑手已接单",
+			})
 		}
 		return nil
 	})
@@ -299,6 +363,25 @@ func (s *DeliveryService) Start(riderID, deliveryID uint64) (*DeliveryView, erro
 	}
 	if d.OrderID != nil {
 		_ = s.DB.Model(&model.Order{}).Where("id = ?", *d.OrderID).Update("status", model.OrderStatusShipping).Error
+	}
+	rid := riderID
+	AppendFulfillmentEvent(s.DB, FulfillmentEventInput{
+		SubjectType: model.FulfillmentSubjectDelivery,
+		SubjectID:   deliveryID,
+		EventCode:   model.EventDelivering,
+		ActorRole:   model.FulfillmentActorRider,
+		ActorID:     &rid,
+		Title:       "骑手配送中",
+	})
+	if d.TakeoutOrderID != nil {
+		AppendFulfillmentEvent(s.DB, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectTakeout,
+			SubjectID:   *d.TakeoutOrderID,
+			EventCode:   model.EventDelivering,
+			ActorRole:   model.FulfillmentActorRider,
+			ActorID:     &rid,
+			Title:       "骑手配送中",
+		})
 	}
 	return s.getRiderViewByID(deliveryID)
 }
@@ -452,8 +535,12 @@ func (s *DeliveryService) RejectPrepare(merchantID, deliveryID uint64, reason st
 	return s.getViewByID(deliveryID)
 }
 
-// ReportException ?????????
+// ReportException 骑手上报异常（已接单/配送中）。
 func (s *DeliveryService) ReportException(riderID, deliveryID uint64, reason string) (*DeliveryView, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, fmt.Errorf("%w: 请填写异常说明", ErrDeliveryStatusInvalid)
+	}
 	var d model.DeliveryOrder
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
@@ -463,19 +550,77 @@ func (s *DeliveryService) ReportException(riderID, deliveryID uint64, reason str
 			}
 			return err
 		}
-		if d.Status != model.DeliveryAccepted && d.Status != model.DeliveryDelivering {
+		if d.Status != model.DeliveryAccepted && d.Status != model.DeliveryPicking && d.Status != model.DeliveryDelivering {
 			return ErrDeliveryStatusInvalid
 		}
-		reasonPtr := reason
+		reasonText := "骑手上报：" + reason
 		return tx.Model(&d).Updates(map[string]interface{}{
 			"status":           model.DeliveryException,
-			"exception_reason": reasonPtr,
+			"exception_reason": reasonText,
 		}).Error
 	})
 	if err != nil {
 		return nil, err
 	}
 	return s.getRiderViewByID(deliveryID)
+}
+
+// ReportExceptionByUser 用户上报异常：仅骑手点击送达后（待确认收货）可报；进入管理端配送异常人工处理。
+func (s *DeliveryService) ReportExceptionByUser(accountID, deliveryID uint64, reason string) (*DeliveryView, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, fmt.Errorf("%w: 请填写异常说明", ErrDeliveryStatusInvalid)
+	}
+	var d model.DeliveryOrder
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := query.NotDeleted(tx.Clauses(clause.Locking{Strength: "UPDATE"})).
+			Where("id = ?", deliveryID).First(&d).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrDeliveryNotFound
+			}
+			return err
+		}
+		if err := s.assertDeliveryOwner(tx, accountID, &d); err != nil {
+			return err
+		}
+		// 仅待确认收货（骑手已送达）；配送中不可上报
+		if d.Status != model.DeliveryDelivered {
+			return ErrDeliveryStatusInvalid
+		}
+		reasonText := "用户上报：" + reason
+		if err := tx.Model(&d).Updates(map[string]interface{}{
+			"status":           model.DeliveryException,
+			"exception_reason": reasonText,
+		}).Error; err != nil {
+			return err
+		}
+		aid := accountID
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectDelivery,
+			SubjectID:   deliveryID,
+			EventCode:   model.EventExceptionReported,
+			ActorRole:   model.FulfillmentActorUser,
+			ActorID:     &aid,
+			Title:       "用户发起申诉",
+			Detail:      map[string]interface{}{"reason": reasonText},
+		})
+		if d.TakeoutOrderID != nil {
+			AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+				SubjectType: model.FulfillmentSubjectTakeout,
+				SubjectID:   *d.TakeoutOrderID,
+				EventCode:   model.EventExceptionReported,
+				ActorRole:   model.FulfillmentActorUser,
+				ActorID:     &aid,
+				Title:       "用户发起申诉",
+				Detail:      map[string]interface{}{"reason": reasonText},
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.getViewByID(deliveryID)
 }
 
 // deliveryBelongsToMerchant ?????????????Order.MerchantID ??InventoryUsage.MerchantID???
@@ -521,8 +666,29 @@ func (s *DeliveryService) Complete(riderID, deliveryID uint64, input CompleteDel
 			return err
 		}
 		if d.OrderID != nil {
-			return tx.Model(&model.Order{}).Where("id = ?", *d.OrderID).
-				Update("status", model.OrderStatusPendingConfirm).Error
+			if err := tx.Model(&model.Order{}).Where("id = ?", *d.OrderID).
+				Update("status", model.OrderStatusPendingConfirm).Error; err != nil {
+				return err
+			}
+		}
+		rid := riderID
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectDelivery,
+			SubjectID:   deliveryID,
+			EventCode:   model.EventDelivered,
+			ActorRole:   model.FulfillmentActorRider,
+			ActorID:     &rid,
+			Title:       "骑手已送达，待确认收货",
+		})
+		if d.TakeoutOrderID != nil {
+			AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+				SubjectType: model.FulfillmentSubjectTakeout,
+				SubjectID:   *d.TakeoutOrderID,
+				EventCode:   model.EventDelivered,
+				ActorRole:   model.FulfillmentActorRider,
+				ActorID:     &rid,
+				Title:       "骑手已送达，待确认收货",
+			})
 		}
 		return nil
 	})
@@ -592,7 +758,35 @@ func (s *DeliveryService) ConfirmReceipt(accountID, deliveryID uint64) (*Deliver
 				return err
 			}
 		}
-		_ = now
+		aid := accountID
+		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+			SubjectType: model.FulfillmentSubjectDelivery,
+			SubjectID:   deliveryID,
+			EventCode:   model.EventUserConfirmed,
+			ActorRole:   model.FulfillmentActorUser,
+			ActorID:     &aid,
+			Title:       "用户已确认收货",
+		})
+		if d.TakeoutOrderID != nil {
+			AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+				SubjectType: model.FulfillmentSubjectTakeout,
+				SubjectID:   *d.TakeoutOrderID,
+				EventCode:   model.EventCompleted,
+				ActorRole:   model.FulfillmentActorUser,
+				ActorID:     &aid,
+				Title:       "订单已完成",
+			})
+		}
+		if d.OrderID != nil {
+			AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
+				SubjectType: model.FulfillmentSubjectOrder,
+				SubjectID:   *d.OrderID,
+				EventCode:   model.EventCompleted,
+				ActorRole:   model.FulfillmentActorUser,
+				ActorID:     &aid,
+				Title:       "订单已完成",
+			})
+		}
 		return nil
 	})
 	if err != nil {
@@ -742,6 +936,9 @@ func (s *DeliveryService) getViewByID(id uint64) (*DeliveryView, error) {
 		return nil, err
 	}
 	view := toDeliveryView(s.DB, *d)
+	if view.Status == model.DeliveryException {
+		view.StatusText = "申诉中"
+	}
 	return &view, nil
 }
 
@@ -803,7 +1000,9 @@ func toDeliveryView(db *gorm.DB, d model.DeliveryOrder) DeliveryView {
 	if view.TakeoutOrderID != nil {
 		attachTakeoutDeliveryData(db, &view)
 	}
+	attachDeliveryMerchant(db, &view)
 	attachRiderContact(db, &view)
+	finalizeDeliveryDisplay(&view)
 	return view
 }
 
@@ -818,6 +1017,10 @@ func toRiderDeliveryViews(db *gorm.DB, list []model.DeliveryOrder) []DeliveryVie
 func toRiderDeliveryView(db *gorm.DB, d model.DeliveryOrder) DeliveryView {
 	view := toDeliveryView(db, d)
 	attachRiderVerifyCode(db, &view)
+	// 背包跑腿无出餐环节：骑手端不返回出餐号（含历史误写入的）
+	if IsBagErrand(&view.DeliveryOrder) {
+		view.PickupCode = ""
+	}
 	return view
 }
 
@@ -914,13 +1117,33 @@ func attachDeliveryUsageItems(db *gorm.DB, view *DeliveryView) {
 	for i := range usages {
 		u := usages[i]
 		name := ""
+		cover := ""
+		unitPrice := 0.0
 		isPkg := false
 		if u.Product != nil {
 			name = u.Product.Name
+			cover = u.Product.CoverURL
+			unitPrice = u.Product.Price
 			isPkg = u.Product.ItemType == model.ProductItemTypePackage
+		}
+		if unitPrice <= 0 && u.SourceOrderID != nil {
+			var oi model.OrderItem
+			if err := query.NotDeleted(db).
+				Select("unit_price", "product_image", "product_name").
+				Where("order_id = ? AND product_id = ?", *u.SourceOrderID, u.ProductID).
+				Order("id ASC").Limit(1).Find(&oi).Error; err == nil && oi.UnitPrice > 0 {
+				unitPrice = oi.UnitPrice
+				if cover == "" && oi.ProductImage != nil {
+					cover = *oi.ProductImage
+				}
+				if name == "" {
+					name = oi.ProductName
+				}
+			}
 		}
 		lines = append(lines, DeliveryUsageLine{
 			UsageID: u.ID, ProductID: u.ProductID, ProductName: name,
+			ProductImage: cover, UnitPrice: unitPrice,
 			Quantity: u.Quantity, IsPackage: isPkg,
 			PackageSelectionText: u.PackageSelections.SummaryText(),
 			OptionSelectionText:  u.OptionSelections.SummaryText(),
@@ -928,6 +1151,9 @@ func attachDeliveryUsageItems(db *gorm.DB, view *DeliveryView) {
 		})
 	}
 	view.UsageItems = lines
+	if view.Merchant == nil && usages[0].MerchantProfile != nil {
+		view.Merchant = merchantBriefFromProfile(usages[0].MerchantProfile)
+	}
 }
 
 func attachTakeoutDeliveryData(db *gorm.DB, view *DeliveryView) {
@@ -942,23 +1168,173 @@ func attachTakeoutDeliveryData(db *gorm.DB, view *DeliveryView) {
 	}
 	view.AddressSnapshot = to.AddressSnapshot
 	view.DeliveryTimeRemark = to.DeliveryTimeRemark
+	view.GoodsAmount = to.GoodsAmount
+	view.TotalAmount = to.GoodsAmount
+	if view.DeliveryFee <= 0 && to.DeliveryFee > 0 {
+		view.DeliveryFee = to.DeliveryFee
+	}
+	if view.RiderEarnings <= 0 && to.RiderEarnings > 0 {
+		view.RiderEarnings = to.RiderEarnings
+	}
+
+	itemByPID := map[uint64]model.TakeoutOrderItem{}
+	for i := range to.Items {
+		itemByPID[to.Items[i].ProductID] = to.Items[i]
+	}
 
 	_, _, selLines := buildTakeoutSelectionDisplay(db, &to)
 	if len(selLines) == 0 {
+		// 无选配行时仍用外卖明细兜底
+		lines := make([]DeliveryUsageLine, 0, len(to.Items))
+		for _, it := range to.Items {
+			cover := ""
+			if it.ProductImage != nil {
+				cover = *it.ProductImage
+			}
+			lines = append(lines, DeliveryUsageLine{
+				ProductID: it.ProductID, ProductName: it.ProductName,
+				ProductImage: cover, UnitPrice: it.UnitPrice, Quantity: it.Quantity,
+			})
+		}
+		view.UsageItems = lines
+	} else {
+		lines := make([]DeliveryUsageLine, 0, len(selLines))
+		for _, ln := range selLines {
+			cover := ""
+			unitPrice := 0.0
+			if it, ok := itemByPID[ln.ProductID]; ok {
+				if it.ProductImage != nil {
+					cover = *it.ProductImage
+				}
+				unitPrice = it.UnitPrice
+			}
+			if cover == "" && ln.ProductID != 0 {
+				var p model.Product
+				if err := query.NotDeleted(db).Select("id", "cover_url", "price").First(&p, ln.ProductID).Error; err == nil {
+					cover = p.CoverURL
+					if unitPrice <= 0 {
+						unitPrice = p.Price
+					}
+				}
+			}
+			lines = append(lines, DeliveryUsageLine{
+				ProductID:            ln.ProductID,
+				ProductName:          ln.ProductName,
+				ProductImage:         cover,
+				UnitPrice:            unitPrice,
+				Quantity:             ln.Quantity,
+				IsPackage:            ln.IsPackage,
+				PackageSelectionText: ln.PackageSelectionText,
+				OptionSelectionText:  ln.OptionSelectionText,
+			})
+		}
+		view.UsageItems = lines
+	}
+
+	if view.Merchant == nil {
+		var mp model.MerchantProfile
+		if err := query.NotDeleted(db).First(&mp, to.MerchantID).Error; err == nil {
+			view.Merchant = merchantBriefFromProfile(&mp)
+		}
+	}
+}
+
+func merchantBriefFromProfile(mp *model.MerchantProfile) *DeliveryMerchantBrief {
+	if mp == nil {
+		return nil
+	}
+	addr, phone := "", ""
+	if mp.Address != nil {
+		addr = *mp.Address
+	}
+	if mp.ContactPhone != nil {
+		phone = *mp.ContactPhone
+	}
+	return &DeliveryMerchantBrief{
+		ID:           mp.ID,
+		ShopName:     mp.ShopName,
+		Address:      addr,
+		ContactPhone: phone,
+		Latitude:     mp.Latitude,
+		Longitude:    mp.Longitude,
+	}
+}
+
+func attachDeliveryMerchant(db *gorm.DB, view *DeliveryView) {
+	if db == nil || view == nil || view.Merchant != nil {
 		return
 	}
-	lines := make([]DeliveryUsageLine, 0, len(selLines))
-	for _, ln := range selLines {
-		lines = append(lines, DeliveryUsageLine{
-			ProductID:            ln.ProductID,
-			ProductName:          ln.ProductName,
-			Quantity:             ln.Quantity,
-			IsPackage:            ln.IsPackage,
-			PackageSelectionText: ln.PackageSelectionText,
-			OptionSelectionText:  ln.OptionSelectionText,
-		})
+	if view.Order != nil && view.Order.MerchantProfile != nil {
+		view.Merchant = merchantBriefFromProfile(view.Order.MerchantProfile)
+		return
 	}
-	view.UsageItems = lines
+	if view.InventoryUsage != nil && view.InventoryUsage.MerchantProfile != nil {
+		view.Merchant = merchantBriefFromProfile(view.InventoryUsage.MerchantProfile)
+		return
+	}
+	if view.OrderID != nil {
+		var o model.Order
+		if err := query.NotDeleted(db).Select("id", "merchant_id").First(&o, *view.OrderID).Error; err == nil && o.MerchantID > 0 {
+			var mp model.MerchantProfile
+			if err := query.NotDeleted(db).First(&mp, o.MerchantID).Error; err == nil {
+				view.Merchant = merchantBriefFromProfile(&mp)
+			}
+		}
+	}
+}
+
+func finalizeDeliveryDisplay(view *DeliveryView) {
+	if view == nil {
+		return
+	}
+	var qty uint32
+	var goods float64
+	names := make([]string, 0, len(view.UsageItems))
+	for _, ln := range view.UsageItems {
+		qty += ln.Quantity
+		goods = roundMoney(goods + ln.UnitPrice*float64(ln.Quantity))
+		if ln.ProductName != "" {
+			names = append(names, fmt.Sprintf("%s×%d", ln.ProductName, ln.Quantity))
+		}
+		if view.ProductImage == "" && ln.ProductImage != "" {
+			view.ProductImage = ln.ProductImage
+		}
+	}
+	if view.Quantity == 0 {
+		view.Quantity = qty
+	}
+	if view.ProductName == "" && len(names) > 0 {
+		view.ProductName = strings.Join(names, "、")
+	}
+	if view.GoodsAmount <= 0 && goods > 0 {
+		view.GoodsAmount = goods
+	}
+	if view.TotalAmount <= 0 {
+		view.TotalAmount = view.GoodsAmount
+	}
+	// 订单配送：从订单行补图/价/名
+	if view.ProductImage == "" && view.Order != nil && len(view.Order.Items) > 0 {
+		it := view.Order.Items[0]
+		if it.ProductImage != nil {
+			view.ProductImage = *it.ProductImage
+		}
+		if view.ProductName == "" {
+			view.ProductName = it.ProductName
+		}
+		if view.Quantity == 0 {
+			view.Quantity = it.Quantity
+		}
+		if view.TotalAmount <= 0 {
+			view.TotalAmount = roundMoney(it.UnitPrice * float64(it.Quantity))
+			view.GoodsAmount = view.TotalAmount
+		}
+	}
+	if view.ProductImage == "" && view.InventoryUsage != nil && view.InventoryUsage.Product != nil {
+		view.ProductImage = view.InventoryUsage.Product.CoverURL
+		if view.ProductName == "" {
+			view.ProductName = view.InventoryUsage.Product.Name
+		}
+	}
 }
 
 // ListForAdmin ??????????????
@@ -1033,6 +1409,10 @@ func validateAdminResolveRemark(remark string) (string, error) {
 }
 
 func resumeTargetStatus(d *model.DeliveryOrder) uint8 {
+	// 用户在「待确认收货」上报异常后恢复：回到待确认
+	if d.DeliveredAt != nil {
+		return model.DeliveryDelivered
+	}
 	if d.StartedAt != nil {
 		return model.DeliveryDelivering
 	}
@@ -1099,6 +1479,9 @@ func (s *DeliveryService) restoreDeliveryUsagesForCancelInTx(tx *gorm.DB, d *mod
 			"cancel_reason": reasonText,
 			"remark":        reasonText,
 		}).Error; err != nil {
+			return err
+		}
+		if err := InvalidateVerificationRecordsForUsage(tx, u.ID); err != nil {
 			return err
 		}
 		if u.SourceOrderID != nil {
@@ -1258,24 +1641,62 @@ func (s *DeliveryService) AdminResolveCancel(deliveryID uint64, remark string) (
 }
 
 func enrichBagReviewView(db *gorm.DB, d model.DeliveryOrder) BagDeliveryReviewView {
+	return enrichExceptionReviewView(db, d)
+}
+
+// enrichExceptionReviewView 管理端异常/审核视图：客户账号、收货联系人、商家、骑手信息。
+func enrichExceptionReviewView(db *gorm.DB, d model.DeliveryOrder) BagDeliveryReviewView {
 	base := toDeliveryView(db, d)
 	out := BagDeliveryReviewView{DeliveryView: base}
-	var usage model.UserInventoryUsage
+
 	if d.InventoryUsageID != nil {
-		_ = query.NotDeleted(db).Preload("MerchantProfile").First(&usage, *d.InventoryUsageID).Error
-	}
-	if usage.ID != 0 {
-		out.AccountID = usage.AccountID
-		if usage.AddressSnapshot != nil {
-			out.ContactPhone = usage.AddressSnapshot.ContactPhone
-			out.ContactName = usage.AddressSnapshot.ContactName
+		var usage model.UserInventoryUsage
+		if err := query.NotDeleted(db).Preload("MerchantProfile").First(&usage, *d.InventoryUsageID).Error; err == nil {
+			out.AccountID = usage.AccountID
+			if usage.AddressSnapshot != nil {
+				out.ContactPhone = usage.AddressSnapshot.ContactPhone
+				out.ContactName = usage.AddressSnapshot.ContactName
+			}
+			if usage.MerchantProfile != nil {
+				out.MerchantName = usage.MerchantProfile.ShopName
+			}
 		}
-		if usage.MerchantProfile != nil {
-			out.MerchantName = usage.MerchantProfile.ShopName
+	}
+	if out.AccountID == 0 && d.TakeoutOrderID != nil {
+		var to model.TakeoutOrder
+		if err := query.NotDeleted(db).First(&to, *d.TakeoutOrderID).Error; err == nil {
+			out.AccountID = to.AccountID
+			if to.AddressSnapshot != nil {
+				out.ContactPhone = to.AddressSnapshot.ContactPhone
+				out.ContactName = to.AddressSnapshot.ContactName
+			}
+			var mp model.MerchantProfile
+			if err := query.NotDeleted(db).Select("id", "shop_name").First(&mp, to.MerchantID).Error; err == nil {
+				out.MerchantName = mp.ShopName
+			}
 		}
 	}
-	var acc model.Account
+	if out.AccountID == 0 && d.OrderID != nil {
+		var order model.Order
+		if err := query.NotDeleted(db).First(&order, *d.OrderID).Error; err == nil {
+			out.AccountID = order.AccountID
+			if order.AddressSnapshot != nil {
+				out.ContactPhone = order.AddressSnapshot.ContactPhone
+				out.ContactName = order.AddressSnapshot.ContactName
+			}
+			var mp model.MerchantProfile
+			if err := query.NotDeleted(db).Select("id", "shop_name").First(&mp, order.MerchantID).Error; err == nil {
+				out.MerchantName = mp.ShopName
+			}
+		}
+	}
+	if out.ContactPhone == "" && base.AddressSnapshot != nil {
+		out.ContactPhone = base.AddressSnapshot.ContactPhone
+		out.ContactName = base.AddressSnapshot.ContactName
+	}
+
 	if out.AccountID != 0 {
+		var acc model.Account
 		if err := query.NotDeleted(db).Select("id", "phone", "nickname").First(&acc, out.AccountID).Error; err == nil {
 			if acc.Phone != nil {
 				out.AccountPhone = *acc.Phone
@@ -1419,7 +1840,9 @@ func (s *DeliveryService) RejectBagDelivery(deliveryID uint64, reasonKey, remark
 	return s.getViewByID(deliveryID)
 }
 
-func (s *DeliveryService) ListExceptions(page, pageSize int) ([]DeliveryView, int64, error) {
+// ListExceptions 管理端配送异常列表。
+// scope=pending（默认）待处理；resolved 已处理（exception_reason 含管理员处理备注且状态已离开异常）。
+func (s *DeliveryService) ListExceptions(scope string, page, pageSize int) ([]BagDeliveryReviewView, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -1429,8 +1852,22 @@ func (s *DeliveryService) ListExceptions(page, pageSize int) ([]DeliveryView, in
 	if pageSize > 50 {
 		pageSize = 50
 	}
-	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{})).
-		Where("status = ?", model.DeliveryException)
+	scope = strings.TrimSpace(strings.ToLower(scope))
+	if scope == "" || scope == "pending" || scope == "open" {
+		scope = "pending"
+	} else if scope == "resolved" || scope == "history" || scope == "done" {
+		scope = "resolved"
+	} else {
+		scope = "pending"
+	}
+
+	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{}))
+	if scope == "resolved" {
+		// 恢复/改派/取消后会写入「管理员处理：」前缀，且状态离开异常
+		q = q.Where("status <> ? AND exception_reason LIKE ?", model.DeliveryException, "管理员处理：%")
+	} else {
+		q = q.Where("status = ?", model.DeliveryException)
+	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -1441,7 +1878,11 @@ func (s *DeliveryService) ListExceptions(page, pageSize int) ([]DeliveryView, in
 		Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
-	return toDeliveryViews(s.DB, list), total, nil
+	out := make([]BagDeliveryReviewView, 0, len(list))
+	for i := range list {
+		out = append(out, enrichExceptionReviewView(s.DB, list[i]))
+	}
+	return out, total, nil
 }
 
 func FormatBagAdminRejectReason(reasonKey, remark string) (string, error) {

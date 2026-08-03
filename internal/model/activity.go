@@ -52,6 +52,7 @@ type ActivityProduct struct {
 	GroupBuyTargetCount     *uint32   `json:"group_buy_target_count,omitempty"`
 	GroupBuyAllowRepeat     uint8     `gorm:"not null;default:0" json:"group_buy_allow_repeat"`
 	GroupBuyMaxJoinsPerUser uint32    `gorm:"not null;default:1" json:"group_buy_max_joins_per_user"`
+	GroupBuyMaxConcurrentTeams uint32 `gorm:"column:group_buy_max_concurrent_teams;not null;default:0" json:"group_buy_max_concurrent_teams"`
 	EnableCoupon            uint8     `gorm:"not null;default:1" json:"enable_coupon"`
 	SortOrder               int       `gorm:"not null;default:0" json:"sort_order"`
 	Status                  uint8     `gorm:"not null;default:1" json:"status"`

@@ -174,7 +174,6 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 	result := &UseBatchResult{Usages: make([]InventoryUsageView, 0, len(loaded))}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		var deliveryID uint64
-		var pickupCode string
 		var deliveryFee float64
 
 		if deliveryType == model.DeliveryTypeDelivery {
@@ -184,11 +183,11 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 			}
 			deliveryFee = merchant.DeliveryFee
 			now := time.Now()
+			// 背包跑腿无出餐号
 			d := model.DeliveryOrder{
 				Status:           model.DeliveryPendingAdminReview,
 				MerchantPrepared: 1,
 				PreparedAt:       &now,
-				PickupCode:       genPickupCode(tx, merchantID),
 				DeliveryFee:      deliveryFee,
 				RiderEarnings:    merchant.RiderEarnings,
 			}
@@ -196,9 +195,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 				return err
 			}
 			deliveryID = d.ID
-			pickupCode = d.PickupCode
 			result.DeliveryOrderID = &deliveryID
-			result.PickupCode = pickupCode
 			result.DeliveryFee = deliveryFee
 		}
 
