@@ -121,7 +121,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	merchantSvc := &service.MerchantService{DB: db}
 	takeoutHandler := &handler.TakeoutHandler{TakeoutSvc: takeoutSvc, MerchantSvc: merchantSvc}
 	deliveryFeeHandler := &handler.DeliveryFeeHandler{Svc: deliveryFeePaySvc}
-	productSvc := &service.ProductService{DB: db, CategorySvc: categorySvc}
+	productSvc := &service.ProductService{DB: db, CategorySvc: categorySvc, GroupCloser: orderSvc}
 	verifySvc := &service.VerificationService{DB: db, InventorySvc: inventorySvc, ProductSvc: productSvc}
 	riderSvc := &service.RiderApplicationService{DB: db}
 	adminHandler := &handler.AdminHandler{MerchantSvc: merchantSvc, ProductSvc: productSvc, RiderSvc: riderSvc, EarningSvc: riderEarningSvc}
@@ -293,15 +293,19 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 // startGroupExpireWorker 定时关闭超时未成团拼团并模拟退款。
 func startGroupExpireWorker(orderSvc *service.OrderService) {
 	go func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
+		run := func() {
 			n, err := orderSvc.ExpireStaleGroupTeams(time.Now())
 			if err != nil {
 				log.Printf("拼团超时部分失败: %v (本批成功 %d)", err, n)
 			} else if n > 0 {
 				log.Printf("拼团超时已处理 %d 个团", n)
 			}
+		}
+		run() // 启动时立即扫一遍，避免刚过期的团要等满一分钟
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			run()
 		}
 	}()
 }

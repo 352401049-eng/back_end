@@ -12,9 +12,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// ProductGroupCloser 关闭商品拼团通道时查询/解散待成团（由 OrderService 实现）。
+type ProductGroupCloser interface {
+	CountPendingProductChannelGroups(productID uint64) (teamCount, orderCount int64, err error)
+	FailPendingProductChannelGroups(productID uint64) (int, error)
+}
+
 type ProductService struct {
 	DB          *gorm.DB
 	CategorySvc *CategoryService
+	GroupCloser ProductGroupCloser
 }
 
 type ProductInput struct {
@@ -49,6 +56,7 @@ type ProductInput struct {
 	OptionGroups               *[]OptionGroupInput  // 非 nil 时全量替换规格组（含空切片表示清空）
 	ApplicableMerchantIDs      []uint64
 	HasApplicableMerchantIDs   bool
+	ForceCloseGroup            bool // 管理端确认后强制关闭拼团并退款待成团
 }
 
 type GroupBuyConfigInput struct {
@@ -57,6 +65,7 @@ type GroupBuyConfigInput struct {
 	GroupBuyPrice       *float64
 	GroupBuyAllowRepeat *uint8
 	GroupBuyMaxConcurrentTeams *uint32
+	ForceCloseGroup     bool
 }
 
 type ProductListFilter struct {
@@ -349,6 +358,9 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	if err := validateProductChannels(&updated); err != nil {
 		return nil, err
 	}
+	if err := s.ensureCanCloseProductGroup(product.ID, product.EnableGroup == 1 || product.EnableGroupBuy == 1, updated.EnableGroup == 1, input.ForceCloseGroup); err != nil {
+		return nil, err
+	}
 	updates["enable_deal"] = updated.EnableDeal
 	updates["enable_group"] = updated.EnableGroup
 	updates["enable_takeout"] = updated.EnableTakeout
@@ -557,9 +569,14 @@ func (s *ProductService) UpdateGroupBuy(id uint64, input GroupBuyConfigInput, sc
 	if err := validateGroupBuyConfig(check); err != nil {
 		return nil, err
 	}
+	wasOn := product.EnableGroupBuy == 1 || product.EnableGroup == 1
+	if err := s.ensureCanCloseProductGroup(product.ID, wasOn, input.EnableGroupBuy == 1, input.ForceCloseGroup); err != nil {
+		return nil, err
+	}
 
 	updates := map[string]interface{}{
 		"enable_group_buy": input.EnableGroupBuy,
+		"enable_group":     input.EnableGroupBuy,
 	}
 	if input.EnableGroupBuy == 1 {
 		updates["group_buy_target_count"] = targetCount
@@ -576,6 +593,7 @@ func (s *ProductService) UpdateGroupBuy(id uint64, input GroupBuyConfigInput, sc
 		return nil, fmt.Errorf("更新拼团配置失败: %w", err)
 	}
 	product.EnableGroupBuy = input.EnableGroupBuy
+	product.EnableGroup = input.EnableGroupBuy
 	product.GroupBuyTargetCount = targetCount
 	product.GroupBuyPrice = groupPrice
 	product.GroupBuyAllowRepeat = allowRepeat
@@ -617,6 +635,7 @@ type UpdateProductSaleInput struct {
 	GroupBuyPrice       *float64
 	GroupBuyAllowRepeat *uint8
 	GroupBuyMaxConcurrentTeams *uint32
+	ForceCloseGroup     bool
 }
 
 // UpdateSaleOptions 一次性更新拼团与优惠券配置（商品编辑页）。
@@ -662,6 +681,7 @@ func (s *ProductService) UpdateSaleOptions(id uint64, input UpdateProductSaleInp
 			GroupBuyPrice:       price,
 			GroupBuyAllowRepeat: allowRepeat,
 			GroupBuyMaxConcurrentTeams: maxTeams,
+			ForceCloseGroup:     input.ForceCloseGroup,
 		}, scopeMerchantID); err != nil {
 			return nil, err
 		}
@@ -931,6 +951,38 @@ func normalizeGroupBuyAllowRepeat(v uint8) uint8 {
 		return 1
 	}
 	return 0
+}
+
+// ensureCanCloseProductGroup 关闭拼团通道前检查待成团；未确认则拒绝，已确认则退款解散。
+// forceClose=true 时即使通道已关闭也会清理残留待成团（用于通道已关但仍有待退款的情况）。
+func (s *ProductService) ensureCanCloseProductGroup(productID uint64, wasEnabled, willEnable, forceClose bool) error {
+	if willEnable {
+		return nil
+	}
+	if !wasEnabled && !forceClose {
+		return nil
+	}
+	if s.GroupCloser == nil {
+		return nil
+	}
+	teamCount, orderCount, err := s.GroupCloser.CountPendingProductChannelGroups(productID)
+	if err != nil {
+		return fmt.Errorf("查询待成团失败: %w", err)
+	}
+	if orderCount == 0 && teamCount == 0 {
+		return nil
+	}
+	if !forceClose {
+		return &GroupCloseNeedsConfirmError{
+			ProductID:         productID,
+			PendingTeamCount:  teamCount,
+			PendingOrderCount: orderCount,
+		}
+	}
+	if _, err := s.GroupCloser.FailPendingProductChannelGroups(productID); err != nil {
+		return fmt.Errorf("关闭拼团退款失败: %w", err)
+	}
+	return nil
 }
 
 // syncGroupBuy 将商品拼团配置同步到 group_buy 表，供购物车/下单引用 group_buy_id。

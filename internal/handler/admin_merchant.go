@@ -132,6 +132,7 @@ type UpdateProductRequest struct {
 	PackageGroups       []service.PackageGroupInput  `json:"package_groups"`
 	OptionGroups        *[]service.OptionGroupInput  `json:"option_groups"`
 	ApplicableMerchantIDs *[]uint64 `json:"applicable_merchant_ids"`
+	ForceCloseGroup     *uint8    `json:"force_close_group"` // 1=确认关闭拼团并退款待成团
 }
 
 func (r UpdateProductRequest) hasField() bool {
@@ -144,7 +145,7 @@ func (r UpdateProductRequest) hasField() bool {
 		r.GroupBuyTargetCount != nil || r.GroupBuyPrice != nil || r.GroupBuyAllowRepeat != nil ||
 		r.GroupBuyMaxConcurrentTeams != nil ||
 		r.ItemType != nil || r.Status != nil || len(r.PackageGroups) > 0 || r.OptionGroups != nil ||
-		r.ApplicableMerchantIDs != nil
+		r.ApplicableMerchantIDs != nil || r.ForceCloseGroup != nil
 }
 
 type UpdateProductImagesRequest struct {
@@ -171,6 +172,7 @@ type UpdateProductGroupBuyRequest struct {
 	GroupBuyPrice       *float64 `json:"group_buy_price" example:"79.9"`
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
 	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams" example:"0"`
+	ForceCloseGroup     *uint8   `json:"force_close_group"`
 }
 
 type UpdateProductCouponRequest struct {
@@ -185,6 +187,7 @@ type UpdateProductSaleRequest struct {
 	GroupBuyPrice       *float64 `json:"group_buy_price" example:"79.9"`
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
 	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams" example:"0"`
+	ForceCloseGroup     *uint8   `json:"force_close_group"`
 }
 
 // CreateMerchant godoc
@@ -810,6 +813,7 @@ func (h *AdminHandler) patchProductGroupBuy(c *gin.Context, scope *uint64) {
 		GroupBuyPrice:       req.GroupBuyPrice,
 		GroupBuyAllowRepeat: req.GroupBuyAllowRepeat,
 		GroupBuyMaxConcurrentTeams: req.GroupBuyMaxConcurrentTeams,
+		ForceCloseGroup:     req.ForceCloseGroup != nil && *req.ForceCloseGroup == 1,
 	}, scope)
 	if err != nil {
 		h.handleProductError(c, err)
@@ -861,6 +865,7 @@ func (h *AdminHandler) patchProductSale(c *gin.Context, scope *uint64) {
 		GroupBuyPrice:       req.GroupBuyPrice,
 		GroupBuyAllowRepeat: req.GroupBuyAllowRepeat,
 		GroupBuyMaxConcurrentTeams: req.GroupBuyMaxConcurrentTeams,
+		ForceCloseGroup:     req.ForceCloseGroup != nil && *req.ForceCloseGroup == 1,
 	}, scope)
 	if err != nil {
 		h.handleProductError(c, err)
@@ -913,6 +918,21 @@ func (h *AdminHandler) handleMerchantError(c *gin.Context, err error) {
 
 func (h *AdminHandler) handleProductError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, service.ErrGroupCloseNeedsConfirm):
+		msg := "仍有进行中的拼团订单，关闭通道将退款并解散这些团"
+		data := gin.H{"reason": "group_close_needs_confirm"}
+		var conf *service.GroupCloseNeedsConfirmError
+		if errors.As(err, &conf) && conf != nil {
+			data["product_id"] = conf.ProductID
+			data["pending_team_count"] = conf.PendingTeamCount
+			data["pending_order_count"] = conf.PendingOrderCount
+			if raw := err.Error(); len(raw) > len(service.ErrGroupCloseNeedsConfirm.Error()) {
+				if i := len(service.ErrGroupCloseNeedsConfirm.Error()); i+2 < len(raw) && raw[i:i+2] == ": " {
+					msg = raw[i+2:]
+				}
+			}
+		}
+		response.FailWithData(c, 409, 40909, msg, data)
 	case errors.Is(err, service.ErrProductNotFound):
 		response.Fail(c, 404, 404, "商品不存在")
 	case errors.Is(err, service.ErrProductForbidden):
@@ -1697,6 +1717,9 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	if req.ApplicableMerchantIDs != nil {
 		input.HasApplicableMerchantIDs = true
 		input.ApplicableMerchantIDs = *req.ApplicableMerchantIDs
+	}
+	if req.ForceCloseGroup != nil && *req.ForceCloseGroup == 1 {
+		input.ForceCloseGroup = true
 	}
 	return input
 }
