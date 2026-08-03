@@ -30,10 +30,12 @@ type ProductSaleOptions struct {
 // ProductStoreView 用户端商品展示（含购买方式与优惠券、拼团说明）。
 type ProductStoreView struct {
 	model.Product
-	CanGroupBuy  bool               `json:"can_group_buy"`
-	CanUseCoupon bool               `json:"can_use_coupon"`
-	GroupBuyID   *uint64            `json:"group_buy_id,omitempty"`
-	SaleOptions  ProductSaleOptions `json:"sale_options"`
+	CanGroupBuy           bool                      `json:"can_group_buy"`
+	CanUseCoupon          bool                      `json:"can_use_coupon"`
+	GroupBuyID            *uint64                   `json:"group_buy_id,omitempty"`
+	SaleOptions           ProductSaleOptions        `json:"sale_options"`
+	ApplicableMerchantIDs []uint64                  `json:"applicable_merchant_ids"`
+	ApplicableMerchants   []ApplicableMerchantBrief `json:"applicable_merchants"`
 }
 
 func (s *ProductService) ToStoreView(p *model.Product) *ProductStoreView {
@@ -46,6 +48,8 @@ func (s *ProductService) ToStoreView(p *model.Product) *ProductStoreView {
 		gb = &g
 	}
 	view := buildProductStoreView(*p, gb)
+	briefsMap, idsMap := s.loadApplicableMerchantBriefs([]uint64{p.ID})
+	applyApplicableMerchantsToStoreView(&view, idsMap[p.ID], briefsMap[p.ID])
 	return &view
 }
 
@@ -55,13 +59,16 @@ func (s *ProductService) ToStoreViews(products []model.Product) []ProductStoreVi
 		ids = append(ids, products[i].ID)
 	}
 	gbMap := s.loadActiveGroupBuys(ids)
+	briefsMap, idsMap := s.loadApplicableMerchantBriefs(ids)
 	views := make([]ProductStoreView, 0, len(products))
 	for i := range products {
 		var gb *model.GroupBuy
 		if g, ok := gbMap[products[i].ID]; ok {
 			gb = &g
 		}
-		views = append(views, buildProductStoreView(products[i], gb))
+		view := buildProductStoreView(products[i], gb)
+		applyApplicableMerchantsToStoreView(&view, idsMap[products[i].ID], briefsMap[products[i].ID])
+		views = append(views, view)
 	}
 	return views
 }

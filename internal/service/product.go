@@ -45,8 +45,10 @@ type ProductInput struct {
 	GroupBuyMaxConcurrentTeams uint32
 	ItemType            uint8
 	Status              uint8
-	PackageGroups       []PackageGroupInput  // item_type=套餐时必填
-	OptionGroups        *[]OptionGroupInput  // 非 nil 时全量替换规格组（含空切片表示清空）
+	PackageGroups              []PackageGroupInput  // item_type=套餐时必填
+	OptionGroups               *[]OptionGroupInput  // 非 nil 时全量替换规格组（含空切片表示清空）
+	ApplicableMerchantIDs      []uint64
+	HasApplicableMerchantIDs   bool
 }
 
 type GroupBuyConfigInput struct {
@@ -72,12 +74,14 @@ type ProductListFilter struct {
 // ProductDetailView 商品详情（管理端/用户端），套餐附带分组，普通商品附带规格组。
 type ProductDetailView struct {
 	model.Product
-	PackageGroups []PackageGroupView        `json:"package_groups,omitempty"`
-	OptionGroups  []model.ProductOptionGroup  `json:"option_groups,omitempty"`
-	CanGroupBuy   bool                        `json:"can_group_buy"`
-	CanUseCoupon  bool               `json:"can_use_coupon"`
-	GroupBuyID    *uint64            `json:"group_buy_id,omitempty"`
-	SaleOptions   ProductSaleOptions `json:"sale_options"`
+	PackageGroups         []PackageGroupView        `json:"package_groups,omitempty"`
+	OptionGroups          []model.ProductOptionGroup  `json:"option_groups,omitempty"`
+	CanGroupBuy           bool                        `json:"can_group_buy"`
+	CanUseCoupon          bool               `json:"can_use_coupon"`
+	GroupBuyID            *uint64            `json:"group_buy_id,omitempty"`
+	SaleOptions           ProductSaleOptions `json:"sale_options"`
+	ApplicableMerchantIDs []uint64                  `json:"applicable_merchant_ids"`
+	ApplicableMerchants   []ApplicableMerchantBrief `json:"applicable_merchants"`
 }
 
 func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*model.Product, error) {
@@ -156,6 +160,9 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 				return err
 			}
 		}
+		if err := s.ReplaceApplicableMerchants(tx, product.ID, merchantID, input.ApplicableMerchantIDs); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
@@ -204,7 +211,7 @@ func (s *ProductService) List(page, pageSize int, filter ProductListFilter) ([]m
 
 	q := query.NotDeleted(s.DB.Model(&model.Product{}))
 	if filter.MerchantID != nil {
-		q = q.Where("merchant_id = ?", *filter.MerchantID)
+		q = merchantShelfProductScope(q, *filter.MerchantID)
 	}
 	if filter.CategoryID != nil {
 		q = q.Where("category_id = ?", *filter.CategoryID)
@@ -363,6 +370,11 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 				itemType = product.ItemType
 			}
 			if err := s.ReplaceOptionGroups(tx, id, itemType, *input.OptionGroups); err != nil {
+				return err
+			}
+		}
+		if input.HasApplicableMerchantIDs {
+			if err := s.ReplaceApplicableMerchants(tx, id, merchantID, input.ApplicableMerchantIDs); err != nil {
 				return err
 			}
 		}
@@ -804,11 +816,13 @@ func (s *ProductService) GetOnShelfPublic(id uint64) (*ProductDetailView, error)
 func (s *ProductService) toDetailView(product *model.Product) (*ProductDetailView, error) {
 	store := s.ToStoreView(product)
 	view := &ProductDetailView{
-		Product:      *product,
-		CanGroupBuy:  store.CanGroupBuy,
-		CanUseCoupon: store.CanUseCoupon,
-		GroupBuyID:   store.GroupBuyID,
-		SaleOptions:  store.SaleOptions,
+		Product:               *product,
+		CanGroupBuy:           store.CanGroupBuy,
+		CanUseCoupon:          store.CanUseCoupon,
+		GroupBuyID:            store.GroupBuyID,
+		SaleOptions:           store.SaleOptions,
+		ApplicableMerchantIDs: store.ApplicableMerchantIDs,
+		ApplicableMerchants:   store.ApplicableMerchants,
 	}
 	if product.ItemType == model.ProductItemTypePackage {
 		groups, err := s.LoadPackageGroups(product.ID)
@@ -990,11 +1004,14 @@ func (s *ProductService) GetOnShelf(id, merchantID uint64) (*model.Product, erro
 	}
 	var product model.Product
 	if err := query.NotDeleted(s.DB).Preload("Category", "is_deleted = ?", model.NotDeleted).
-		Where("id = ? AND merchant_id = ? AND status = ?", id, merchantID, model.ProductStatusOn).
+		Where("id = ? AND status = ?", id, model.ProductStatusOn).
 		First(&product).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrProductNotFound
 		}
+		return nil, err
+	}
+	if err := s.AssertMerchantApplicable(id, merchantID); err != nil {
 		return nil, err
 	}
 	return &product, nil
