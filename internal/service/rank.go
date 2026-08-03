@@ -88,7 +88,7 @@ type hotGroupRow struct {
 
 // ListHotGroups 进行中的拼团。
 // 以「已支付且待成团」订单为事实来源，人数按去重账号统计；
-// 同一商品下的多个团（含活动团与普通团）全部展示，按接近成团优先排序。
+// 同一商品只保留最接近成团的一团（避免热拼榜同一商品刷屏）。
 func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 	if limit < 1 {
 		limit = rankListLimit
@@ -210,6 +210,19 @@ func (s *RankService) ListHotGroups(limit int) ([]RankHotGroupItem, error) {
 		// 不因「人数已达目标」过滤：订单仍为 pending_group 就应出现在热拼榜，
 		// 与用户端「待成团」对齐（避免 team.current_count 与真实订单不同步时漏显）。
 		rows = append(rows, a.row)
+	}
+
+	// 同一商品只留一团：更接近成团优先
+	bestByProduct := map[uint64]hotGroupRow{}
+	for _, r := range rows {
+		prev, ok := bestByProduct[r.ProductID]
+		if !ok || hotGroupRowLess(r, prev) {
+			bestByProduct[r.ProductID] = r
+		}
+	}
+	rows = rows[:0]
+	for _, r := range bestByProduct {
+		rows = append(rows, r)
 	}
 
 	sort.SliceStable(rows, func(i, j int) bool {

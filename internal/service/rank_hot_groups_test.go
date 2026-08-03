@@ -10,20 +10,28 @@ func TestHotGroupRowLessByNeed(t *testing.T) {
 	}
 }
 
-func TestHotGroupRowLessAllTeamsKeptIndependently(t *testing.T) {
-	// 文档约定：热拼榜按团展示，不去重、不滤活动/普通
-	ap := uint64(2)
-	aid := uint64(3)
+func TestHotGroupDedupeKeepsBestTeamPerProduct(t *testing.T) {
+	// 产品约定：热拼榜同一商品只展示一团（最接近成团）
 	rows := []hotGroupRow{
-		{TeamID: 5, ProductID: 1, TargetCount: 5, CurrentCount: 1, ActivityID: &aid, ActivityProductID: &ap},
+		{TeamID: 5, ProductID: 1, TargetCount: 5, CurrentCount: 1},
 		{TeamID: 4, ProductID: 1, TargetCount: 5, CurrentCount: 1},
 		{TeamID: 3, ProductID: 1, TargetCount: 5, CurrentCount: 2},
+		{TeamID: 9, ProductID: 2, TargetCount: 3, CurrentCount: 1},
 	}
-	if len(rows) != 3 {
-		t.Fatal("fixture")
+	bestByProduct := map[uint64]hotGroupRow{}
+	for _, r := range rows {
+		prev, ok := bestByProduct[r.ProductID]
+		if !ok || hotGroupRowLess(r, prev) {
+			bestByProduct[r.ProductID] = r
+		}
 	}
-	// 仅校验更接近成团者优先，三者均可独立出现在榜上
-	if !hotGroupRowLess(rows[2], rows[0]) {
-		t.Fatal("team 3 (2/5) should rank above team 5 (1/5)")
+	if len(bestByProduct) != 2 {
+		t.Fatalf("want 2 products, got %d", len(bestByProduct))
+	}
+	if bestByProduct[1].TeamID != 3 {
+		t.Fatalf("product 1 should keep team 3 (2/5), got team %d", bestByProduct[1].TeamID)
+	}
+	if bestByProduct[2].TeamID != 9 {
+		t.Fatalf("product 2 should keep team 9, got team %d", bestByProduct[2].TeamID)
 	}
 }
