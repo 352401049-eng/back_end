@@ -115,28 +115,32 @@ type ActivityPublicDetailView struct {
 
 type ActivityProductItemView struct {
 	model.ActivityProduct
-	ProductName  string `json:"product_name,omitempty"`
-	ProductCover string `json:"product_cover,omitempty"`
-	CanGroupBuy  bool   `json:"can_group_buy"`
-	CanUseCoupon bool   `json:"can_use_coupon"`
+	ProductName           string                    `json:"product_name,omitempty"`
+	ProductCover          string                    `json:"product_cover,omitempty"`
+	CanGroupBuy           bool                      `json:"can_group_buy"`
+	CanUseCoupon          bool                      `json:"can_use_coupon"`
+	ApplicableMerchantIDs []uint64                  `json:"applicable_merchant_ids"`
+	ApplicableMerchants   []ApplicableMerchantBrief `json:"applicable_merchants"`
 }
 
 type ActivityProductStoreView struct {
 	model.ActivityProduct
-	MerchantID     uint64             `json:"merchant_id"`
-	ProductName    string             `json:"product_name"`
-	ProductCover   string             `json:"product_cover"`
-	OriginalPrice  float64            `json:"original_price"`
-	ItemType       uint8              `json:"item_type"`
-	AvailableStock uint32             `json:"available_stock"`
-	CanGroupBuy    bool               `json:"can_group_buy"`
-	CanUseCoupon   bool               `json:"can_use_coupon"`
-	SaleOptions    ProductSaleOptions `json:"sale_options"`
-	LimitLabels    []string           `json:"limit_labels"`
-	LimitReached   bool               `json:"limit_reached"`
-	LimitReason    string             `json:"limit_reason,omitempty"`
-	RemainingQty   uint32             `json:"remaining_qty"`
-	PackageGroups  []PackageGroupView `json:"package_groups,omitempty"`
+	MerchantID            uint64                    `json:"merchant_id"`
+	ProductName           string                    `json:"product_name"`
+	ProductCover          string                    `json:"product_cover"`
+	OriginalPrice         float64                   `json:"original_price"`
+	ItemType              uint8                     `json:"item_type"`
+	AvailableStock        uint32                    `json:"available_stock"`
+	CanGroupBuy           bool                      `json:"can_group_buy"`
+	CanUseCoupon          bool                      `json:"can_use_coupon"`
+	SaleOptions           ProductSaleOptions        `json:"sale_options"`
+	LimitLabels           []string                  `json:"limit_labels"`
+	LimitReached          bool                      `json:"limit_reached"`
+	LimitReason           string                    `json:"limit_reason,omitempty"`
+	RemainingQty          uint32                    `json:"remaining_qty"`
+	PackageGroups         []PackageGroupView        `json:"package_groups,omitempty"`
+	ApplicableMerchantIDs []uint64                  `json:"applicable_merchant_ids"`
+	ApplicableMerchants   []ApplicableMerchantBrief `json:"applicable_merchants"`
 }
 
 type ActivityOrderContext struct {
@@ -724,6 +728,9 @@ func (s *ActivityService) GetDetailView(id uint64, merchantID *uint64) (*Activit
 		return nil, err
 	}
 	view := s.ToDetailView(act, products, false)
+	if err := s.enrichActivityProductItemViewsApplicable(view.Products); err != nil {
+		return nil, err
+	}
 	return &view, nil
 }
 
@@ -753,6 +760,9 @@ func (s *ActivityService) ListProductItemViews(activityID uint64, merchantID *ui
 			}
 		}
 		views = append(views, toActivityProductItemView(act, &products[i]))
+	}
+	if err := s.enrichActivityProductItemViewsApplicable(views); err != nil {
+		return nil, err
 	}
 	return views, nil
 }
@@ -823,7 +833,11 @@ func (s *ActivityService) GetProductItemView(activityID, apID uint64, merchantID
 		return nil, err
 	}
 	view := toActivityProductItemView(act, ap)
-	return &view, nil
+	views := []ActivityProductItemView{view}
+	if err := s.enrichActivityProductItemViewsApplicable(views); err != nil {
+		return nil, err
+	}
+	return &views[0], nil
 }
 
 func (s *ActivityService) ListStoreProducts(activityID uint64, groupBuyOnly bool) ([]ActivityProductStoreView, error) {
@@ -855,6 +869,9 @@ func (s *ActivityService) ListStoreProducts(activityID uint64, groupBuyOnly bool
 		}
 		views = append(views, view)
 	}
+	if err := s.enrichActivityProductStoreViewsApplicable(views); err != nil {
+		return nil, err
+	}
 	return views, nil
 }
 
@@ -882,6 +899,11 @@ func (s *ActivityService) GetStoreProductForUser(activityID, activityProductID u
 		return nil, ErrActivityProductNotFound
 	}
 	view := buildActivityProductStoreView(act, ap, ap.Product)
+	views := []ActivityProductStoreView{view}
+	if err := s.enrichActivityProductStoreViewsApplicable(views); err != nil {
+		return nil, err
+	}
+	view = views[0]
 	if ap.Product.ItemType == model.ProductItemTypePackage {
 		groups, err := (&ProductService{DB: s.DB}).LoadPackageGroups(ap.Product.ID)
 		if err != nil {
@@ -941,6 +963,46 @@ func buildActivityProductStoreView(act *model.Activity, ap *model.ActivityProduc
 		LimitLabels:  buildSeckillLimitLabels(ap),
 		RemainingQty: avail,
 	}
+}
+
+func (s *ActivityService) enrichActivityProductStoreViewsApplicable(views []ActivityProductStoreView) error {
+	if len(views) == 0 {
+		return nil
+	}
+	productIDs := make([]uint64, 0, len(views))
+	for i := range views {
+		productIDs = append(productIDs, views[i].ProductID)
+	}
+	briefsMap, idsMap, err := (&ProductService{DB: s.DB}).loadApplicableMerchantBriefs(productIDs)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		pid := views[i].ProductID
+		views[i].ApplicableMerchantIDs = idsMap[pid]
+		views[i].ApplicableMerchants = briefsMap[pid]
+	}
+	return nil
+}
+
+func (s *ActivityService) enrichActivityProductItemViewsApplicable(views []ActivityProductItemView) error {
+	if len(views) == 0 {
+		return nil
+	}
+	productIDs := make([]uint64, 0, len(views))
+	for i := range views {
+		productIDs = append(productIDs, views[i].ProductID)
+	}
+	briefsMap, idsMap, err := (&ProductService{DB: s.DB}).loadApplicableMerchantBriefs(productIDs)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		pid := views[i].ProductID
+		views[i].ApplicableMerchantIDs = idsMap[pid]
+		views[i].ApplicableMerchants = briefsMap[pid]
+	}
+	return nil
 }
 
 // enrichActivityProductLimits 写入限购标签与本单剩余可买件数（各限购剩余取最小）。
