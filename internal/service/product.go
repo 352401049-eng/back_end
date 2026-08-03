@@ -95,6 +95,8 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 	merchantID := input.MerchantID
 	if scopeMerchantID != nil {
 		merchantID = *scopeMerchantID
+		input.HasApplicableMerchantIDs = false
+		input.ApplicableMerchantIDs = nil
 	}
 	if merchantID == 0 {
 		return nil, fmt.Errorf("%w: 请指定所属商家", ErrInvalidProductArg)
@@ -258,6 +260,10 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	}
 	if err := s.assertOwnerScope(product, scopeMerchantID); err != nil {
 		return nil, err
+	}
+	if scopeMerchantID != nil {
+		input.HasApplicableMerchantIDs = false
+		input.ApplicableMerchantIDs = nil
 	}
 	if err := s.validateInput(input); err != nil {
 		return nil, err

@@ -20,6 +20,7 @@ func setupApplicableProductTestDB(t *testing.T) *gorm.DB {
 		&model.ProductCategory{},
 		&model.Product{},
 		&model.ProductApplicableMerchant{},
+		&model.GroupBuy{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -176,6 +177,44 @@ func TestUpdateStatusForbiddenForApplicableOnly(t *testing.T) {
 	}
 	if !errors.Is(err, ErrProductForbidden) {
 		t.Fatalf("expected product forbidden, got %v", err)
+	}
+}
+
+func TestMerchantScopedUpdateIgnoresApplicableMerchantIDs(t *testing.T) {
+	db := setupApplicableProductTestDB(t)
+	seedOpenMerchant(db, 1, "店A")
+	seedOpenMerchant(db, 2, "店B")
+	p := seedOnShelfProduct(db, 1, "商品")
+
+	svc := &ProductService{DB: db}
+	if err := svc.ReplaceApplicableMerchants(nil, p.ID, 1, []uint64{1}); err != nil {
+		t.Fatalf("replace applicable: %v", err)
+	}
+
+	scope := uint64(1)
+	input := ProductInput{
+		Name:                     p.Name,
+		CoverURL:                 p.CoverURL,
+		Images:                   p.Images,
+		Price:                    p.Price,
+		CategoryID:               p.CategoryID,
+		Status:                   p.Status,
+		EnableDeal:               p.EnableDeal,
+		DealStock:                p.DealStock,
+		ItemType:                 p.ItemType,
+		HasApplicableMerchantIDs: true,
+		ApplicableMerchantIDs:    []uint64{1, 2},
+	}
+	if _, err := svc.Update(p.ID, input, &scope); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	ids, err := svc.ListApplicableMerchantIDs(p.ID)
+	if err != nil {
+		t.Fatalf("list applicable: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != 1 {
+		t.Fatalf("want applicable [1] only, got %v", ids)
 	}
 }
 
