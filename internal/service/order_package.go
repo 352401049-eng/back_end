@@ -134,12 +134,16 @@ func (s *OrderService) CreatePackage(accountID uint64, input CreatePackageOrderI
 		if input.MerchantID == 0 {
 			return nil, fmt.Errorf("%w: 请指定 merchant_id", ErrInvalidProductArg)
 		}
-		if err := query.NotDeleted(s.DB).
-			Where("id = ? AND merchant_id = ? AND item_type = ? AND status = ?",
-				input.ProductID, input.MerchantID, model.ProductItemTypePackage, model.ProductStatusOn).
-			First(&pkg).Error; err != nil {
+		productSvc := &ProductService{DB: s.DB}
+		p, err := productSvc.GetOnShelf(input.ProductID, input.MerchantID)
+		if err != nil {
+			return nil, err
+		}
+		if p.ItemType != model.ProductItemTypePackage {
 			return nil, ErrProductNotFound
 		}
+		pkg = *p
+		input.MerchantID = pkg.MerchantID
 		unitPrice = pkg.Price
 		if input.PurchaseType == model.PurchaseTypeGroup {
 			if pkg.GroupBuyPrice == nil {

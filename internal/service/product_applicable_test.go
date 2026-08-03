@@ -51,6 +51,7 @@ func seedOnShelfProduct(db *gorm.DB, merchantID uint64, name string) *model.Prod
 		CoverURL:   "https://example.com/cover.jpg",
 		Images:     []string{"https://example.com/cover.jpg"},
 		Price:      10,
+		Stock:      0,
 		EnableDeal: 1,
 		DealStock:  5,
 		Status:     model.ProductStatusOn,

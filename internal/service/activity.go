@@ -1091,11 +1091,14 @@ func (s *ActivityService) ResolveForOrder(accountID uint64, activityProductID ui
 	if ap.Product == nil || ap.Product.Status != model.ProductStatusOn {
 		return nil, ErrProductNotFound
 	}
-	// 订单商家必须与商品所属商家一致；商家专场活动另校验活动归属
-	if ap.Product.MerchantID != merchantID {
-		return nil, ErrActivityForbidden
+	// 入口店面须为商品所属店或适用店；订单 merchant_id 记商品 owner（见 OrderService.Create）
+	if merchantID != 0 && ap.Product.MerchantID != merchantID {
+		if err := (&ProductService{DB: s.DB}).AssertMerchantApplicable(ap.Product.ID, merchantID); err != nil {
+			return nil, ErrActivityForbidden
+		}
 	}
-	if act.MerchantID != 0 && act.MerchantID != merchantID {
+	// 商家专场活动须与商品所属商家一致；平台活动 merchant_id=0 不额外限制入口店
+	if act.MerchantID != 0 && act.MerchantID != ap.Product.MerchantID {
 		return nil, ErrActivityForbidden
 	}
 

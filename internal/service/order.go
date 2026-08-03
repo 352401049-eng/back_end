@@ -140,14 +140,6 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 	if input.DeliveryType == model.DeliveryTypeDelivery && input.AddressID == nil {
 		return nil, ErrAddressRequired
 	}
-	coordIn := DeliveryCoordinateInput{
-		AddressID: input.AddressID, DeliveryLatitude: input.DeliveryLatitude, DeliveryLongitude: input.DeliveryLongitude,
-	}
-	if s.ZoneSvc != nil {
-		if err := s.ZoneSvc.ValidateDelivery(accountID, input.MerchantID, input.DeliveryType, coordIn); err != nil {
-			return nil, err
-		}
-	}
 
 	var product model.Product
 	var unitPrice float64
@@ -168,17 +160,20 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 		activityProductID = &ctx.ActivityProduct.ID
 		actGB = ctx.GroupBuyConfig
 		input.ProductID = product.ID
+		input.MerchantID = product.MerchantID
 		if !ctx.EnableCoupon {
 			if input.UserCouponID != nil {
 				return nil, ErrCouponNotApplicable
 			}
 		}
 	} else {
-		if err := query.NotDeleted(s.DB).
-			Where("id = ? AND merchant_id = ? AND status = ?", input.ProductID, input.MerchantID, model.ProductStatusOn).
-			First(&product).Error; err != nil {
-			return nil, ErrProductNotFound
+		productSvc := &ProductService{DB: s.DB}
+		p, err := productSvc.GetOnShelf(input.ProductID, input.MerchantID)
+		if err != nil {
+			return nil, err
 		}
+		product = *p
+		input.MerchantID = product.MerchantID
 		if product.ItemType == model.ProductItemTypePackage {
 			return nil, fmt.Errorf("%w: 套餐请使用套餐下单接口", ErrInvalidProductArg)
 		}
@@ -197,6 +192,15 @@ func (s *OrderService) Create(accountID uint64, input CreateOrderInput) (*OrderV
 			unitPrice = *product.GroupBuyPrice
 		} else {
 			input.GroupBuyTeamID = nil
+		}
+	}
+
+	coordIn := DeliveryCoordinateInput{
+		AddressID: input.AddressID, DeliveryLatitude: input.DeliveryLatitude, DeliveryLongitude: input.DeliveryLongitude,
+	}
+	if s.ZoneSvc != nil {
+		if err := s.ZoneSvc.ValidateDelivery(accountID, product.MerchantID, input.DeliveryType, coordIn); err != nil {
+			return nil, err
 		}
 	}
 

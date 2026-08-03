@@ -20,23 +20,26 @@ func TestPlatformActivityAllowsCrossMerchantProductQuery(t *testing.T) {
 }
 
 func TestResolveForOrderMerchantGuard(t *testing.T) {
-	productMerchant := uint64(3)
-	orderMerchant := uint64(3)
-	if productMerchant != orderMerchant {
-		t.Fatal("same merchant should pass product check")
+	owner := uint64(1)
+	entryApplicable := uint64(2)
+	entryForbidden := uint64(3)
+	// 入口店 B 适用、C 不适用：owner 校验与 applicable 由 DB 测试覆盖
+	if owner == entryApplicable {
+		t.Fatal("owner and applicable entry should differ")
 	}
-	// 平台活动：act.MerchantID==0 时不再要求 act.MerchantID==orderMerchant
+	// 平台活动：act.MerchantID==0 时不按入口店过滤活动归属
 	actMerchant := uint64(0)
-	if actMerchant != 0 && actMerchant != orderMerchant {
-		t.Fatal("platform should not fail on act merchant mismatch")
+	if actMerchant != 0 && actMerchant != owner {
+		t.Fatal("platform activity should not bind to entry merchant")
 	}
-	// 商家专场：必须一致
-	actMerchant = 9
-	if actMerchant != 0 && actMerchant != orderMerchant {
-		// expected forbidden path
-		return
+	// 商家专场：须与商品 owner 一致，而非入口店
+	actMerchant = owner
+	if actMerchant != 0 && actMerchant != owner {
+		t.Fatal("merchant-scoped activity must match product owner")
 	}
-	t.Fatal("expected merchant-scoped activity to mismatch")
+	if actMerchant == entryForbidden {
+		t.Fatal("merchant-scoped activity should not match non-applicable entry")
+	}
 }
 
 func TestActivityIsActiveNow(t *testing.T) {
