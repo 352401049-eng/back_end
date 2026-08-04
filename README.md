@@ -151,6 +151,22 @@ BACKUP_COMPRESS=true        # 输出 .sql.gz
 
 服务启动后会在**独立后台 goroutine** 中按间隔执行备份；启动时立即备份一次。备份文件已加入 `.gitignore`，不会进仓库。
 
+### 备份邮件（可选）
+
+备份成功后可按间隔发送 **AES-256 加密 ZIP** 到指定邮箱（附件接口限制解码后总大小 ≤ 4MB）：
+
+```
+BACKUP_EMAIL_ENABLED=true
+BACKUP_EMAIL_TO=you@example.com
+BACKUP_EMAIL_API_URL=https://www.catmicloud.cn/api/v1/email/send-attachment
+BACKUP_EMAIL_API_KEY=yzd_xxx
+BACKUP_EMAIL_INTERVAL=168h          # 默认每周
+BACKUP_EMAIL_ZIP_PASSWORD=至少8位
+BACKUP_EMAIL_SUBJECT=雨季新江数据库备份
+```
+
+发信记录写在备份目录 `.last_backup_email_sent`；首次开启会在下一次备份时发送。解压密码仅保存在服务器 `.env`，不会写进邮件正文。
+
 恢复示例：
 
 ```bash

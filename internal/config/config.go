@@ -41,6 +41,15 @@ type BackupConfig struct {
 	Interval   time.Duration
 	RetainDays int
 	Compress   bool
+
+	// 备份邮件（加密 zip 附件）
+	EmailEnabled    bool
+	EmailTo         string
+	EmailAPIURL     string
+	EmailAPIKey     string
+	EmailInterval   time.Duration // 发信间隔，默认 168h（每周）
+	EmailZipPassword string
+	EmailSubject    string
 }
 
 type DBConfig struct {
@@ -209,12 +218,24 @@ func loadBackupConfig() BackupConfig {
 		interval = 24 * time.Hour
 	}
 	retain, _ := strconv.Atoi(getEnv("BACKUP_RETAIN_DAYS", "7"))
+	emailInterval, err := time.ParseDuration(getEnv("BACKUP_EMAIL_INTERVAL", "168h"))
+	if err != nil || emailInterval < time.Hour {
+		emailInterval = 168 * time.Hour
+	}
+	apiURL := strings.TrimSpace(getEnv("BACKUP_EMAIL_API_URL", "https://www.catmicloud.cn/api/v1/email/send-attachment"))
 	return BackupConfig{
-		Enabled:    getEnv("BACKUP_ENABLED", "false") == "true",
-		Dir:        getEnv("BACKUP_DIR", "backups"),
-		Interval:   interval,
-		RetainDays: retain,
-		Compress:   getEnv("BACKUP_COMPRESS", "true") == "true",
+		Enabled:          getEnv("BACKUP_ENABLED", "false") == "true",
+		Dir:              getEnv("BACKUP_DIR", "backups"),
+		Interval:         interval,
+		RetainDays:       retain,
+		Compress:         getEnv("BACKUP_COMPRESS", "true") == "true",
+		EmailEnabled:     getEnv("BACKUP_EMAIL_ENABLED", "false") == "true",
+		EmailTo:          strings.TrimSpace(getEnv("BACKUP_EMAIL_TO", "")),
+		EmailAPIURL:      apiURL,
+		EmailAPIKey:      strings.TrimSpace(getEnv("BACKUP_EMAIL_API_KEY", "")),
+		EmailInterval:    emailInterval,
+		EmailZipPassword: getEnv("BACKUP_EMAIL_ZIP_PASSWORD", ""),
+		EmailSubject:     strings.TrimSpace(getEnv("BACKUP_EMAIL_SUBJECT", "雨季新江数据库备份")),
 	}
 }
 

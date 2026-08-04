@@ -40,7 +40,13 @@ func (s *Scheduler) Start(ctx context.Context) {
 	s.cancel = cancel
 
 	go s.loop(child)
-	log.Printf("[backup] 已启动定时备份: 间隔=%s 目录=%s 保留=%d天", s.cfg.Interval, s.cfg.Dir, s.cfg.RetainDays)
+	msg := fmt.Sprintf("[backup] 已启动定时备份: 间隔=%s 目录=%s 保留=%d天", s.cfg.Interval, s.cfg.Dir, s.cfg.RetainDays)
+	if s.cfg.EmailEnabled {
+		msg += fmt.Sprintf(" | 邮件=开 收件=%s 发信间隔=%s", maskEmail(s.cfg.EmailTo), s.cfg.EmailInterval)
+	} else {
+		msg += " | 邮件=关"
+	}
+	log.Print(msg)
 }
 
 func (s *Scheduler) Stop() {
@@ -70,9 +76,21 @@ func (s *Scheduler) runOnce() {
 		return
 	}
 	log.Printf("[backup] 备份完成: %s", path)
+	s.maybeEmailBackup(path)
 	if err := cleanup(s.cfg.Dir, s.cfg.RetainDays); err != nil {
 		log.Printf("[backup] 清理旧备份失败: %v", err)
 	}
+}
+
+func maskEmail(email string) string {
+	at := strings.IndexByte(email, '@')
+	if at <= 1 {
+		return "***"
+	}
+	if at == 2 {
+		return string(email[0]) + "***" + email[at:]
+	}
+	return email[:1] + "***" + email[at-1:]
 }
 
 // Dump 执行一次 mysqldump，返回备份文件路径。
