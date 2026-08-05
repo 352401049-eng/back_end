@@ -7,6 +7,7 @@ import (
 
 	"yujixinjiang/backend/internal/model"
 	"yujixinjiang/backend/internal/payment"
+	"yujixinjiang/backend/internal/payment/wechatv3"
 	"yujixinjiang/backend/internal/query"
 
 	"gorm.io/gorm"
@@ -35,7 +36,11 @@ func (s *OrderService) advanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
 
 // AdvanceAfterPaidInTx 供支付渠道（微信回调）注入调用。
 // 直购 PendingPay → 待履约；拼团 PendingGroup 保持待成团，按已支付人数尝试成团。
+// 若本地已被 pay-expire 关成 Closed/Cancelled 但微信已付款，先恢复业务状态再入团/履约。
 func (s *OrderService) AdvanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
+	if err := s.healPaidButClosedOrderInTx(tx, orderID); err != nil {
+		return err
+	}
 	res := tx.Model(&model.Order{}).
 		Where("id = ? AND status = ?", orderID, model.OrderStatusPendingPay).
 		Updates(map[string]interface{}{
@@ -55,6 +60,50 @@ func (s *OrderService) AdvanceAfterPaidInTx(tx *gorm.DB, orderID uint64) error {
 	}
 	// 团已成功时本单可能刚被推进为待履约，补一次自动审核
 	return s.maybeAutoApproveInTx(tx, orderID)
+}
+
+// healPaidButClosedOrderInTx 迟到回调：微信已付但本地被超时关单时，按购买方式恢复状态。
+// 关单时已回退库存/活动销量，此处重新占用，避免「已付款却无库存扣减」。
+func (s *OrderService) healPaidButClosedOrderInTx(tx *gorm.DB, orderID uint64) error {
+	var order model.Order
+	if err := query.NotDeleted(tx).First(&order, orderID).Error; err != nil {
+		return err
+	}
+	if order.PayStatus != model.PayStatusPaid {
+		return nil
+	}
+	if order.Status != model.OrderStatusClosed && order.Status != model.OrderStatusCancelled {
+		return nil
+	}
+	var groupCnt int64
+	if err := query.NotDeleted(tx.Model(&model.OrderItem{})).
+		Where("order_id = ? AND purchase_type = ?", orderID, model.PurchaseTypeGroup).
+		Count(&groupCnt).Error; err != nil {
+		return err
+	}
+	status := model.OrderStatusPendingFulfill
+	review := model.MerchantReviewPending
+	if groupCnt > 0 {
+		status = model.OrderStatusPendingGroup
+		review = model.MerchantReviewNone
+	}
+	if err := tx.Model(&order).Updates(map[string]interface{}{
+		"status":                status,
+		"merchant_review_stage": review,
+		"pay_expire_at":         nil,
+	}).Error; err != nil {
+		return err
+	}
+	if err := deductProductStockForOrder(tx, orderID); err != nil {
+		return err
+	}
+	if s.ActivitySvc != nil {
+		// 关单时 RollbackSold 已减日限/已售；状态恢复后按订单对账重占日限，勿再 CreditSold（会重复加）。
+		if err := s.ActivitySvc.ReholdAfterOrderRestoreInTx(tx, orderID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *OrderService) maybeAutoApproveInTx(tx *gorm.DB, orderID uint64) error {
@@ -81,6 +130,11 @@ func (s *OrderService) maybeAutoApproveInTx(tx *gorm.DB, orderID uint64) error {
 	}
 	if err := s.creditOrderInventory(tx, order.AccountID, orderID, items); err != nil {
 		return err
+	}
+	if s.InventorySvc != nil {
+		if err := s.InventorySvc.AutoPickupAfterCredit(tx, order.AccountID, orderID, resolveUsageMerchantID(&order)); err != nil {
+			return err
+		}
 	}
 	return tx.Model(&order).Update("merchant_review_stage", model.MerchantReviewApproved).Error
 }
@@ -238,9 +292,30 @@ func (s *OrderService) ExpireStalePendingPayOrders(now time.Time) (int, error) {
 	return n, firstErr
 }
 
-// expireOnePendingPayOrder 关闭单个待支付订单。关单前先查 pay_status，
-// 若已支付（回调可能已先到）则不关单，避免已付款被关。
+// expireOnePendingPayOrder 关闭单个待支付订单。关单前先查本地/微信侧是否已付：
+// 已付则补入账+入团/履约，绝不关单（避免微信已扣款本地关成「已关闭」）。
 func (s *OrderService) expireOnePendingPayOrder(orderID uint64) error {
+	var snap model.Order
+	if err := query.NotDeleted(s.DB).Select("id", "order_no", "status", "pay_status", "prepay_id").
+		First(&snap, orderID).Error; err != nil {
+		return err
+	}
+	if snap.Status != model.OrderStatusPendingPay && snap.Status != model.OrderStatusPendingGroup {
+		return nil
+	}
+	if snap.PayStatus == model.PayStatusPaid {
+		return s.DB.Transaction(func(tx *gorm.DB) error {
+			return s.advanceAfterPaidInTx(tx, orderID)
+		})
+	}
+
+	// 微信侧先查单 / 关单：ORDERPAID 或 SUCCESS 走补入账，不关本地单
+	if wp, ok := s.Payment.(*payment.WeChatProvider); ok && wp.Client != nil {
+		if settled, err := s.trySettleWechatPaidOnExpire(wp, snap); settled || err != nil {
+			return err
+		}
+	}
+
 	return s.DB.Transaction(func(tx *gorm.DB) error {
 		var order model.Order
 		if err := query.NotDeleted(tx).Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -250,15 +325,8 @@ func (s *OrderService) expireOnePendingPayOrder(orderID uint64) error {
 		if order.Status != model.OrderStatusPendingPay && order.Status != model.OrderStatusPendingGroup {
 			return nil
 		}
-		// 已支付则不关单（回调可能已先到，容错）
 		if order.PayStatus == model.PayStatusPaid {
 			return s.advanceAfterPaidInTx(tx, orderID)
-		}
-		// 微信支付：尝试关闭微信侧订单（忽略失败，非关键路径）
-		if wp, ok := s.Payment.(*payment.WeChatProvider); ok && wp.Client != nil {
-			if err := wp.Client.CloseOrder(wp.MchID, order.OrderNo); err != nil {
-				log.Printf("[pay-expire] close wechat order %s failed: %v", order.OrderNo, err)
-			}
 		}
 		isPackageParent := order.PackageProductID != nil && order.ParentOrderID == nil && order.MerchantID == 0
 		if order.ParentOrderID != nil {
@@ -293,5 +361,66 @@ func (s *OrderService) expireOnePendingPayOrder(orderID uint64) error {
 			"status":        model.OrderStatusClosed,
 			"pay_expire_at": nil,
 		}).Error
+	})
+}
+
+// trySettleWechatPaidOnExpire 查微信/关单探测是否已付。settled=true 表示已补入账（或无需再关）。
+func (s *OrderService) trySettleWechatPaidOnExpire(wp *payment.WeChatProvider, order model.Order) (settled bool, err error) {
+	tradeState, txID, qerr := wp.Client.QueryOrderByOutTradeNo(order.OrderNo)
+	if qerr == nil && tradeState == "SUCCESS" {
+		log.Printf("[pay-expire] order %s already paid on wechat, settle locally", order.OrderNo)
+		return true, s.markPaidAndAdvanceFromExpire(order.ID, txID)
+	}
+	if qerr != nil {
+		log.Printf("[pay-expire] query wechat order %s failed: %v", order.OrderNo, qerr)
+	}
+
+	closeErr := wp.Client.CloseOrder(wp.MchID, order.OrderNo)
+	if closeErr == nil {
+		return false, nil
+	}
+	if wechatv3.IsOrderPaid(closeErr) {
+		log.Printf("[pay-expire] close %s got ORDERPAID, settle locally", order.OrderNo)
+		if tradeState, txID, qerr = wp.Client.QueryOrderByOutTradeNo(order.OrderNo); qerr == nil && tradeState == "SUCCESS" {
+			return true, s.markPaidAndAdvanceFromExpire(order.ID, txID)
+		}
+		// 查单失败仍按已付补入账，避免关本地未付单
+		return true, s.markPaidAndAdvanceFromExpire(order.ID, "")
+	}
+	log.Printf("[pay-expire] close wechat order %s failed: %v", order.OrderNo, closeErr)
+	return false, nil
+}
+
+// markPaidAndAdvanceFromExpire 超时任务发现微信已付时：标已付 + 推进/入团。
+func (s *OrderService) markPaidAndAdvanceFromExpire(orderID uint64, transactionID string) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		res := query.NotDeleted(tx.Model(&model.Order{})).
+			Where("id = ? AND pay_status = ?", orderID, model.PayStatusUnpaid).
+			Updates(map[string]interface{}{
+				"pay_status": model.PayStatusPaid,
+				"paid_at":    now,
+				"prepay_id":  nil,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			var o model.Order
+			if err := query.NotDeleted(tx).Select("pay_status").First(&o, orderID).Error; err != nil {
+				return err
+			}
+			if o.PayStatus != model.PayStatusPaid {
+				return fmt.Errorf("order %d unexpected pay_status=%d on expire settle", orderID, o.PayStatus)
+			}
+		}
+		if transactionID != "" {
+			_ = tx.Model(&model.PaymentTransaction{}).Where("order_id = ?", orderID).
+				Updates(map[string]interface{}{
+					"status":         model.PayTxStatusPaid,
+					"transaction_id": transactionID,
+				})
+		}
+		return s.advanceAfterPaidInTx(tx, orderID)
 	})
 }

@@ -60,6 +60,7 @@ type ActivityProductInput struct {
 	GroupBuyAllowRepeat     uint8
 	GroupBuyMaxJoinsPerUser uint32
 	GroupBuyMaxConcurrentTeams uint32
+	ExpireDays              *uint32
 	EnableCoupon            uint8
 	SortOrder               int
 	Status                  uint8
@@ -85,6 +86,7 @@ type UpdateActivityProductPatch struct {
 	GroupBuyAllowRepeat     *uint8
 	GroupBuyMaxJoinsPerUser *uint32
 	GroupBuyMaxConcurrentTeams *uint32
+	ExpireDays              *uint32
 	EnableCoupon            *uint8
 	SortOrder               *int
 	Status                  *uint8
@@ -356,6 +358,7 @@ func (s *ActivityService) AddProduct(activityID uint64, input ActivityProductInp
 		GroupBuyAllowRepeat:     input.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: maxJoins,
 		GroupBuyMaxConcurrentTeams: input.GroupBuyMaxConcurrentTeams,
+		ExpireDays:              normalizeExpireDays(input.ExpireDays),
 		EnableCoupon:            normalizeEnableCoupon(input.EnableCoupon),
 		SortOrder:               input.SortOrder, Status: status,
 	}
@@ -439,6 +442,7 @@ func activityProductUpdates(input ActivityProductInput, maxJoins uint32, status 
 		"group_buy_allow_repeat":       input.GroupBuyAllowRepeat,
 		"group_buy_max_joins_per_user": maxJoins,
 		"group_buy_max_concurrent_teams": input.GroupBuyMaxConcurrentTeams,
+		"expire_days":                  normalizeExpireDays(input.ExpireDays),
 		"enable_coupon":                normalizeEnableCoupon(input.EnableCoupon),
 		"sort_order":                   input.SortOrder, "status": status,
 	}
@@ -487,7 +491,8 @@ func (p UpdateActivityProductPatch) hasField() bool {
 		p.RegisterMax != nil || p.PlatformDailyMax != nil || p.DailyRefreshTime != nil ||
 		p.EnableGroupBuy != nil || p.GroupBuyPrice != nil ||
 		p.GroupBuyTargetCount != nil || p.GroupBuyAllowRepeat != nil ||
-		p.GroupBuyMaxJoinsPerUser != nil || p.GroupBuyMaxConcurrentTeams != nil || p.EnableCoupon != nil || p.SortOrder != nil || p.Status != nil
+		p.GroupBuyMaxJoinsPerUser != nil || p.GroupBuyMaxConcurrentTeams != nil || p.ExpireDays != nil ||
+		p.EnableCoupon != nil || p.SortOrder != nil || p.Status != nil
 }
 
 func activityProductInputToPatch(input ActivityProductInput) UpdateActivityProductPatch {
@@ -510,6 +515,7 @@ func activityProductInputToPatch(input ActivityProductInput) UpdateActivityProdu
 		GroupBuyAllowRepeat:     &input.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: &input.GroupBuyMaxJoinsPerUser,
 		GroupBuyMaxConcurrentTeams: &input.GroupBuyMaxConcurrentTeams,
+		ExpireDays:              input.ExpireDays,
 		EnableCoupon:            &input.EnableCoupon,
 		SortOrder:               &input.SortOrder,
 		Status:                  &input.Status,
@@ -538,6 +544,7 @@ func mergeActivityProductPatch(ap *model.ActivityProduct, patch UpdateActivityPr
 		GroupBuyAllowRepeat:     ap.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: ap.GroupBuyMaxJoinsPerUser,
 		GroupBuyMaxConcurrentTeams: ap.GroupBuyMaxConcurrentTeams,
+		ExpireDays:              ap.ExpireDays,
 		EnableCoupon:            ap.EnableCoupon,
 		SortOrder:               ap.SortOrder,
 		Status:                  ap.Status,
@@ -595,6 +602,9 @@ func mergeActivityProductPatch(ap *model.ActivityProduct, patch UpdateActivityPr
 	}
 	if patch.GroupBuyMaxConcurrentTeams != nil {
 		merged.GroupBuyMaxConcurrentTeams = *patch.GroupBuyMaxConcurrentTeams
+	}
+	if patch.ExpireDays != nil {
+		merged.ExpireDays = normalizeExpireDays(patch.ExpireDays)
 	}
 	if patch.EnableCoupon != nil {
 		merged.EnableCoupon = *patch.EnableCoupon
@@ -1205,6 +1215,45 @@ func (s *ActivityService) CreditSoldInTx(tx *gorm.DB, activityProductID uint64, 
 		}
 	}
 	return bucket, nil
+}
+
+// ReholdAfterOrderRestoreInTx 关单后补入账恢复订单时：重占活动已售，并按有效订单对账平台日限。
+// 不可再走 CreditSoldInTx：日限对账已含本单，再 credit 会重复占用。
+func (s *ActivityService) ReholdAfterOrderRestoreInTx(tx *gorm.DB, orderID uint64) error {
+	var items []model.OrderItem
+	if err := query.NotDeleted(tx).Where("order_id = ? AND activity_product_id IS NOT NULL", orderID).Find(&items).Error; err != nil {
+		return err
+	}
+	seen := make(map[uint64]struct{})
+	now := time.Now()
+	for _, it := range items {
+		if it.ActivityProductID == nil || it.Quantity == 0 {
+			continue
+		}
+		apID := *it.ActivityProductID
+		ap, err := lockActivityProduct(tx, apID)
+		if err != nil {
+			return err
+		}
+		if _, done := seen[apID]; !done {
+			seen[apID] = struct{}{}
+			if _, err := ensurePlatformDailyBucketLocked(tx, ap, now); err != nil {
+				return err
+			}
+		}
+		if ap.ActivityStock > 0 {
+			res := tx.Model(&model.ActivityProduct{}).
+				Where("id = ? AND sold_count + ? <= activity_stock", apID, it.Quantity).
+				Update("sold_count", gorm.Expr("sold_count + ?", it.Quantity))
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				return ErrInsufficientStock
+			}
+		}
+	}
+	return nil
 }
 
 func (s *ActivityService) RollbackSoldInTx(tx *gorm.DB, orderID uint64) error {

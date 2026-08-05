@@ -244,6 +244,14 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 			if srcOID == nil {
 				srcOID = inv.LastOrderID
 			}
+			var expireAt *time.Time
+			if deliveryType == model.DeliveryTypePickup {
+				var err error
+				expireAt, err = resolveUsageExpireAt(tx, inv.ProductID, srcOID, time.Now())
+				if err != nil {
+					return err
+				}
+			}
 			usage := model.UserInventoryUsage{
 				AccountID: accountID, InventoryID: inv.ID, ProductID: inv.ProductID,
 				MerchantID: ownerMerchantID, UsageMerchantID: usageMerchantID, SourceOrderID: srcOID,
@@ -251,6 +259,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 				AddressSnapshot: addrSnap, Status: status, Remark: input.Remark,
 				PackageSelections: snap, PackageSelectStatus: pkgStatus,
 				OptionSelections: optSnap, OptionSelectStatus: optStatus,
+				ExpireAt: expireAt,
 			}
 			if deliveryID > 0 {
 				usage.DeliveryOrderID = &deliveryID
@@ -275,7 +284,7 @@ func (s *InventoryService) UseBatch(accountID uint64, input UseBatchInput) (*Use
 
 			var verifyCode *string
 			if deliveryType == model.DeliveryTypePickup || deliveryType == model.DeliveryTypeDelivery {
-				vc, err := createVerificationCodeForUsage(tx, accountID, usage.ID)
+				vc, err := createVerificationCodeForUsage(tx, accountID, usage.ID, expireAt)
 				if err != nil {
 					return err
 				}

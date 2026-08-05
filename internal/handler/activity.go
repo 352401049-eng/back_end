@@ -51,6 +51,7 @@ type ActivityProductRequest struct {
 	GroupBuyAllowRepeat     uint8    `json:"group_buy_allow_repeat" example:"0"`
 	GroupBuyMaxJoinsPerUser uint32   `json:"group_buy_max_joins_per_user" example:"1"`
 	GroupBuyMaxConcurrentTeams uint32 `json:"group_buy_max_concurrent_teams" example:"0"`
+	ExpireDays              *uint32  `json:"expire_days" example:"7"`
 	EnableCoupon            uint8    `json:"enable_coupon" example:"1"`
 	SortOrder               int      `json:"sort_order"`
 	Status                  uint8    `json:"status" example:"1"`
@@ -80,6 +81,7 @@ type activityProductAddBody struct {
 	GroupBuyAllowRepeat     FlexUInt8       `json:"group_buy_allow_repeat"`
 	GroupBuyMaxJoinsPerUser FlexUInt32      `json:"group_buy_max_joins_per_user"`
 	GroupBuyMaxConcurrentTeams FlexUInt32   `json:"group_buy_max_concurrent_teams"`
+	ExpireDays              FlexUInt32Ptr  `json:"expire_days"`
 	EnableCoupon            FlexUInt8       `json:"enable_coupon"`
 	SortOrder               FlexInt         `json:"sort_order"`
 	Status                  FlexUInt8       `json:"status"`
@@ -118,6 +120,7 @@ func parseActivityProductAddBody(c *gin.Context) (ActivityProductRequest, error)
 		GroupBuyTargetCount: raw.GroupBuyTargetCount.Ptr(), GroupBuyAllowRepeat: raw.GroupBuyAllowRepeat.Uint8(),
 		GroupBuyMaxJoinsPerUser: raw.GroupBuyMaxJoinsPerUser.Uint32(),
 		GroupBuyMaxConcurrentTeams: raw.GroupBuyMaxConcurrentTeams.Uint32(),
+		ExpireDays: raw.ExpireDays.Ptr(),
 		EnableCoupon: raw.EnableCoupon.Uint8(), SortOrder: raw.SortOrder.Int(), Status: raw.Status.Uint8(),
 	}, nil
 }
@@ -142,6 +145,7 @@ type activityProductUpdateBody struct {
 	GroupBuyAllowRepeat     FlexUInt8Ptr   `json:"group_buy_allow_repeat"`
 	GroupBuyMaxJoinsPerUser FlexUInt32Ptr  `json:"group_buy_max_joins_per_user"`
 	GroupBuyMaxConcurrentTeams FlexUInt32Ptr `json:"group_buy_max_concurrent_teams"`
+	ExpireDays              FlexUInt32Ptr `json:"expire_days"`
 	EnableCoupon            FlexUInt8Ptr   `json:"enable_coupon"`
 	SortOrder               FlexIntPtr     `json:"sort_order"`
 	Status                  FlexUInt8Ptr   `json:"status"`
@@ -162,6 +166,7 @@ func parseActivityProductUpdateBody(c *gin.Context) (UpdateActivityProductReques
 		GroupBuyTargetCount: raw.GroupBuyTargetCount.Ptr(), GroupBuyAllowRepeat: raw.GroupBuyAllowRepeat.Ptr(),
 		GroupBuyMaxJoinsPerUser: raw.GroupBuyMaxJoinsPerUser.Ptr(),
 		GroupBuyMaxConcurrentTeams: raw.GroupBuyMaxConcurrentTeams.Ptr(),
+		ExpireDays: raw.ExpireDays.Ptr(),
 		EnableCoupon: raw.EnableCoupon.Ptr(), SortOrder: raw.SortOrder.Ptr(), Status: raw.Status.Ptr(),
 	}, nil
 }
@@ -186,6 +191,7 @@ type UpdateActivityProductRequest struct {
 	GroupBuyAllowRepeat     *uint8   `json:"group_buy_allow_repeat" example:"0"`
 	GroupBuyMaxJoinsPerUser *uint32  `json:"group_buy_max_joins_per_user" example:"1"`
 	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams" example:"0"`
+	ExpireDays              *uint32  `json:"expire_days" example:"7"`
 	EnableCoupon            *uint8   `json:"enable_coupon" example:"1"`
 	SortOrder               *int     `json:"sort_order"`
 	Status                  *uint8   `json:"status" example:"1"`
@@ -213,6 +219,7 @@ func toActivityProductInput(req ActivityProductRequest) service.ActivityProductI
 		GroupBuyAllowRepeat: req.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: req.GroupBuyMaxJoinsPerUser,
 		GroupBuyMaxConcurrentTeams: req.GroupBuyMaxConcurrentTeams,
+		ExpireDays: req.ExpireDays,
 		EnableCoupon: req.EnableCoupon, SortOrder: req.SortOrder, Status: req.Status,
 	}
 }
@@ -228,6 +235,7 @@ func toActivityProductPatch(req UpdateActivityProductRequest) service.UpdateActi
 		GroupBuyTargetCount: req.GroupBuyTargetCount, GroupBuyAllowRepeat: req.GroupBuyAllowRepeat,
 		GroupBuyMaxJoinsPerUser: req.GroupBuyMaxJoinsPerUser,
 		GroupBuyMaxConcurrentTeams: req.GroupBuyMaxConcurrentTeams,
+		ExpireDays: req.ExpireDays,
 		EnableCoupon: req.EnableCoupon, SortOrder: req.SortOrder, Status: req.Status,
 	}
 }

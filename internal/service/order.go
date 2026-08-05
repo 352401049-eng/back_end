@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"yujixinjiang/backend/internal/config"
 	"yujixinjiang/backend/internal/model"
 	"yujixinjiang/backend/internal/payment"
 	"yujixinjiang/backend/internal/query"
@@ -37,6 +38,7 @@ type OrderService struct {
 	ZoneSvc           *DeliveryZoneService
 	Payment           payment.Provider
 	PayTimeoutMinutes int // 待支付订单超时分钟数，0 时由 worker 用默认值
+	AvatarPublicBase  string
 }
 
 type CreateOrderInput struct {
@@ -98,6 +100,16 @@ type GroupBuyProgress struct {
 	CanStartNewTeam bool    `json:"can_start_new_team"`
 	MaxConcurrentTeams uint32 `json:"max_concurrent_teams"`
 	ConcurrentTeamCount uint32 `json:"concurrent_team_count"`
+	Members         []GroupBuyMemberView `json:"members,omitempty"`
+}
+
+// GroupBuyMemberView 拼团页成员展示（昵称/头像）。
+type GroupBuyMemberView struct {
+	AccountID uint64 `json:"account_id"`
+	Nickname  string `json:"nickname"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	IsLeader  bool   `json:"is_leader"`
+	IsMe      bool   `json:"is_me"`
 }
 
 type JoinableGroupTeamView struct {
@@ -423,7 +435,7 @@ func (s *OrderService) resolveUnpaidGroupTeamID(tx *gorm.DB, accountID uint64, p
 		First(&team).Error; err != nil {
 		return nil, ErrGroupBuyInvalid
 	}
-	joinCount, err := countUserTeamJoins(tx, accountID, team.ID, activityID)
+	joinCount, err := countUserTeamJoins(tx, accountID, team.ID, activityID, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +443,7 @@ func (s *OrderService) resolveUnpaidGroupTeamID(tx *gorm.DB, accountID uint64, p
 	if err := validateTeamJoinLimit(joinCount, allowRepeat, maxJoins); err != nil {
 		return nil, err
 	}
-	paidCount, err := countPaidPendingGroupOnTeam(tx, team.ID)
+	paidCount, err := countPaidPendingGroupOnTeam(tx, team.ID, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -469,16 +481,17 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, 
 			First(&team).Error; err != nil {
 			return 0, ErrGroupBuyInvalid
 		}
-		// 本单已入团则幂等返回（支付回调重试）
-		var existingMember model.GroupBuyMember
-		if err := query.NotDeleted(tx).
+		// 本单已入团则幂等返回（支付回调重试）。用 Count 避免 First 未命中污染 tx.Error。
+		var existingCnt int64
+		if err := query.NotDeleted(tx.Model(&model.GroupBuyMember{})).
 			Where("team_id = ? AND order_id = ?", team.ID, orderID).
-			First(&existingMember).Error; err == nil {
-			return team.ID, nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			Count(&existingCnt).Error; err != nil {
 			return 0, err
 		}
-		joinCount, err := countUserTeamJoins(tx, accountID, team.ID, activityID)
+		if existingCnt > 0 {
+			return team.ID, nil
+		}
+		joinCount, err := countUserTeamJoins(tx, accountID, team.ID, activityID, orderID)
 		if err != nil {
 			return 0, err
 		}
@@ -486,7 +499,7 @@ func (s *OrderService) joinOrCreateTeam(tx *gorm.DB, accountID, orderID uint64, 
 		if err := validateTeamJoinLimit(joinCount, allowRepeat, maxJoins); err != nil {
 			return 0, err
 		}
-		paidCount, err := countPaidPendingGroupOnTeam(tx, team.ID)
+		paidCount, err := countPaidPendingGroupOnTeam(tx, team.ID, orderID)
 		if err != nil {
 			return 0, err
 		}
@@ -596,15 +609,15 @@ func (s *OrderService) ensureActiveGroupBuy(product model.Product, actGB *Activi
 }
 
 func ensureGroupBuyMember(tx *gorm.DB, teamID, orderID, accountID uint64, isLeader bool) error {
-	var existing model.GroupBuyMember
-	err := query.NotDeleted(tx).
-		Where("team_id = ? AND account_id = ? AND order_id = ?", teamID, accountID, orderID).
-		First(&existing).Error
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	// Count 代替 First：避免 record not found 把 tx.Error 污染后导致后续 Create 变成 no-op。
+	var n int64
+	if err := query.NotDeleted(tx.Model(&model.GroupBuyMember{})).
+		Where("team_id = ? AND order_id = ?", teamID, orderID).
+		Count(&n).Error; err != nil {
 		return err
+	}
+	if n > 0 {
+		return nil
 	}
 	leader := uint8(0)
 	if isLeader {
@@ -614,7 +627,14 @@ func ensureGroupBuyMember(tx *gorm.DB, teamID, orderID, accountID uint64, isLead
 		TeamID: teamID, OrderID: orderID, AccountID: accountID,
 		IsLeader: leader, JoinedAt: time.Now(),
 	}
-	return tx.Create(&m).Error
+	if err := tx.Create(&m).Error; err != nil {
+		// 并发下可能撞 uk_team_order，再确认一次即可
+		if isMySQLDuplicateKey(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func resolveGroupBuyRepeat(product model.Product, actGB *ActivityGroupBuyConfig) (uint8, uint32) {
@@ -663,7 +683,7 @@ func (s *OrderService) tryCompleteGroup(tx *gorm.DB, teamID *uint64, product mod
 	}
 
 	// 成团门槛只计「已支付」的待成团单，避免未付款参团直接入包
-	paidCount, err := countPaidPendingGroupOnTeam(tx, team.ID)
+	paidCount, err := countPaidPendingGroupOnTeam(tx, team.ID, 0)
 	if err != nil {
 		return err
 	}
@@ -1171,6 +1191,11 @@ func (s *OrderService) MerchantReview(merchantID, orderID uint64, approve bool, 
 		if err := s.creditOrderInventory(tx, order.AccountID, orderID, items); err != nil {
 			return err
 		}
+		if s.InventorySvc != nil {
+			if err := s.InventorySvc.AutoPickupAfterCredit(tx, order.AccountID, orderID, resolveUsageMerchantID(order)); err != nil {
+				return err
+			}
+		}
 		if err := tx.Model(order).Update("merchant_review_stage", model.MerchantReviewApproved).Error; err != nil {
 			return err
 		}
@@ -1181,14 +1206,14 @@ func (s *OrderService) MerchantReview(merchantID, orderID uint64, approve bool, 
 			EventCode:   model.EventMerchantApproved,
 			ActorRole:   model.FulfillmentActorMerchant,
 			ActorID:     &mid,
-			Title:       "商家已通过，商品入背包",
+			Title:       "商家已通过，已生成待核销",
 		})
 		AppendFulfillmentEventInTx(tx, FulfillmentEventInput{
 			SubjectType: model.FulfillmentSubjectOrder,
 			SubjectID:   orderID,
 			EventCode:   model.EventInventoryCredited,
 			ActorRole:   model.FulfillmentActorSystem,
-			Title:       "商品已入背包",
+			Title:       "商品已入待核销",
 		})
 		return nil
 	})
@@ -1389,7 +1414,7 @@ func (s *OrderService) GetActivityGroupProgress(accountID, activityID, activityP
 		return nil, err
 	}
 	if accountID > 0 {
-		count, err := countUserTeamJoins(s.DB, accountID, team.ID, &activityID)
+		count, err := countUserTeamJoins(s.DB, accountID, team.ID, &activityID, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -1651,7 +1676,7 @@ func (s *OrderService) buildGroupBuyProgress(product *model.Product, gb *model.G
 	}
 	// 展示进度与成团一致：以已支付人数为准（current_count 仅在付款入团时增加）
 	if allowRepeat == 1 {
-		if paid, err := countPaidPendingGroupOnTeam(s.DB, team.ID); err == nil {
+		if paid, err := countPaidPendingGroupOnTeam(s.DB, team.ID, 0); err == nil {
 			progress.CurrentCount = paid
 			if paid < target {
 				progress.RemainingCount = target - paid
@@ -1660,6 +1685,11 @@ func (s *OrderService) buildGroupBuyProgress(product *model.Product, gb *model.G
 			}
 		}
 	}
+	members, err := loadGroupBuyMemberViews(s.DB, team.ID, accountID, s.AvatarPublicBase)
+	if err != nil {
+		return nil, err
+	}
+	progress.Members = members
 	return progress, nil
 }
 
@@ -1718,8 +1748,9 @@ func (s *OrderService) findUserPendingTeamID(accountID, productID uint64) (*uint
 	return &teamID, nil
 }
 
-func countUserTeamJoins(db *gorm.DB, accountID, teamID uint64, activityID *uint64) (int64, error) {
-	// 仅计已支付参团，未付款不算「已加入」
+func countUserTeamJoins(db *gorm.DB, accountID, teamID uint64, activityID *uint64, excludeOrderID uint64) (int64, error) {
+	// 仅计已支付参团，未付款不算「已加入」。
+	// excludeOrderID：支付成功回调里本单已标已付，校验「是否已参过团」时需排除本单，否则会误判已加入。
 	q := db.
 		Table("order_item oi").
 		Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
@@ -1729,6 +1760,9 @@ func countUserTeamJoins(db *gorm.DB, accountID, teamID uint64, activityID *uint6
 		Where("o.status <> ?", model.OrderStatusClosed)
 	if teamID > 0 {
 		q = q.Where("oi.group_buy_team_id = ?", teamID)
+	}
+	if excludeOrderID > 0 {
+		q = q.Where("oi.order_id <> ?", excludeOrderID)
 	}
 	if activityID != nil {
 		q = q.Where("oi.activity_id = ?", *activityID)
@@ -1752,15 +1786,17 @@ func countDistinctTeamParticipants(db *gorm.DB, teamID uint64) (uint32, error) {
 }
 
 // countPaidPendingGroupOnTeam 已支付且仍待成团的参团笔数（同账号多笔各计一次）。
-func countPaidPendingGroupOnTeam(db *gorm.DB, teamID uint64) (uint32, error) {
+// excludeOrderID：本单刚标已付时排除自己，避免「满员」判断把本单算进去导致无法入团。
+func countPaidPendingGroupOnTeam(db *gorm.DB, teamID, excludeOrderID uint64) (uint32, error) {
 	var n int64
-	err := db.Raw(`
-		SELECT COUNT(*)
-		FROM order_item oi
-		INNER JOIN `+"`order`"+` o ON o.id = oi.order_id AND o.is_deleted = 0
-		WHERE oi.group_buy_team_id = ? AND oi.is_deleted = 0
-		  AND o.status = ? AND o.pay_status = ?
-	`, teamID, model.OrderStatusPendingGroup, model.PayStatusPaid).Scan(&n).Error
+	q := db.Table("order_item oi").
+		Joins("INNER JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = 0").
+		Where("oi.group_buy_team_id = ? AND oi.is_deleted = 0", teamID).
+		Where("o.status = ? AND o.pay_status = ?", model.OrderStatusPendingGroup, model.PayStatusPaid)
+	if excludeOrderID > 0 {
+		q = q.Where("oi.order_id <> ?", excludeOrderID)
+	}
+	err := q.Count(&n).Error
 	return uint32(n), err
 }
 
@@ -1796,6 +1832,62 @@ func loadAccountNicknames(db *gorm.DB, accountIDs []uint64) map[uint64]string {
 		}
 	}
 	return result
+}
+
+func loadGroupBuyMemberViews(db *gorm.DB, teamID, viewerAccountID uint64, avatarBase string) ([]GroupBuyMemberView, error) {
+	var members []model.GroupBuyMember
+	if err := query.NotDeleted(db).
+		Where("team_id = ?", teamID).
+		Order("is_leader DESC, joined_at ASC, id ASC").
+		Find(&members).Error; err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		return []GroupBuyMemberView{}, nil
+	}
+	ids := make([]uint64, 0, len(members))
+	seen := make(map[uint64]struct{}, len(members))
+	for _, m := range members {
+		if _, ok := seen[m.AccountID]; ok {
+			continue
+		}
+		seen[m.AccountID] = struct{}{}
+		ids = append(ids, m.AccountID)
+	}
+	type accRow struct {
+		ID        uint64
+		Nickname  string
+		AvatarURL *string
+	}
+	var rows []accRow
+	_ = db.Table("account").
+		Select("id, COALESCE(NULLIF(nickname,''), '拼友') AS nickname, avatar_url").
+		Where("id IN ?", ids).
+		Scan(&rows).Error
+	byID := make(map[uint64]accRow, len(rows))
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	out := make([]GroupBuyMemberView, 0, len(members))
+	for _, m := range members {
+		acc := byID[m.AccountID]
+		nick := acc.Nickname
+		if nick == "" {
+			nick = "拼友"
+		}
+		avatar := ""
+		if acc.AvatarURL != nil && *acc.AvatarURL != "" {
+			avatar = config.ExpandPublicURL(avatarBase, *acc.AvatarURL)
+		}
+		out = append(out, GroupBuyMemberView{
+			AccountID: m.AccountID,
+			Nickname:  nick,
+			AvatarURL: avatar,
+			IsLeader:  m.IsLeader == 1,
+			IsMe:      viewerAccountID > 0 && m.AccountID == viewerAccountID,
+		})
+	}
+	return out, nil
 }
 
 func findLatestActivityPendingTeam(db *gorm.DB, groupBuyID, activityID uint64) (*uint64, error) {
@@ -1843,7 +1935,7 @@ func findUserPendingTeamInGroupBuy(tx *gorm.DB, accountID, groupBuyID uint64, ac
 }
 
 func countUserTeamOrders(db *gorm.DB, accountID, teamID uint64) (int64, error) {
-	return countUserTeamJoins(db, accountID, teamID, nil)
+	return countUserTeamJoins(db, accountID, teamID, nil, 0)
 }
 
 func rollbackGroupTeamForOrder(tx *gorm.DB, orderID uint64) error {
@@ -1857,15 +1949,21 @@ func rollbackGroupTeamForOrder(tx *gorm.DB, orderID uint64) error {
 		return err
 	}
 
-	// 未付款未入团：仅有意向 team_id，无 member，不改 current_count
-	var member model.GroupBuyMember
-	err := query.NotDeleted(tx).
+	// 未付款未入团：仅有意向 team_id，无 member，不改 current_count。
+	// 用 Count 避免 First 未命中污染 tx.Error。
+	var memberCnt int64
+	if err := query.NotDeleted(tx.Model(&model.GroupBuyMember{})).
 		Where("order_id = ? AND team_id = ?", orderID, *item.GroupBuyTeamID).
-		First(&member).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+		Count(&memberCnt).Error; err != nil {
+		return err
+	}
+	if memberCnt == 0 {
 		return nil
 	}
-	if err != nil {
+	var member model.GroupBuyMember
+	if err := query.NotDeleted(tx).
+		Where("order_id = ? AND team_id = ?", orderID, *item.GroupBuyTeamID).
+		First(&member).Error; err != nil {
 		return err
 	}
 	if err := query.SoftDelete(tx, &model.GroupBuyMember{}, "id = ?", member.ID).Error; err != nil {
@@ -2342,6 +2440,15 @@ func restoreChannelStockInTx(tx *gorm.DB, productID uint64, quantity uint32, cha
 
 // restoreProductStockForOrder 取消/拒单时回退订单商品库存。
 func restoreProductStockForOrder(tx *gorm.DB, orderID uint64) error {
+	return applyOrderChannelStock(tx, orderID, false)
+}
+
+// deductProductStockForOrder 下单/补入账时按通道扣减库存。
+func deductProductStockForOrder(tx *gorm.DB, orderID uint64) error {
+	return applyOrderChannelStock(tx, orderID, true)
+}
+
+func applyOrderChannelStock(tx *gorm.DB, orderID uint64, deduct bool) error {
 	var items []model.OrderItem
 	if err := query.NotDeleted(tx).Where("order_id = ?", orderID).Find(&items).Error; err != nil {
 		return err
@@ -2359,7 +2466,11 @@ func restoreProductStockForOrder(tx *gorm.DB, orderID uint64) error {
 			}
 			channel = stockChannelForOrder(p, it.PurchaseType, true)
 		}
-		if err := restoreChannelStockInTx(tx, it.ProductID, it.Quantity, channel); err != nil {
+		if deduct {
+			if err := deductChannelStockInTx(tx, it.ProductID, it.Quantity, channel); err != nil {
+				return err
+			}
+		} else if err := restoreChannelStockInTx(tx, it.ProductID, it.Quantity, channel); err != nil {
 			return err
 		}
 	}

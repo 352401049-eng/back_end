@@ -35,6 +35,8 @@ type Product struct {
 	GroupBuyPrice       *float64  `gorm:"column:group_buy_price;type:decimal(10,2)" json:"group_buy_price,omitempty"`
 	GroupBuyAllowRepeat uint8     `gorm:"column:group_buy_allow_repeat;not null;default:0" json:"group_buy_allow_repeat"`
 	GroupBuyMaxConcurrentTeams uint32 `gorm:"column:group_buy_max_concurrent_teams;not null;default:0" json:"group_buy_max_concurrent_teams"`
+	DealExpireDays      *uint32   `gorm:"column:deal_expire_days" json:"deal_expire_days,omitempty"`
+	GroupExpireDays     *uint32   `gorm:"column:group_expire_days" json:"group_expire_days,omitempty"`
 	ItemType            uint8     `gorm:"not null;default:1" json:"item_type"`
 	Status         uint8     `gorm:"not null;default:1" json:"status"`
 	CreatedAt      time.Time `json:"created_at"`

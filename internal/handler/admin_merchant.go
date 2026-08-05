@@ -93,6 +93,8 @@ type ProductRequest struct {
 	GroupBuyPrice       *float64 `json:"group_buy_price" example:"79.9"`
 	GroupBuyAllowRepeat *uint8   `json:"group_buy_allow_repeat" example:"0"`
 	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams" example:"0"`
+	DealExpireDays      *uint32  `json:"deal_expire_days" example:"7"`
+	GroupExpireDays     *uint32  `json:"group_expire_days" example:"7"`
 	ItemType            uint8    `json:"item_type" example:"1"`
 	Status         uint8    `json:"status" example:"0"`
 	PackageGroups  []service.PackageGroupInput `json:"package_groups"`
@@ -127,6 +129,8 @@ type UpdateProductRequest struct {
 	GroupBuyPrice       *float64  `json:"group_buy_price"`
 	GroupBuyAllowRepeat *uint8    `json:"group_buy_allow_repeat"`
 	GroupBuyMaxConcurrentTeams *uint32 `json:"group_buy_max_concurrent_teams"`
+	DealExpireDays      *uint32   `json:"deal_expire_days"`
+	GroupExpireDays     *uint32   `json:"group_expire_days"`
 	ItemType            *uint8    `json:"item_type"`
 	Status              *uint8    `json:"status"`
 	PackageGroups       []service.PackageGroupInput  `json:"package_groups"`
@@ -143,7 +147,7 @@ func (r UpdateProductRequest) hasField() bool {
 		r.DealStock != nil || r.GroupStock != nil || r.TakeoutStock != nil ||
 		r.EnableGroupBuy != nil || r.EnableCoupon != nil || r.AllowPickup != nil || r.AllowDelivery != nil ||
 		r.GroupBuyTargetCount != nil || r.GroupBuyPrice != nil || r.GroupBuyAllowRepeat != nil ||
-		r.GroupBuyMaxConcurrentTeams != nil ||
+		r.GroupBuyMaxConcurrentTeams != nil || r.DealExpireDays != nil || r.GroupExpireDays != nil ||
 		r.ItemType != nil || r.Status != nil || len(r.PackageGroups) > 0 || r.OptionGroups != nil ||
 		r.ApplicableMerchantIDs != nil || r.ForceCloseGroup != nil
 }
@@ -1572,6 +1576,16 @@ func buildProductInput(req ProductRequest, existing *model.Product) service.Prod
 	} else if existing != nil {
 		input.GroupBuyMaxConcurrentTeams = existing.GroupBuyMaxConcurrentTeams
 	}
+	if req.DealExpireDays != nil {
+		input.DealExpireDays = req.DealExpireDays
+	} else if existing != nil {
+		input.DealExpireDays = existing.DealExpireDays
+	}
+	if req.GroupExpireDays != nil {
+		input.GroupExpireDays = req.GroupExpireDays
+	} else if existing != nil {
+		input.GroupExpireDays = existing.GroupExpireDays
+	}
 	if len(req.PackageGroups) > 0 {
 		input.PackageGroups = req.PackageGroups
 	}
@@ -1611,6 +1625,8 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 		GroupBuyPrice:       existing.GroupBuyPrice,
 		GroupBuyAllowRepeat: existing.GroupBuyAllowRepeat,
 		GroupBuyMaxConcurrentTeams: existing.GroupBuyMaxConcurrentTeams,
+		DealExpireDays:      existing.DealExpireDays,
+		GroupExpireDays:     existing.GroupExpireDays,
 		ItemType:            existing.ItemType,
 		Status:              existing.Status,
 	}
@@ -1701,6 +1717,12 @@ func buildPatchProductInput(req UpdateProductRequest, existing *model.Product) s
 	}
 	if req.GroupBuyMaxConcurrentTeams != nil {
 		input.GroupBuyMaxConcurrentTeams = *req.GroupBuyMaxConcurrentTeams
+	}
+	if req.DealExpireDays != nil {
+		input.DealExpireDays = req.DealExpireDays
+	}
+	if req.GroupExpireDays != nil {
+		input.GroupExpireDays = req.GroupExpireDays
 	}
 	if req.ItemType != nil {
 		input.ItemType = *req.ItemType

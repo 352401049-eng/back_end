@@ -79,6 +79,10 @@ func (s *Scheduler) maybeEmailBackup(backupPath string) {
 	if info.Size() > maxEmailAttachmentBytes {
 		log.Printf("[backup-email] 加密包过大（%d bytes > %d），跳过发信；本地备份仍保留: %s",
 			info.Size(), maxEmailAttachmentBytes, backupPath)
+		// 记入发信间隔，避免每个备份周期无限重试压缩/发信
+		if err := markEmailSent(cfg.Dir, time.Now()); err != nil {
+			log.Printf("[backup-email] 写入发信记录失败（超大附件跳过）: %v", err)
+		}
 		return
 	}
 
@@ -120,8 +124,9 @@ func (s *Scheduler) maybeEmailBackup(backupPath string) {
 		log.Printf("[backup-email] 接口返回未发送: message=%s id=%s", resp.Message, resp.MessageID)
 		return
 	}
-	if err := markEmailSent(cfg.Dir, time.Now()); err != nil {
-		log.Printf("[backup-email] 写入发信记录失败: %v", err)
+	if err := markEmailSentWithRetry(cfg.Dir, time.Now(), 3); err != nil {
+		log.Printf("[backup-email] 写入发信记录失败（已发送，可能重复投递）: %v", err)
+		return
 	}
 	log.Printf("[backup-email] 已发送加密备份至邮箱 ref=%s message_id=%s", ref, resp.MessageID)
 }
@@ -171,6 +176,22 @@ func markEmailSent(dir string, at time.Time) error {
 	}
 	marker := filepath.Join(dir, emailSentMarkerName)
 	return os.WriteFile(marker, []byte(at.UTC().Format(time.RFC3339)+"\n"), 0o600)
+}
+
+func markEmailSentWithRetry(dir string, at time.Time, attempts int) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var last error
+	for i := 0; i < attempts; i++ {
+		if err := markEmailSent(dir, at); err != nil {
+			last = err
+			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+			continue
+		}
+		return nil
+	}
+	return last
 }
 
 // makeEncryptedZip 将备份文件打成 AES-256 加密 ZIP（可用 7-Zip / WinRAR 解压）。

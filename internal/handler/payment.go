@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 
 	"yujixinjiang/backend/internal/auth"
@@ -90,6 +91,7 @@ func (h *PaymentHandler) WeChatNotify(c *gin.Context) {
 	}
 	result, err := h.OrderSvc.HandlePaymentNotify(headers, body)
 	if err != nil {
+		log.Printf("[wechat notify] handle failed: %v", err)
 		writeWeChatNotifyFail(c, http.StatusBadRequest, "处理失败")
 		return
 	}

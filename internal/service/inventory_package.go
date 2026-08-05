@@ -514,9 +514,7 @@ func validateFulfillmentFlags(product model.Product, deliveryType uint8) error {
 	if deliveryType == model.DeliveryTypeDelivery && product.AllowDelivery != 1 {
 		return ErrDeliveryNotAllowed
 	}
-	if deliveryType == model.DeliveryTypePickup && product.AllowPickup != 1 {
-		return ErrPickupNotAllowed
-	}
+	// 自取默认开放，不再依赖 allow_pickup 开关
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // APIError 微信 V3 API 返回的业务错误。
@@ -40,6 +41,15 @@ func isNotFound(err error) bool {
 	if apiErr, ok := err.(*APIError); ok {
 		return apiErr.StatusCode == http.StatusNotFound ||
 			apiErr.Code == "ORDER_NOT_FOUND" || apiErr.Code == "RESOURCE_NOT_EXISTS"
+	}
+	return false
+}
+
+// IsOrderPaid 判断关闭订单时微信是否表示「该单已支付」。
+func IsOrderPaid(err error) bool {
+	if apiErr, ok := err.(*APIError); ok {
+		code := strings.ToUpper(apiErr.Code)
+		return code == "ORDERPAID" || code == "ORDER_PAID"
 	}
 	return false
 }

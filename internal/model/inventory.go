@@ -67,6 +67,7 @@ type UserInventoryUsage struct {
 	PackageSelectStatus uint8                    `gorm:"not null;default:0" json:"package_select_status"`
 	OptionSelections    OptionSelectionSnapshot  `gorm:"type:json;serializer:json" json:"option_selections,omitempty"`
 	OptionSelectStatus  uint8                    `gorm:"not null;default:0" json:"option_select_status"`
+	ExpireAt            *time.Time               `gorm:"column:expire_at" json:"expire_at,omitempty"`
 	CreatedAt            time.Time        `json:"created_at"`
 	UpdatedAt            time.Time        `json:"updated_at"`
 	SoftDelete

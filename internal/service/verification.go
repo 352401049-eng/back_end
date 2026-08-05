@@ -249,6 +249,9 @@ func (s *VerificationService) buildVerifyResolveResult(db *gorm.DB, vc *model.Ve
 		}
 		switch usage.Status {
 		case model.InventoryUsagePendingVerify:
+			if usage.ExpireAt != nil && usage.ExpireAt.Before(time.Now()) {
+				return nil, ErrVerifyCodeExpired
+			}
 			// 自取待核销
 		case model.InventoryUsagePendingShip:
 			if usage.DeliveryOrderID == nil {

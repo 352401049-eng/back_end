@@ -299,6 +299,92 @@ func (h *UserHandler) CancelInventoryUsage(c *gin.Context) {
 	response.OK(c, view)
 }
 
+type ConvertDeliveryRequest struct {
+	AddressID         uint64                           `json:"address_id"`
+	UsageMerchantID   uint64                           `json:"usage_merchant_id"`
+	Remark            *string                          `json:"remark"`
+	PackageSelections []service.PackageSelectionInput  `json:"package_selections"`
+	OptionSelections  []service.OptionSelectionUnitInput `json:"option_selections"`
+}
+
+// RefundPendingVerifyUsage godoc
+// @Summary      待核销退款
+// @Description  作废核销码并退款，不回滚回背包
+// @Tags         用户-背包
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path  int  true  "使用记录 ID"
+// @Success      200  {object}  response.Body{data=service.InventoryRefundView}
+// @Router       /user/inventory/usages/{id}/refund [post]
+func (h *UserHandler) RefundPendingVerifyUsage(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	usageID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "使用记录 ID 无效")
+		return
+	}
+	if h.OrderSvc == nil {
+		response.InternalError(c, "服务未配置")
+		return
+	}
+	view, err := h.OrderSvc.RefundPendingVerifyUsage(accountID, usageID)
+	if err != nil {
+		handleInventoryError(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+// ConvertPendingVerifyToDelivery godoc
+// @Summary      待核销改为配送
+// @Description  支持配送的商品从待核销改为配送；有配送费时返回待支付配送费单
+// @Tags         用户-背包
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path  int                     true  "使用记录 ID"
+// @Param        body  body  ConvertDeliveryRequest  true  "地址与选配"
+// @Success      200   {object}  response.Body{data=service.ConvertDeliveryResult}
+// @Router       /user/inventory/usages/{id}/convert-delivery [post]
+func (h *UserHandler) ConvertPendingVerifyToDelivery(c *gin.Context) {
+	accountID, ok := auth.AccountID(c)
+	if !ok {
+		response.Fail(c, 401, 401, "未登录")
+		return
+	}
+	usageID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "使用记录 ID 无效")
+		return
+	}
+	if h.InventorySvc == nil {
+		response.InternalError(c, "服务未配置")
+		return
+	}
+	var req ConvertDeliveryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数无效")
+		return
+	}
+	result, err := h.InventorySvc.ConvertPendingVerifyToDelivery(accountID, usageID, service.ConvertDeliveryInput{
+		AddressID:         req.AddressID,
+		UsageMerchantID:   req.UsageMerchantID,
+		Remark:            req.Remark,
+		PackageSelections: req.PackageSelections,
+		OptionSelections:  req.OptionSelections,
+	})
+	if err != nil {
+		handleInventoryError(c, err)
+		return
+	}
+	response.OK(c, result)
+}
+
 func handleInventoryError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInventoryNotFound):
@@ -315,7 +401,12 @@ func handleInventoryError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrInventoryUsageNotFound):
 		response.Fail(c, 404, 404, "使用记录不存在")
 	case errors.Is(err, service.ErrInventoryUsageInvalid):
-		response.BadRequest(c, "当前状态不可取消")
+		msg := err.Error()
+		if i := strings.Index(msg, ": "); i >= 0 && i+2 < len(msg) {
+			response.BadRequest(c, msg[i+2:])
+			return
+		}
+		response.BadRequest(c, "当前状态不可操作")
 	case errors.Is(err, service.ErrInventoryCancelPending):
 		response.BadRequest(c, "取消申请审核中，请耐心等待")
 	case errors.Is(err, service.ErrAddressRequired):

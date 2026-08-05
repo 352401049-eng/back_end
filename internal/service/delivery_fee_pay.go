@@ -45,9 +45,13 @@ type DeliveryFeePayView struct {
 }
 
 type deliveryFeePayload struct {
-	Items    []UseBatchItemInput `json:"items"`
-	AddressID uint64             `json:"address_id"`
-	Remark   *string             `json:"remark,omitempty"`
+	Items             []UseBatchItemInput        `json:"items,omitempty"`
+	ConvertUsageID    uint64                     `json:"convert_usage_id,omitempty"`
+	AddressID         uint64                     `json:"address_id"`
+	Remark            *string                    `json:"remark,omitempty"`
+	UsageMerchantID   uint64                     `json:"usage_merchant_id,omitempty"`
+	PackageSelections []PackageSelectionInput    `json:"package_selections,omitempty"`
+	OptionSelections  []OptionSelectionUnitInput `json:"option_selections,omitempty"`
 }
 
 func genDeliveryFeeOrderNo() string {
@@ -239,28 +243,50 @@ func (s *DeliveryFeePayService) MarkPaidInTx(tx *gorm.DB, feeOrderID uint64, at 
 		return fmt.Errorf("%w: invalid payload", ErrDeliveryFeeStatusInvalid)
 	}
 
-	// 必须用副本挂 tx，禁止改写共享 InventorySvc.DB；否则事务提交后全局背包查询会报
-	// "sql: transaction has already been committed or rolled back"。
 	base := s.inventorySvc()
 	invOnTx := *base
 	invOnTx.DB = tx
-	result, err := invOnTx.UseBatch(feeOrder.AccountID, UseBatchInput{
-		Items:                      payload.Items,
-		UsageMerchantID:            feeOrder.MerchantID,
-		DeliveryType:               model.DeliveryTypeDelivery,
-		AddressID:                    &payload.AddressID,
-		Remark:                       payload.Remark,
-		FulfillAfterDeliveryFeePay:   true,
-	})
-	if err != nil {
-		return err
+
+	var deliveryOrderID *uint64
+	if payload.ConvertUsageID > 0 {
+		var mp model.MerchantProfile
+		if err := query.NotDeleted(tx).Select("id", "delivery_fee", "rider_earnings").First(&mp, feeOrder.MerchantID).Error; err != nil {
+			return err
+		}
+		view, err := invOnTx.convertPendingVerifyInTx(tx, feeOrder.AccountID, payload.ConvertUsageID, ConvertDeliveryInput{
+			AddressID:         payload.AddressID,
+			UsageMerchantID:   payload.UsageMerchantID,
+			Remark:            payload.Remark,
+			PackageSelections: payload.PackageSelections,
+			OptionSelections:  payload.OptionSelections,
+			SkipFeeCheck:      true,
+		}, &mp)
+		if err != nil {
+			return err
+		}
+		if view != nil && view.DeliveryOrderID != nil {
+			deliveryOrderID = view.DeliveryOrderID
+		}
+	} else {
+		result, err := invOnTx.UseBatch(feeOrder.AccountID, UseBatchInput{
+			Items:                      payload.Items,
+			UsageMerchantID:            feeOrder.MerchantID,
+			DeliveryType:               model.DeliveryTypeDelivery,
+			AddressID:                  &payload.AddressID,
+			Remark:                     payload.Remark,
+			FulfillAfterDeliveryFeePay: true,
+		})
+		if err != nil {
+			return err
+		}
+		deliveryOrderID = result.DeliveryOrderID
 	}
 
 	updates := map[string]interface{}{
 		"status": model.DeliveryFeeStatusFulfilled,
 	}
-	if result.DeliveryOrderID != nil {
-		updates["delivery_order_id"] = *result.DeliveryOrderID
+	if deliveryOrderID != nil {
+		updates["delivery_order_id"] = *deliveryOrderID
 	}
 	if err := tx.Model(&feeOrder).Updates(updates).Error; err != nil {
 		return err

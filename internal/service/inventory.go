@@ -284,6 +284,16 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 		if srcOID == nil {
 			srcOID = inv.LastOrderID
 		}
+
+		var expireAt *time.Time
+		if deliveryType == model.DeliveryTypePickup {
+			var err error
+			expireAt, err = resolveUsageExpireAt(tx, inv.ProductID, srcOID, time.Now())
+			if err != nil {
+				return err
+			}
+		}
+
 		usage = model.UserInventoryUsage{
 			AccountID: accountID, InventoryID: inv.ID, ProductID: inv.ProductID,
 			MerchantID: inv.Product.MerchantID, SourceOrderID: srcOID,
@@ -291,6 +301,7 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 			AddressSnapshot: addrSnap, Status: status, Remark: input.Remark,
 			PackageSelections: snap, PackageSelectStatus: pkgStatus,
 			OptionSelections: optSnap, OptionSelectStatus: optStatus,
+			ExpireAt: expireAt,
 		}
 		if err := tx.Create(&usage).Error; err != nil {
 			return err
@@ -313,7 +324,7 @@ func (s *InventoryService) Use(accountID, inventoryID uint64, input UseInventory
 		}
 
 		if deliveryType == model.DeliveryTypePickup || deliveryType == model.DeliveryTypeDelivery {
-			vc, err := createVerificationCodeForUsage(tx, accountID, usage.ID)
+			vc, err := createVerificationCodeForUsage(tx, accountID, usage.ID, expireAt)
 			if err != nil {
 				return err
 			}
@@ -378,9 +389,9 @@ func (s *InventoryService) RequestCancelUsage(accountID, usageID uint64, reason 
 		return nil, ErrInventoryUsageInvalid
 	}
 
-	// 自提待核销：直接取消
+	// 自提待核销：禁止「取消回背包」，须走 RefundPendingVerifyUsage 直接退款
 	if usage.Status == model.InventoryUsagePendingVerify {
-		return s.finalizeCancelUsage(accountID, &usage, reason)
+		return nil, fmt.Errorf("%w: 待核销请申请退款，不可取消回背包", ErrInventoryUsageInvalid)
 	}
 
 	// 配送：未接单可直取消；骑手已接单需商家审核
@@ -913,14 +924,12 @@ func (s *InventoryService) adjustQuantity(
 	return tx.Create(&log).Error
 }
 
-func createVerificationCodeForUsage(tx *gorm.DB, accountID, usageID uint64) (*model.VerificationCode, error) {
+func createVerificationCodeForUsage(tx *gorm.DB, accountID, usageID uint64, expireAt *time.Time) (*model.VerificationCode, error) {
 	code := genVerifyCodeStr()
 	vc := model.VerificationCode{
 		AccountID: accountID, InventoryUsageID: &usageID, Code: code,
-		Status: model.VerificationCodeUnused,
+		Status: model.VerificationCodeUnused, ExpiredAt: expireAt,
 	}
-	exp := time.Now().AddDate(0, 0, 30)
-	vc.ExpiredAt = &exp
 	if err := tx.Create(&vc).Error; err != nil {
 		return nil, err
 	}

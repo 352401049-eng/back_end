@@ -1,8 +1,9 @@
 -- =============================================================================
 -- 豫记信疆 · 生产基线 schema（空库一键建表）
 -- =============================================================================
--- 本文件已包含 sql/updates/012–034 以及 migrations/ 下全部变更的最终形态。
--- 新环境只需执行本文件一次，无需再跑历史 ALTER / updates。
+-- 本文件已包含 sql/updates/012–038 以及 migrations/ 下全部变更的最终形态
+-- （含 20260802 购物车规格、20260803 适用店/usage_merchant_id）。
+-- 新环境只需执行本文件一次，无需再跑历史 ALTER / updates / migrations。
 --
 -- 软删除统一使用 is_deleted（0=正常，1=已删除），无 deleted_at。
 -- 字符集 utf8mb4，引擎 InnoDB。主键与列类型对齐 internal/model/*.go（GORM tags）。
@@ -168,6 +169,8 @@ CREATE TABLE IF NOT EXISTS `product` (
   `group_buy_price` DECIMAL(10,2) NULL DEFAULT NULL,
   `group_buy_allow_repeat` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '同团是否允许同一用户多笔',
   `group_buy_max_concurrent_teams` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '同时进行中团数上限，0=不限',
+  `deal_expire_days` INT UNSIGNED NULL DEFAULT NULL COMMENT '团购入待核销后过期天数，NULL/0=永不',
+  `group_expire_days` INT UNSIGNED NULL DEFAULT NULL COMMENT '拼团入待核销后过期天数，NULL/0=永不',
   `item_type` TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '1实物 2虚拟 3套餐',
   `status` TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '0下架 1上架',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -180,6 +183,19 @@ CREATE TABLE IF NOT EXISTS `product` (
   KEY `idx_product_item_type` (`item_type`),
   KEY `idx_product_is_deleted` (`is_deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品';
+
+-- -----------------------------------------------------------------------------
+-- product_applicable_merchant 商品适用店面（多店核销/履约）
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `product_applicable_merchant` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `product_id` BIGINT UNSIGNED NOT NULL,
+  `merchant_id` BIGINT UNSIGNED NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_product_merchant` (`product_id`, `merchant_id`),
+  KEY `idx_merchant_product` (`merchant_id`, `product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品适用店面';
 
 -- -----------------------------------------------------------------------------
 -- product_option_group / product_option_item 商品规格选项
@@ -310,6 +326,7 @@ CREATE TABLE IF NOT EXISTS `activity_product` (
   `group_buy_allow_repeat` TINYINT UNSIGNED NOT NULL DEFAULT 0,
   `group_buy_max_joins_per_user` INT UNSIGNED NOT NULL DEFAULT 1,
   `group_buy_max_concurrent_teams` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '同时进行中团数上限，0=不限',
+  `expire_days` INT UNSIGNED NULL DEFAULT NULL COMMENT '覆盖商品过期；NULL=沿用商品对应通道',
   `enable_coupon` TINYINT UNSIGNED NOT NULL DEFAULT 1,
   `sort_order` INT NOT NULL DEFAULT 0,
   `status` TINYINT UNSIGNED NOT NULL DEFAULT 1,
@@ -378,6 +395,9 @@ CREATE TABLE IF NOT EXISTS `cart_item` (
   `group_buy_id` BIGINT UNSIGNED NULL DEFAULT NULL,
   `group_buy_team_id` BIGINT UNSIGNED NULL DEFAULT NULL,
   `spec` VARCHAR(128) NULL DEFAULT NULL,
+  `option_selections` JSON NULL COMMENT '规格选配 JSON',
+  `option_text` VARCHAR(512) NULL COMMENT '规格摘要文案',
+  `option_key` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '规格合并键',
   `quantity` INT UNSIGNED NOT NULL DEFAULT 1,
   `selected` TINYINT UNSIGNED NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -386,6 +406,7 @@ CREATE TABLE IF NOT EXISTS `cart_item` (
   PRIMARY KEY (`id`),
   KEY `idx_cart_item_account` (`account_id`),
   KEY `idx_cart_item_product` (`product_id`),
+  KEY `idx_cart_option_key` (`account_id`, `product_id`, `purchase_type`, `option_key`),
   KEY `idx_cart_item_is_deleted` (`is_deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='购物车';
 
@@ -447,6 +468,7 @@ CREATE TABLE IF NOT EXISTS `order` (
   `order_no` VARCHAR(32) NOT NULL,
   `account_id` BIGINT UNSIGNED NOT NULL,
   `merchant_id` BIGINT UNSIGNED NOT NULL,
+  `usage_merchant_id` BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '实际使用店',
   `package_product_id` BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '套餐商品ID（父单）',
   `activity_id` BIGINT UNSIGNED NULL DEFAULT NULL,
   `status` TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -593,6 +615,7 @@ CREATE TABLE IF NOT EXISTS `user_inventory_usage` (
   `inventory_id` BIGINT UNSIGNED NOT NULL,
   `product_id` BIGINT UNSIGNED NOT NULL,
   `merchant_id` BIGINT UNSIGNED NOT NULL,
+  `usage_merchant_id` BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '实际使用店',
   `source_order_id` BIGINT UNSIGNED NULL DEFAULT NULL,
   `quantity` INT UNSIGNED NOT NULL,
   `delivery_type` TINYINT UNSIGNED NOT NULL COMMENT '1自取 2配送',
@@ -605,6 +628,7 @@ CREATE TABLE IF NOT EXISTS `user_inventory_usage` (
   `package_select_status` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0不适用 1待选配 2已确认 3用户已选',
   `option_selections` JSON NULL COMMENT '规格选配快照',
   `option_select_status` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0无需 1待选 2已选',
+  `expire_at` DATETIME NULL DEFAULT NULL COMMENT '待核销过期时间快照，NULL=永不',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `is_deleted` TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -614,6 +638,7 @@ CREATE TABLE IF NOT EXISTS `user_inventory_usage` (
   KEY `idx_uiu_merchant_status` (`merchant_id`, `status`),
   KEY `idx_usage_package_select` (`merchant_id`, `package_select_status`, `status`),
   KEY `idx_uiu_delivery_order` (`delivery_order_id`),
+  KEY `idx_uiu_expire_at` (`status`, `delivery_type`, `expire_at`),
   KEY `idx_uiu_is_deleted` (`is_deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='背包使用记录';
 
@@ -625,6 +650,7 @@ CREATE TABLE IF NOT EXISTS `takeout_order` (
   `order_no` VARCHAR(32) NOT NULL,
   `account_id` BIGINT UNSIGNED NOT NULL,
   `merchant_id` BIGINT UNSIGNED NOT NULL,
+  `usage_merchant_id` BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '实际使用店',
   `status` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0待支付 1配餐中 2待骑手/配送中 3已完成 8已取消',
   `goods_amount` DECIMAL(10,2) NOT NULL,
   `delivery_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,

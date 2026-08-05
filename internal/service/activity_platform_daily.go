@@ -48,23 +48,57 @@ func PlatformDailyBucketKey(refreshTime string, now time.Time) string {
 }
 
 // ensurePlatformDailyBucketLocked 在已锁定的活动商品上惰性切桶；返回当前桶键。
+// 切桶后按有效订单对账 platform_daily_sold，修复关单回滚后补入账未加回造成的漂移。
 func ensurePlatformDailyBucketLocked(tx *gorm.DB, ap *model.ActivityProduct, now time.Time) (string, error) {
 	if ap == nil || ap.PlatformDailyMax == 0 {
 		return "", nil
 	}
 	key := PlatformDailyBucketKey(ap.DailyRefreshTime, now)
-	if ap.PlatformDailyBucket == key {
-		return key, nil
+	if ap.PlatformDailyBucket != key {
+		if err := tx.Model(ap).Where("id = ?", ap.ID).Updates(map[string]interface{}{
+			"platform_daily_sold":   0,
+			"platform_daily_bucket": key,
+		}).Error; err != nil {
+			return "", err
+		}
+		ap.PlatformDailySold = 0
+		ap.PlatformDailyBucket = key
 	}
-	if err := tx.Model(ap).Where("id = ?", ap.ID).Updates(map[string]interface{}{
-		"platform_daily_sold":   0,
-		"platform_daily_bucket": key,
-	}).Error; err != nil {
+	if err := reconcilePlatformDailySoldLocked(tx, ap); err != nil {
 		return "", err
 	}
-	ap.PlatformDailySold = 0
-	ap.PlatformDailyBucket = key
 	return key, nil
+}
+
+// reconcilePlatformDailySoldLocked 用「当前桶 + 未关闭/未退」订单明细件数校正计数器。
+func reconcilePlatformDailySoldLocked(tx *gorm.DB, ap *model.ActivityProduct) error {
+	if ap == nil || ap.PlatformDailyMax == 0 || ap.PlatformDailyBucket == "" {
+		return nil
+	}
+	var sum int64
+	err := tx.Table("order_item oi").
+		Select("COALESCE(SUM(oi.quantity), 0)").
+		Joins("JOIN `order` o ON o.id = oi.order_id AND o.is_deleted = ?", model.NotDeleted).
+		Where("oi.activity_product_id = ? AND oi.is_deleted = ?", ap.ID, model.NotDeleted).
+		Where("oi.platform_daily_bucket = ?", ap.PlatformDailyBucket).
+		Where("o.status NOT IN ?", orderStatusesExcludedFromBoughtQty).
+		Scan(&sum).Error
+	if err != nil {
+		return err
+	}
+	if sum < 0 {
+		sum = 0
+	}
+	got := uint32(sum)
+	if got == ap.PlatformDailySold {
+		return nil
+	}
+	if err := tx.Model(&model.ActivityProduct{}).Where("id = ?", ap.ID).
+		Update("platform_daily_sold", got).Error; err != nil {
+		return err
+	}
+	ap.PlatformDailySold = got
+	return nil
 }
 
 func platformDailyRemaining(ap *model.ActivityProduct) uint32 {

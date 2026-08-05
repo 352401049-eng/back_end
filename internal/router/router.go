@@ -74,6 +74,7 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		DB: db, InventorySvc: inventorySvc, CouponSvc: couponSvc,
 		ActivitySvc: activitySvc, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
 		PayTimeoutMinutes: cfg.Payment.PayTimeoutMinutes,
+		AvatarPublicBase:  cfg.Upload.AvatarPublicBase,
 	}
 	takeoutSvc := &service.TakeoutService{
 		DB: db, ZoneSvc: deliveryZoneSvc, Payment: payProvider,
@@ -100,7 +101,9 @@ func Setup(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		}
 	}
 	startGroupExpireWorker(orderSvc)
+	startUsageExpireWorker(orderSvc)
 	startPendingPayExpireWorker(orderSvc, takeoutSvc, deliveryFeePaySvc)
+	service.MigrateBagToPendingVerifyIfEnabled(db)
 	paymentHandler := &handler.PaymentHandler{OrderSvc: orderSvc}
 	deliverySvc := &service.DeliveryService{DB: db, InventorySvc: inventorySvc, DeliveryFeePaySvc: deliveryFeePaySvc}
 	riderEarningSvc := &service.RiderEarningService{DB: db}
@@ -280,6 +283,8 @@ func registerUserRoutes(r *gin.RouterGroup, h *handler.UserHandler, ch *handler.
 	r.GET("/user/inventory/usages", h.ListInventoryUsages)
 	r.GET("/user/inventory/usages/:id", h.GetInventoryUsage)
 	r.POST("/user/inventory/usages/:id/cancel", h.CancelInventoryUsage)
+	r.POST("/user/inventory/usages/:id/refund", h.RefundPendingVerifyUsage)
+	r.POST("/user/inventory/usages/:id/convert-delivery", h.ConvertPendingVerifyToDelivery)
 
 	r.GET("/user/addresses", h.ListAddresses)
 	r.POST("/user/addresses", h.CreateAddress)
@@ -310,6 +315,26 @@ func startGroupExpireWorker(orderSvc *service.OrderService) {
 	}()
 }
 
+// startUsageExpireWorker 定时对待核销已过期记录自动退款。
+func startUsageExpireWorker(orderSvc *service.OrderService) {
+	go func() {
+		run := func() {
+			n, err := orderSvc.ExpireStalePendingVerifyUsages(time.Now())
+			if err != nil {
+				log.Printf("待核销过期退款部分失败: %v (本批成功 %d)", err, n)
+			} else if n > 0 {
+				log.Printf("待核销过期已自动退款 %d 条", n)
+			}
+		}
+		run()
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			run()
+		}
+	}()
+}
+
 // startPendingPayExpireWorker 定时关闭超时未支付的入包/外卖/配送费订单。
 func startPendingPayExpireWorker(orderSvc *service.OrderService, takeoutSvc *service.TakeoutService, deliveryFeePaySvc *service.DeliveryFeePayService) {
 	go func() {
@@ -320,9 +345,9 @@ func startPendingPayExpireWorker(orderSvc *service.OrderService, takeoutSvc *ser
 			now := time.Now()
 			n, err := orderSvc.ExpireStalePendingPayOrders(now)
 			if err != nil {
-				log.Printf("待支付超时关单部分失败: %v (本批成功 %d)", err, n)
+				log.Printf("待支付超时处理部分失败: %v (本批成功 %d)", err, n)
 			} else if n > 0 {
-				log.Printf("待支付超时已关闭 %d 个入包订单", n)
+				log.Printf("待支付超时已处理 %d 个入包订单（关单或补入账）", n)
 			}
 			tn, terr := takeoutSvc.ExpireStalePendingPay(now)
 			if terr != nil {

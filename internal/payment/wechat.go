@@ -1098,8 +1098,8 @@ func (p *WeChatProvider) reuseOpenPrepay(subjectType string, subjectID uint64, o
 	return nil, nil
 }
 
-// invalidateOpenPrepay 作废本地预支付流水并清空订单 prepay_id；必须成功关闭微信侧未支付单，
-// 否则同 out_trade_no 无法重新下单（CloseOrder 在订单不存在时已视为成功）。
+// invalidateOpenPrepay 作废本地预支付流水并清空订单 prepay_id。
+// 会尽力关闭微信侧未支付单；CloseOrder 瞬时失败时仍允许重新拉起（已支付则返回错误）。
 func (p *WeChatProvider) invalidateOpenPrepay(subjectType string, subjectID uint64, orderNo string) error {
 	q := p.DB.Model(&model.PaymentTransaction{}).Where("status = ?", model.PayTxStatusPrepay)
 	if subjectType == model.PaySubjectOrder {
@@ -1119,7 +1119,12 @@ func (p *WeChatProvider) invalidateOpenPrepay(subjectType string, subjectID uint
 	}
 	if p.Client != nil && orderNo != "" {
 		if err := p.Client.CloseOrder(p.MchID, orderNo); err != nil {
-			return fmt.Errorf("%w: 关闭微信预支付失败，请稍后重试: %v", ErrInvalidState, err)
+			// 已支付：禁止作废后重新下单，交由查单/回调入账
+			if wechatv3.IsOrderPaid(err) {
+				return fmt.Errorf("%w: 微信侧订单已支付，请刷新订单状态: %v", ErrInvalidState, err)
+			}
+			// 网络/瞬时失败：本地预支付已作废，仍尝试重新拉起；若微信拒绝同单号再报错
+			log.Printf("[wechat] close order %s failed, continue recreate prepay: %v", orderNo, err)
 		}
 	}
 	return nil

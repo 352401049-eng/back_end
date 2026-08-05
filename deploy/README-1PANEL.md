@@ -9,7 +9,7 @@
 3. **数据库**：
    - 新建库 `yujixinjiang`（utf8mb4）
    - 新建用户（非 root），授权仅该库
-   - 在「数据库 → 导入」执行本仓库 `sql/schema.sql`（**新库只跑这一份**，不要跑 `weixin/database/schema.sql`，也不要再跑 `sql/updates/*`）
+   - 在「数据库 → 导入」执行本仓库 `sql/schema.sql`（**新库只跑这一份**；已内含全部 migrations / updates 最终形态，不要再跑 `sql/updates/*` 或 `migrations/*`，也不要跑 `weixin/database/schema.sql`）
 
 ## 二、上传后端
 

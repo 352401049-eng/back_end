@@ -50,6 +50,8 @@ type ProductInput struct {
 	GroupBuyPrice       *float64
 	GroupBuyAllowRepeat uint8
 	GroupBuyMaxConcurrentTeams uint32
+	DealExpireDays      *uint32
+	GroupExpireDays     *uint32
 	ItemType            uint8
 	Status              uint8
 	PackageGroups              []PackageGroupInput  // item_type=套餐时必填
@@ -135,6 +137,8 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		GroupBuyPrice:       input.GroupBuyPrice,
 		GroupBuyAllowRepeat: normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
 		GroupBuyMaxConcurrentTeams: input.GroupBuyMaxConcurrentTeams,
+		DealExpireDays:      normalizeExpireDays(input.DealExpireDays),
+		GroupExpireDays:     normalizeExpireDays(input.GroupExpireDays),
 		EnableCoupon:        normalizeEnableCoupon(input.EnableCoupon),
 		AllowPickup:         normalizeAllowPickup(input.AllowPickup),
 		ItemType:            input.ItemType,
@@ -149,6 +153,10 @@ func (s *ProductService) Create(input ProductInput, scopeMerchantID *uint64) (*m
 		product.GroupBuyPrice = nil
 		product.GroupBuyAllowRepeat = 0
 		product.GroupBuyMaxConcurrentTeams = 0
+		product.GroupExpireDays = nil
+	}
+	if product.EnableDeal != 1 {
+		product.DealExpireDays = nil
 	}
 	if product.ItemType == 0 {
 		product.ItemType = model.ProductItemTypePhysical
@@ -331,6 +339,8 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 		"group_buy_price":        input.GroupBuyPrice,
 		"group_buy_allow_repeat": normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat),
 		"group_buy_max_concurrent_teams": input.GroupBuyMaxConcurrentTeams,
+		"deal_expire_days":       normalizeExpireDays(input.DealExpireDays),
+		"group_expire_days":      normalizeExpireDays(input.GroupExpireDays),
 		"enable_coupon":          normalizeEnableCoupon(input.EnableCoupon),
 		"allow_pickup":           normalizeAllowPickup(input.AllowPickup),
 		"item_type":              input.ItemType,
@@ -350,6 +360,8 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	updated.GroupBuyPrice = input.GroupBuyPrice
 	updated.GroupBuyAllowRepeat = normalizeGroupBuyAllowRepeat(input.GroupBuyAllowRepeat)
 	updated.GroupBuyMaxConcurrentTeams = input.GroupBuyMaxConcurrentTeams
+	updated.DealExpireDays = normalizeExpireDays(input.DealExpireDays)
+	updated.GroupExpireDays = normalizeExpireDays(input.GroupExpireDays)
 	updated.EnableCoupon = normalizeEnableCoupon(input.EnableCoupon)
 	updated.AllowPickup = normalizeAllowPickup(input.AllowPickup)
 	updated.ItemType = input.ItemType
@@ -370,11 +382,17 @@ func (s *ProductService) Update(id uint64, input ProductInput, scopeMerchantID *
 	updates["stock"] = updated.Stock
 	updates["enable_group_buy"] = updated.EnableGroupBuy
 	updates["allow_delivery"] = updated.AllowDelivery
+	if updated.EnableDeal != 1 {
+		updates["deal_expire_days"] = nil
+		updated.DealExpireDays = nil
+	}
 	if updated.EnableGroup != 1 {
 		updates["group_buy_target_count"] = nil
 		updates["group_buy_price"] = nil
 		updates["group_buy_allow_repeat"] = 0
 		updates["group_buy_max_concurrent_teams"] = 0
+		updates["group_expire_days"] = nil
+		updated.GroupExpireDays = nil
 	}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(product).Updates(updates).Error; err != nil {
@@ -932,10 +950,7 @@ func normalizeEnableCoupon(v uint8) uint8 {
 	return 1
 }
 
-func normalizeAllowPickup(v uint8) uint8 {
-	if v == 0 {
-		return 0
-	}
+func normalizeAllowPickup(_ uint8) uint8 {
 	return 1
 }
 
