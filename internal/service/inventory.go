@@ -630,42 +630,16 @@ func (s *InventoryService) ListUsages(accountID uint64, page, pageSize int) ([]I
 	return views, total, nil
 }
 
-func (s *InventoryService) ListUsagesForMerchant(merchantID uint64, status *uint8, page, pageSize int) ([]InventoryUsageView, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 10
-	}
-	if pageSize > 50 {
-		pageSize = 50
-	}
-	offset := (page - 1) * pageSize
-
-	q := query.NotDeleted(s.DB.Model(&model.UserInventoryUsage{})).Where("merchant_id = ?", merchantID)
-	if status != nil {
-		q = q.Where("status = ?", *status)
-	}
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var list []model.UserInventoryUsage
-	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
-		return nil, 0, err
-	}
-	views := make([]InventoryUsageView, 0, len(list))
-	for i := range list {
-		v, err := s.GetUsageView(0, list[i].ID)
-		if err != nil {
-			return nil, 0, err
-		}
-		views = append(views, *v)
-	}
-	return views, total, nil
+func (s *InventoryService) ListUsagesForMerchant(merchantID uint64, status *uint8, page, pageSize int, keyword string, startDate, endDate *time.Time) ([]InventoryUsageView, int64, error) {
+	mid := merchantID
+	return s.listUsagesFiltered(&mid, status, page, pageSize, keyword, startDate, endDate)
 }
 
-func (s *InventoryService) ListUsagesForAdmin(merchantID *uint64, status *uint8, page, pageSize int) ([]InventoryUsageView, int64, error) {
+func (s *InventoryService) ListUsagesForAdmin(merchantID *uint64, status *uint8, page, pageSize int, keyword string, startDate, endDate *time.Time) ([]InventoryUsageView, int64, error) {
+	return s.listUsagesFiltered(merchantID, status, page, pageSize, keyword, startDate, endDate)
+}
+
+func (s *InventoryService) listUsagesFiltered(merchantID *uint64, status *uint8, page, pageSize int, keyword string, startDate, endDate *time.Time) ([]InventoryUsageView, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -676,6 +650,14 @@ func (s *InventoryService) ListUsagesForAdmin(merchantID *uint64, status *uint8,
 		pageSize = 50
 	}
 	offset := (page - 1) * pageSize
+
+	accountIDs, empty, err := FindAccountIDsByKeyword(s.DB, keyword)
+	if err != nil {
+		return nil, 0, err
+	}
+	if empty {
+		return []InventoryUsageView{}, 0, nil
+	}
 
 	q := query.NotDeleted(s.DB.Model(&model.UserInventoryUsage{}))
 	if merchantID != nil {
@@ -683,6 +665,15 @@ func (s *InventoryService) ListUsagesForAdmin(merchantID *uint64, status *uint8,
 	}
 	if status != nil {
 		q = q.Where("status = ?", *status)
+	}
+	if len(accountIDs) > 0 {
+		q = q.Where("account_id IN ?", accountIDs)
+	}
+	if startDate != nil {
+		q = q.Where("created_at >= ?", *startDate)
+	}
+	if endDate != nil {
+		q = q.Where("created_at < ?", *endDate)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

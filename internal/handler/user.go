@@ -104,7 +104,7 @@ func (h *UserHandler) Orders(c *gin.Context) {
 		status = &u
 	}
 	pageNum, pageSize, _ := page.Normalize()
-	list, total, err := h.OrderSvc.List(accountID, nil, pageNum, pageSize, status, c.Query("status_code"), nil)
+	list, total, err := h.OrderSvc.List(accountID, nil, pageNum, pageSize, status, c.Query("status_code"), nil, nil, nil, nil)
 	if err != nil {
 		response.InternalError(c, "获取订单列表失败")
 		return

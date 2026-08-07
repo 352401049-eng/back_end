@@ -975,7 +975,7 @@ func (s *OrderService) GetView(accountID, orderID uint64, merchantID *uint64) (*
 	return &view, nil
 }
 
-func (s *OrderService) List(accountID uint64, merchantID *uint64, page, pageSize int, status *uint8, statusCode string, buyerAccountID *uint64) ([]OrderView, int64, error) {
+func (s *OrderService) List(accountID uint64, merchantID *uint64, page, pageSize int, status *uint8, statusCode string, buyerAccountID *uint64, accountIDs []uint64, startDate, endDate *time.Time) ([]OrderView, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -997,11 +997,19 @@ func (s *OrderService) List(accountID uint64, merchantID *uint64, page, pageSize
 		// 用户端只展示顶层订单（套餐父单 / 普通单），子单挂在父单 children
 		q = q.Where("parent_order_id IS NULL")
 	}
-	if buyerAccountID != nil {
+	if len(accountIDs) > 0 {
+		q = q.Where("account_id IN ?", accountIDs)
+	} else if buyerAccountID != nil {
 		q = q.Where("account_id = ?", *buyerAccountID)
 	}
 	if status != nil {
 		q = q.Where("status = ?", *status)
+	}
+	if startDate != nil {
+		q = q.Where("created_at >= ?", *startDate)
+	}
+	if endDate != nil {
+		q = q.Where("created_at < ?", *endDate)
 	}
 	applyStatusCodeFilter(q, statusCode)
 

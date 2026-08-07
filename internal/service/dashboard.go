@@ -78,7 +78,8 @@ type MerchantDashboard struct {
 }
 
 // SalesReport 销售额报表。
-// ValidOrderCount / TotalSalesAmount = 有效（已确定收益）口径，与 Completed* 一致。
+// ValidOrderCount / TotalSalesAmount / Completed* = 已核销（已确定收益）。
+// Pending* = 已付款尚未履约完成（待核销 / 配送中 / 外卖配餐配送中等）。
 type SalesReport struct {
 	MerchantID           *uint64              `json:"merchant_id,omitempty"`
 	MerchantName         string               `json:"merchant_name,omitempty"`
@@ -88,24 +89,44 @@ type SalesReport struct {
 	CompletedItemCount   int64                `json:"completed_item_count"`
 	CompletedSalesAmount float64              `json:"completed_sales_amount"`
 	CompletedItems       []SalesCompletedItem `json:"completed_items"`
+	PendingOrderCount    int64                `json:"pending_order_count"`
+	PendingSalesAmount   float64              `json:"pending_sales_amount"`
+	PendingItems         []SalesPendingItem   `json:"pending_items"`
 	StartDate            string               `json:"start_date,omitempty"`
 	EndDate              string               `json:"end_date,omitempty"`
 }
 
 // SalesCompletedItem 已确定收益的履约明细（自提核销 / 配送确认收货 / 外卖完成）。
 type SalesCompletedItem struct {
-	UsageID     uint64  `json:"usage_id,omitempty"`
-	TakeoutID   uint64  `json:"takeout_id,omitempty"`
-	ProductID   uint64  `json:"product_id"`
-	ProductName string  `json:"product_name"`
-	Quantity    uint32  `json:"quantity"`
-	UnitPrice   float64 `json:"unit_price"`
-	Amount      float64 `json:"amount"`
-	FulfillType string  `json:"fulfill_type"`
-	FulfillText string  `json:"fulfill_text"`
-	CompletedAt string  `json:"completed_at"`
-	PackageText string  `json:"package_text,omitempty"`
-	IsPackage   bool    `json:"is_package"`
+	UsageID      uint64  `json:"usage_id,omitempty"`
+	TakeoutID    uint64  `json:"takeout_id,omitempty"`
+	ProductID    uint64  `json:"product_id"`
+	ProductName  string  `json:"product_name"`
+	Quantity     uint32  `json:"quantity"`
+	UnitPrice    float64 `json:"unit_price"`
+	Amount       float64 `json:"amount"`
+	FulfillType  string  `json:"fulfill_type"`
+	FulfillText  string  `json:"fulfill_text"`
+	CompletedAt  string  `json:"completed_at"`
+	PackageText  string  `json:"package_text,omitempty"`
+	IsPackage    bool    `json:"is_package"`
+	UserNickname string  `json:"user_nickname,omitempty"`
+	UserPhone    string  `json:"user_phone,omitempty"`
+}
+
+// SalesPendingItem 已付款未履约完成的明细。
+type SalesPendingItem struct {
+	Source       string  `json:"source"` // usage | takeout | inventory
+	ID           uint64  `json:"id"`
+	ProductID    uint64  `json:"product_id"`
+	ProductName  string  `json:"product_name"`
+	Quantity     uint32  `json:"quantity"`
+	UnitPrice    float64 `json:"unit_price"`
+	Amount       float64 `json:"amount"`
+	PurchasedAt  string  `json:"purchased_at"`
+	StatusText   string  `json:"status_text"`
+	UserNickname string  `json:"user_nickname,omitempty"`
+	UserPhone    string  `json:"user_phone,omitempty"`
 }
 
 type SalesReportFilter struct {
@@ -233,9 +254,17 @@ func (s *DashboardService) SalesReport(filter SalesReportFilter) (*SalesReport, 
 	report.CompletedItems = items
 	report.CompletedItemCount = count
 	report.CompletedSalesAmount = roundMoney(amount)
-	// 看板「有效订单 / 有效营业额」与已确定收益同口径
+	// 看板「有效订单 / 有效营业额」与已核销同口径
 	report.ValidOrderCount = count
 	report.TotalSalesAmount = report.CompletedSalesAmount
+
+	pendingItems, pendingCount, pendingAmount, err := s.listPendingSalesItems(filter)
+	if err != nil {
+		return nil, err
+	}
+	report.PendingItems = pendingItems
+	report.PendingOrderCount = pendingCount
+	report.PendingSalesAmount = roundMoney(pendingAmount)
 
 	vrQ := s.effectiveVerificationQuery(filter.MerchantID)
 	vrQ = applyVerifiedTimeRange(vrQ, filter.StartDate, filter.EndDate)
@@ -349,12 +378,14 @@ func (s *DashboardService) listCompletedBagSalesItems(filter SalesReportFilter) 
 		if isPkg {
 			pkgText = u.PackageSelections.SummaryText()
 		}
+		nick, phone := s.lookupAccountBrief(u.AccountID)
 		items = append(items, SalesCompletedItem{
 			UsageID: u.ID, ProductID: u.ProductID, ProductName: name,
 			Quantity: u.Quantity, UnitPrice: unitPrice, Amount: amount,
 			FulfillType: fulfillType, FulfillText: fulfillText,
 			CompletedAt: u.UpdatedAt.Format("2006-01-02 15:04"),
 			PackageText: pkgText, IsPackage: isPkg,
+			UserNickname: nick, UserPhone: phone,
 		})
 	}
 	return items, total, sum, nil
@@ -405,14 +436,226 @@ func (s *DashboardService) listCompletedTakeoutSalesItems(filter SalesReportFilt
 				unit = roundMoney(net / float64(qty))
 			}
 		}
+		nick, phone := s.lookupAccountBrief(o.AccountID)
 		items = append(items, SalesCompletedItem{
 			TakeoutID: o.ID, ProductID: firstTakeoutProductID(o.Items), ProductName: name,
 			Quantity: qty, UnitPrice: unit, Amount: net,
 			FulfillType: "takeout", FulfillText: "外卖·已完成",
 			CompletedAt: o.UpdatedAt.Format("2006-01-02 15:04"),
+			UserNickname: nick, UserPhone: phone,
 		})
 	}
 	return items, total, sum, nil
+}
+
+// listPendingSalesItems 已付款未履约完：待核销/配送中 usage + 进行中外卖 + 背包剩余库存。
+func (s *DashboardService) listPendingSalesItems(filter SalesReportFilter) ([]SalesPendingItem, int64, float64, error) {
+	bag, bagCount, bagSum, err := s.listPendingBagSalesItems(filter)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	takeout, takeoutCount, takeoutSum, err := s.listPendingTakeoutSalesItems(filter)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	inv, invCount, invSum, err := s.listPendingInventorySalesItems(filter)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	merged := make([]SalesPendingItem, 0, len(bag)+len(takeout)+len(inv))
+	merged = append(merged, bag...)
+	merged = append(merged, takeout...)
+	merged = append(merged, inv...)
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].PurchasedAt > merged[j].PurchasedAt
+	})
+	if len(merged) > 500 {
+		merged = merged[:500]
+	}
+	return merged, bagCount + takeoutCount + invCount, bagSum + takeoutSum + invSum, nil
+}
+
+func (s *DashboardService) listPendingBagSalesItems(filter SalesReportFilter) ([]SalesPendingItem, int64, float64, error) {
+	q := query.NotDeleted(s.freshDB().Model(&model.UserInventoryUsage{})).
+		Where("status IN ?", []int{
+			int(model.InventoryUsagePendingVerify),
+			int(model.InventoryUsagePendingShip),
+			int(model.InventoryUsageCancelPending),
+		})
+	if filter.MerchantID != nil {
+		q = q.Where("usage_merchant_id = ?", *filter.MerchantID)
+	}
+	q = applyCompletedTimeRange(q, "created_at", filter.StartDate, filter.EndDate)
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	var usages []model.UserInventoryUsage
+	if err := q.Preload("Product", "is_deleted = ?", model.NotDeleted).
+		Order("created_at DESC").
+		Limit(500).
+		Find(&usages).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	unitByKey := s.loadOrderItemUnitPrices(usages)
+	items := make([]SalesPendingItem, 0, len(usages))
+	var sum float64
+	for _, u := range usages {
+		name := ""
+		catalogPrice := 0.0
+		if u.Product != nil {
+			name = u.Product.Name
+			catalogPrice = u.Product.Price
+		}
+		unitPrice := catalogPrice
+		if u.SourceOrderID != nil {
+			if up, ok := unitByKey[orderProductKey(*u.SourceOrderID, u.ProductID)]; ok && up > 0 {
+				unitPrice = up
+			}
+		}
+		amount := roundMoney(unitPrice * float64(u.Quantity))
+		sum += amount
+		nick, phone := s.lookupAccountBrief(u.AccountID)
+		items = append(items, SalesPendingItem{
+			Source: "usage", ID: u.ID, ProductID: u.ProductID, ProductName: name,
+			Quantity: u.Quantity, UnitPrice: unitPrice, Amount: amount,
+			PurchasedAt: u.CreatedAt.Format("2006-01-02 15:04"),
+			StatusText:  model.InventoryUsageStatusText(u.Status),
+			UserNickname: nick, UserPhone: phone,
+		})
+	}
+	return items, total, sum, nil
+}
+
+func (s *DashboardService) listPendingTakeoutSalesItems(filter SalesReportFilter) ([]SalesPendingItem, int64, float64, error) {
+	q := query.NotDeleted(s.freshDB().Model(&model.TakeoutOrder{})).
+		Where("pay_status = ? AND status IN ?", model.PayStatusPaid, []int{
+			int(model.TakeoutStatusPreparing),
+			int(model.TakeoutStatusFulfilling),
+		})
+	if filter.MerchantID != nil {
+		q = q.Where("usage_merchant_id = ?", *filter.MerchantID)
+	}
+	q = applyCompletedTimeRange(q, "created_at", filter.StartDate, filter.EndDate)
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	var orders []model.TakeoutOrder
+	if err := q.Preload("Items", "is_deleted = ?", model.NotDeleted).
+		Order("created_at DESC").
+		Limit(500).
+		Find(&orders).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	items := make([]SalesPendingItem, 0, len(orders))
+	var sum float64
+	for _, o := range orders {
+		net := o.PayAmount - o.RefundedAmount
+		if net < 0 {
+			net = 0
+		}
+		net = roundMoney(net)
+		sum += net
+		name := "外卖订单"
+		qty := uint32(0)
+		unit := 0.0
+		if len(o.Items) > 0 {
+			name = o.Items[0].ProductName
+			if len(o.Items) > 1 {
+				name = name + " 等"
+			}
+			for _, it := range o.Items {
+				qty += it.Quantity
+			}
+			if qty > 0 {
+				unit = roundMoney(net / float64(qty))
+			}
+		}
+		statusText := "外卖·配餐中"
+		if o.Status == model.TakeoutStatusFulfilling {
+			statusText = "外卖·配送中"
+		}
+		purchasedAt := o.CreatedAt.Format("2006-01-02 15:04")
+		if o.PaidAt != nil {
+			purchasedAt = o.PaidAt.Format("2006-01-02 15:04")
+		}
+		nick, phone := s.lookupAccountBrief(o.AccountID)
+		items = append(items, SalesPendingItem{
+			Source: "takeout", ID: o.ID, ProductID: firstTakeoutProductID(o.Items), ProductName: name,
+			Quantity: qty, UnitPrice: unit, Amount: net,
+			PurchasedAt: purchasedAt, StatusText: statusText,
+			UserNickname: nick, UserPhone: phone,
+		})
+	}
+	return items, total, sum, nil
+}
+
+func (s *DashboardService) listPendingInventorySalesItems(filter SalesReportFilter) ([]SalesPendingItem, int64, float64, error) {
+	q := query.NotDeleted(s.freshDB().Model(&model.UserInventory{})).
+		Where("quantity > 0")
+	if filter.MerchantID != nil {
+		q = q.Where(
+			"product_id IN (SELECT id FROM product WHERE is_deleted = 0 AND merchant_id = ?)",
+			*filter.MerchantID,
+		)
+	}
+	q = applyCompletedTimeRange(q, "updated_at", filter.StartDate, filter.EndDate)
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	var rows []model.UserInventory
+	if err := q.Preload("Product", "is_deleted = ?", model.NotDeleted).
+		Order("updated_at DESC").
+		Limit(500).
+		Find(&rows).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	items := make([]SalesPendingItem, 0, len(rows))
+	var sum float64
+	for _, inv := range rows {
+		name := ""
+		unitPrice := 0.0
+		if inv.Product.ID > 0 {
+			name = inv.Product.Name
+			unitPrice = inv.Product.Price
+		}
+		amount := roundMoney(unitPrice * float64(inv.Quantity))
+		sum += amount
+		nick, phone := s.lookupAccountBrief(inv.AccountID)
+		items = append(items, SalesPendingItem{
+			Source: "inventory", ID: inv.ID, ProductID: inv.ProductID, ProductName: name,
+			Quantity: inv.Quantity, UnitPrice: unitPrice, Amount: amount,
+			PurchasedAt: inv.UpdatedAt.Format("2006-01-02 15:04"),
+			StatusText:  "已入背包·待使用",
+			UserNickname: nick, UserPhone: phone,
+		})
+	}
+	return items, total, sum, nil
+}
+
+func (s *DashboardService) lookupAccountBrief(accountID uint64) (nickname, phone string) {
+	if accountID == 0 {
+		return "", ""
+	}
+	var acc model.Account
+	if err := s.freshDB().Model(&model.Account{}).
+		Select("nickname", "phone").
+		Where("id = ? AND is_deleted = ?", accountID, model.NotDeleted).
+		First(&acc).Error; err != nil {
+		return "", ""
+	}
+	if acc.Nickname != nil {
+		nickname = *acc.Nickname
+	}
+	if acc.Phone != nil {
+		phone = *acc.Phone
+	}
+	return nickname, phone
 }
 
 func firstTakeoutProductID(items []model.TakeoutOrderItem) uint64 {

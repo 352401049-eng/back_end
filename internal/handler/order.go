@@ -396,7 +396,21 @@ func (h *MerchantOrderHandler) ListOrders(c *gin.Context) {
 		}
 		buyerAccountID = &id
 	}
-	list, total, err := h.OrderSvc.List(0, scope, page, pageSize, nil, statusCode, buyerAccountID)
+	accountIDs, empty, err := service.FindAccountIDsByKeyword(h.OrderSvc.DB, c.Query("keyword"))
+	if err != nil {
+		response.InternalError(c, "搜索用户失败")
+		return
+	}
+	if empty {
+		response.OK(c, query.PageResult{List: []service.OrderView{}, Total: 0, Page: page, PageSize: pageSize})
+		return
+	}
+	start, end, err := service.ParseSalesDateRange(c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		response.BadRequest(c, "日期格式无效，请使用 YYYY-MM-DD")
+		return
+	}
+	list, total, err := h.OrderSvc.List(0, scope, page, pageSize, nil, statusCode, buyerAccountID, accountIDs, start, end)
 	if err != nil {
 		response.InternalError(c, "获取订单失败")
 		return
@@ -596,7 +610,19 @@ func (h *MerchantOrderHandler) ListVerificationRecords(c *gin.Context) {
 		return
 	}
 	page, pageSize := parsePage(c)
-	list, total, err := h.VerifySvc.ListByMerchant(*scope, page, pageSize)
+	start, end, err := service.ParseSalesDateRange(c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		response.BadRequest(c, "日期格式无效，请使用 YYYY-MM-DD")
+		return
+	}
+	list, total, err := h.VerifySvc.ListFiltered(service.VerificationListFilter{
+		MerchantID: scope,
+		Keyword:    c.Query("keyword"),
+		StartDate:  start,
+		EndDate:    end,
+		Page:       page,
+		PageSize:   pageSize,
+	})
 	if err != nil {
 		response.InternalError(c, "获取记录失败")
 		return
@@ -630,7 +656,12 @@ func (h *MerchantOrderHandler) ListInventoryUsages(c *gin.Context) {
 		u := uint8(v)
 		status = &u
 	}
-	list, total, err := h.InventorySvc.ListUsagesForMerchant(*scope, status, page, pageSize)
+	start, end, err := service.ParseSalesDateRange(c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		response.BadRequest(c, "日期格式无效，请使用 YYYY-MM-DD")
+		return
+	}
+	list, total, err := h.InventorySvc.ListUsagesForMerchant(*scope, status, page, pageSize, c.Query("keyword"), start, end)
 	if err != nil {
 		response.InternalError(c, "获取使用记录失败")
 		return
@@ -1251,7 +1282,21 @@ func (h *AdminDashboardHandler) ListOrders(c *gin.Context) {
 		}
 		buyerAccountID = &id
 	}
-	list, total, err := h.OrderSvc.List(0, nil, page, pageSize, nil, c.Query("status_code"), buyerAccountID)
+	accountIDs, empty, err := service.FindAccountIDsByKeyword(h.OrderSvc.DB, c.Query("keyword"))
+	if err != nil {
+		response.InternalError(c, "搜索用户失败")
+		return
+	}
+	if empty {
+		response.OK(c, query.PageResult{List: []service.OrderView{}, Total: 0, Page: page, PageSize: pageSize})
+		return
+	}
+	start, end, err := service.ParseSalesDateRange(c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		response.BadRequest(c, "日期格式无效，请使用 YYYY-MM-DD")
+		return
+	}
+	list, total, err := h.OrderSvc.List(0, nil, page, pageSize, nil, c.Query("status_code"), buyerAccountID, accountIDs, start, end)
 	if err != nil {
 		response.InternalError(c, "获取订单失败")
 		return
@@ -1290,7 +1335,28 @@ func (h *AdminDashboardHandler) GetOrder(c *gin.Context) {
 // @Router       /admin/verification-records [get]
 func (h *AdminDashboardHandler) ListVerificationRecords(c *gin.Context) {
 	page, pageSize := parsePage(c)
-	list, total, err := h.VerifySvc.ListAll(page, pageSize)
+	start, end, err := service.ParseSalesDateRange(c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		response.BadRequest(c, "日期格式无效，请使用 YYYY-MM-DD")
+		return
+	}
+	var merchantID *uint64
+	if raw := c.Query("merchant_id"); raw != "" {
+		id, parseErr := strconv.ParseUint(raw, 10, 64)
+		if parseErr != nil {
+			response.BadRequest(c, "merchant_id 无效")
+			return
+		}
+		merchantID = &id
+	}
+	list, total, err := h.VerifySvc.ListFiltered(service.VerificationListFilter{
+		MerchantID: merchantID,
+		Keyword:    c.Query("keyword"),
+		StartDate:  start,
+		EndDate:    end,
+		Page:       page,
+		PageSize:   pageSize,
+	})
 	if err != nil {
 		response.InternalError(c, "获取记录失败")
 		return

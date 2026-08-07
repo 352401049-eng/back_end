@@ -266,7 +266,12 @@ func (h *AdminExtraHandler) ListDeliveries(c *gin.Context) {
 		u := uint8(v)
 		status = &u
 	}
-	list, total, err := h.DeliverySvc.ListForAdmin(merchantID, status, page, pageSize)
+	start, end, err := service.ParseSalesDateRange(c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		response.BadRequest(c, "日期格式无效，请使用 YYYY-MM-DD")
+		return
+	}
+	list, total, err := h.DeliverySvc.ListForAdmin(merchantID, status, page, pageSize, c.Query("keyword"), start, end)
 	if err != nil {
 		response.InternalError(c, "获取配送单失败")
 		return
@@ -482,7 +487,12 @@ func (h *AdminExtraHandler) ListInventoryUsages(c *gin.Context) {
 		u := uint8(v)
 		status = &u
 	}
-	list, total, err := h.InventorySvc.ListUsagesForAdmin(merchantID, status, page, pageSize)
+	start, end, err := service.ParseSalesDateRange(c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		response.BadRequest(c, "日期格式无效，请使用 YYYY-MM-DD")
+		return
+	}
+	list, total, err := h.InventorySvc.ListUsagesForAdmin(merchantID, status, page, pageSize, c.Query("keyword"), start, end)
 	if err != nil {
 		response.InternalError(c, "获取使用记录失败")
 		return

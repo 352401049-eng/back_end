@@ -1337,8 +1337,8 @@ func finalizeDeliveryDisplay(view *DeliveryView) {
 	}
 }
 
-// ListForAdmin ??????????????
-func (s *DeliveryService) ListForAdmin(merchantID *uint64, status *uint8, page, pageSize int) ([]DeliveryView, int64, error) {
+// ListForAdmin 管理端配送单列表。
+func (s *DeliveryService) ListForAdmin(merchantID *uint64, status *uint8, page, pageSize int, keyword string, startDate, endDate *time.Time) ([]DeliveryView, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -1347,16 +1347,39 @@ func (s *DeliveryService) ListForAdmin(merchantID *uint64, status *uint8, page, 
 	}
 	offset := (page - 1) * pageSize
 
+	accountIDs, empty, err := FindAccountIDsByKeyword(s.DB, keyword)
+	if err != nil {
+		return nil, 0, err
+	}
+	if empty {
+		return []DeliveryView{}, 0, nil
+	}
+
 	q := query.NotDeleted(s.DB.Model(&model.DeliveryOrder{}))
 	if merchantID != nil {
 		q = q.Where(
 			"EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.merchant_id = ?) OR "+
-				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?)",
-			*merchantID, *merchantID,
+				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.merchant_id = ?) OR "+
+				"EXISTS (SELECT 1 FROM takeout_order t WHERE t.id = delivery_order.takeout_order_id AND t.is_deleted = 0 AND t.merchant_id = ?)",
+			*merchantID, *merchantID, *merchantID,
 		)
 	}
 	if status != nil {
 		q = q.Where("status = ?", *status)
+	}
+	if len(accountIDs) > 0 {
+		q = q.Where(
+			"EXISTS (SELECT 1 FROM `order` o WHERE o.id = delivery_order.order_id AND o.is_deleted = 0 AND o.account_id IN ?) OR "+
+				"EXISTS (SELECT 1 FROM user_inventory_usage u WHERE u.id = delivery_order.inventory_usage_id AND u.is_deleted = 0 AND u.account_id IN ?) OR "+
+				"EXISTS (SELECT 1 FROM takeout_order t WHERE t.id = delivery_order.takeout_order_id AND t.is_deleted = 0 AND t.account_id IN ?)",
+			accountIDs, accountIDs, accountIDs,
+		)
+	}
+	if startDate != nil {
+		q = q.Where("created_at >= ?", *startDate)
+	}
+	if endDate != nil {
+		q = q.Where("created_at < ?", *endDate)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

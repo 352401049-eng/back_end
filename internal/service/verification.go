@@ -344,65 +344,99 @@ func toVerifyPreviewView(resolved *verifyResolveResult) *VerifyPreviewView {
 
 // VerificationRecordView 核销记录展示：含核销码、商品、件数与成交金额。
 type VerificationRecordView struct {
-	ID          uint64    `json:"id"`
-	Code        string    `json:"code"`
-	VoucherCode string    `json:"voucher_code"`
-	OrderID     uint64    `json:"order_id"`
-	OrderNo     string    `json:"order_no,omitempty"`
-	MerchantID  uint64    `json:"merchant_id"`
-	ProductID   uint64    `json:"product_id"`
-	ProductName string    `json:"product_name"`
-	Quantity    uint32    `json:"quantity"`
-	UseCount    uint32    `json:"use_count"`
-	UnitPrice   float64   `json:"unit_price"`
-	TotalAmount float64   `json:"total_amount"`
-	VerifyType  string    `json:"verify_type"`
-	VerifiedAt  time.Time `json:"verified_at"`
-	OperatorID  uint64    `json:"operator_id"`
+	ID           uint64    `json:"id"`
+	Code         string    `json:"code"`
+	VoucherCode  string    `json:"voucher_code"`
+	OrderID      uint64    `json:"order_id"`
+	OrderNo      string    `json:"order_no,omitempty"`
+	MerchantID   uint64    `json:"merchant_id"`
+	ProductID    uint64    `json:"product_id"`
+	ProductName  string    `json:"product_name"`
+	Quantity     uint32    `json:"quantity"`
+	UseCount     uint32    `json:"use_count"`
+	UnitPrice    float64   `json:"unit_price"`
+	TotalAmount  float64   `json:"total_amount"`
+	VerifyType   string    `json:"verify_type"`
+	VerifiedAt   time.Time `json:"verified_at"`
+	OperatorID   uint64    `json:"operator_id"`
+	AccountID    uint64    `json:"account_id,omitempty"`
+	UserNickname string    `json:"user_nickname,omitempty"`
+	UserPhone    string    `json:"user_phone,omitempty"`
+}
+
+// VerificationListFilter 核销记录列表筛选。
+type VerificationListFilter struct {
+	MerchantID *uint64
+	Keyword    string
+	StartDate  *time.Time
+	EndDate    *time.Time
+	Page       int
+	PageSize   int
 }
 
 func (s *VerificationService) effectiveVerificationBase() *gorm.DB {
-	return query.NotDeleted(s.DB.Model(&model.VerificationRecord{})).
+	return query.NotDeleted(s.DB.Session(&gorm.Session{NewDB: true}).Model(&model.VerificationRecord{})).
 		Joins("JOIN verification_code vc ON vc.id = verification_record.verification_code_id AND vc.is_deleted = ?", model.NotDeleted).
 		Joins("JOIN user_inventory_usage u ON u.id = vc.inventory_usage_id AND u.is_deleted = ? AND u.status = ?",
 			model.NotDeleted, model.InventoryUsageCompleted)
 }
 
 func (s *VerificationService) ListByMerchant(merchantID uint64, page, pageSize int) ([]VerificationRecordView, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 10
-	}
-	offset := (page - 1) * pageSize
-	q := s.effectiveVerificationBase().Where("verification_record.merchant_id = ?", merchantID)
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var list []model.VerificationRecord
-	if err := q.Order("verification_record.id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
-		return nil, 0, err
-	}
-	return s.toVerificationRecordViews(list), total, nil
+	return s.ListFiltered(VerificationListFilter{
+		MerchantID: &merchantID,
+		Page:       page,
+		PageSize:   pageSize,
+	})
 }
 
 func (s *VerificationService) ListAll(page, pageSize int) ([]VerificationRecordView, int64, error) {
+	return s.ListFiltered(VerificationListFilter{Page: page, PageSize: pageSize})
+}
+
+func (s *VerificationService) ListFiltered(filter VerificationListFilter) ([]VerificationRecordView, int64, error) {
+	page, pageSize := filter.Page, filter.PageSize
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 {
 		pageSize = 10
 	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
 	offset := (page - 1) * pageSize
-	q := s.effectiveVerificationBase()
+
+	accountIDs, empty, err := FindAccountIDsByKeyword(s.DB, filter.Keyword)
+	if err != nil {
+		return nil, 0, err
+	}
+	if empty {
+		return []VerificationRecordView{}, 0, nil
+	}
+
+	base := s.effectiveVerificationBase()
+	if filter.MerchantID != nil {
+		base = base.Where("verification_record.merchant_id = ?", *filter.MerchantID)
+	}
+	if len(accountIDs) > 0 {
+		base = base.Where("u.account_id IN ?", accountIDs)
+	}
+	if filter.StartDate != nil {
+		base = base.Where("verification_record.verified_at >= ?", *filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		base = base.Where("verification_record.verified_at < ?", *filter.EndDate)
+	}
+
 	var total int64
-	if err := q.Count(&total).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var list []model.VerificationRecord
-	if err := q.Order("verification_record.id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).
+		Order("verification_record.id DESC").
+		Offset(offset).Limit(pageSize).
+		Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
 	return s.toVerificationRecordViews(list), total, nil
@@ -437,6 +471,7 @@ func (s *VerificationService) buildVerificationRecordView(rec *model.Verificatio
 				view.ProductID = usage.ProductID
 				view.Quantity = usage.Quantity
 				view.UseCount = usage.Quantity
+				view.AccountID = usage.AccountID
 				if usage.Quantity == 0 {
 					view.Quantity = 1
 					view.UseCount = 1
@@ -463,6 +498,26 @@ func (s *VerificationService) buildVerificationRecordView(rec *model.Verificatio
 						view.TotalAmount = amount
 					}
 				}
+			}
+		}
+	}
+	if view.AccountID == 0 && rec.OrderID > 0 {
+		var order model.Order
+		if err := query.NotDeleted(s.DB).Select("id", "account_id", "order_no").First(&order, rec.OrderID).Error; err == nil {
+			view.AccountID = order.AccountID
+			if view.OrderNo == "" {
+				view.OrderNo = order.OrderNo
+			}
+		}
+	}
+	if view.AccountID > 0 {
+		var acc model.Account
+		if err := query.NotDeleted(s.DB).Select("id", "nickname", "phone").First(&acc, view.AccountID).Error; err == nil {
+			if acc.Nickname != nil {
+				view.UserNickname = *acc.Nickname
+			}
+			if acc.Phone != nil {
+				view.UserPhone = *acc.Phone
 			}
 		}
 	}
